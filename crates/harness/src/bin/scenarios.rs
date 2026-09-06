@@ -7,6 +7,16 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+/// Datadirs under ./regtest-data created for scenario `id` (newest run's; a
+/// two-channel scenario has one node, others too, but keep it general).
+fn kept_datadirs(id: &str) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir("regtest-data")
+        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&format!("{id}-")))).collect())
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--keep") {
@@ -27,12 +37,21 @@ fn main() -> anyhow::Result<()> {
         std::env::set_var("LNGAP_RUN_LABEL", sc.id);
         match (sc.run)() {
             Ok(r) => {
-                writeln!(out, "## {} — {}\n\n**Expected:** {}\n\n**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user {} sat, hub {} sat\n", r.id, r.title, r.expected, r.balances[0].to_sat(), r.balances[1].to_sat())?;
-                writeln!(out, "| block | tx | broadcast by | txid |\n|---|---|---|---|")?;
+                let mut section = String::new();
+                writeln!(section, "## {} — {}\n\n**Expected:** {}\n\n**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user {} sat, hub {} sat\n", r.id, r.title, r.expected, r.balances[0].to_sat(), r.balances[1].to_sat())?;
+                writeln!(section, "| block | tx | broadcast by | txid |\n|---|---|---|---|")?;
                 for (h, role, txid, by) in &r.txs {
-                    writeln!(out, "| {h} | `{role}` | {by} | `{txid}` |")?;
+                    writeln!(section, "| {h} | `{role}` | {by} | `{txid}` |")?;
                 }
-                writeln!(out, "\n<details><summary>narrative</summary>\n\n```\n{}\n```\n</details>\n", r.narrative)?;
+                writeln!(section, "\n<details><summary>narrative</summary>\n\n```\n{}\n```\n</details>\n", r.narrative)?;
+                out.push_str(&section);
+                // with --keep, the report travels with the chain it describes
+                if std::env::var("LNGAP_KEEP_DATADIR").is_ok() {
+                    for d in kept_datadirs(sc.id) {
+                        std::fs::write(d.join("SCENARIO.md"), &section)?;
+                        eprintln!("kept {} with its report in SCENARIO.md", d.display());
+                    }
+                }
             }
             Err(e) => {
                 writeln!(out, "## {} — {}\n\n**FAILED:** {e:#}\n", sc.id, sc.title)?;
