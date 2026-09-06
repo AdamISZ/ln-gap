@@ -99,8 +99,8 @@ impl SecretKey {
         Ok(Reveal { preimages: self.bits.iter().zip(bits).map(|(s, &b)| s.preimage(b)).collect() })
     }
     pub fn reveal_uint(&self, value: u32) -> Result<Reveal> {
-        ensure!(self.n_bits() <= 31, "uint keys are ≤ 31 bits");
-        ensure!(value >> self.n_bits() == 0, "value {value} does not fit in {} bits", self.n_bits());
+        ensure!(self.n_bits() <= 32, "uint keys are ≤ 32 bits");
+        ensure!(self.n_bits() == 32 || value >> self.n_bits() == 0, "value {value} does not fit in {} bits", self.n_bits());
         self.reveal_bits(&uint_to_bits(value, self.n_bits()))
     }
 }
@@ -131,7 +131,7 @@ impl PublicKey {
         Ok(out)
     }
     pub fn decode_uint(&self, reveal: &Reveal) -> Result<u32> {
-        ensure!(self.n_bits() <= 31, "uint keys are ≤ 31 bits");
+        ensure!(self.n_bits() <= 32, "uint keys are ≤ 32 bits");
         Ok(bits_to_uint(&self.decode_bits(reveal)?))
     }
 }

@@ -63,7 +63,7 @@ pub fn check_disprove_leaves(
         let code = prover.code.reveal_bits(&uint_to_bits(u32::from(claim.code), CODE_BITS)).unwrap();
         let prior = prior_prover.map(|p| p.state.reveal_bits(&claim.prior).unwrap());
         let mut w = WitnessStack::new();
-        w.push(sig.as_ref().to_vec()).extend(spec.witness_args(prior.as_ref(), &mv, &new, &code));
+        w.push(sig.as_ref().to_vec()).extend(spec.witness_args(prior.as_ref(), &mv, &new, &code, &[]));
         tx.input[0].witness = w.build(&leaf.script, &tree.control_block(&leaf_name).unwrap());
         (leaf_name, leaf.script.len(), tx)
     };

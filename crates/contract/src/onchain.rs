@@ -15,15 +15,29 @@ pub struct MoveReveals {
     pub mv: Reveal,
     pub state: Reveal,
     pub code: Reveal,
+    /// Extras, in the order the contract's `move_extras` lists them.
+    pub extras: Vec<Reveal>,
 }
 
-pub fn parse_move_witness(w: &Witness, n_move: usize, n_state: usize) -> Result<MoveReveals> {
+pub fn parse_move_witness(w: &Witness, n_move: usize, n_state: usize, extra_bits: &[usize]) -> Result<MoveReveals> {
     let args = witness_args_consumption_order(w);
-    ensure!(args.len() == 2 + n_move + n_state + CODE_BITS, "move witness has {} args, expected {}", args.len(), 2 + n_move + n_state + CODE_BITS);
-    let mv = Reveal::from_consumption_order(&args[2..2 + n_move])?;
-    let state = Reveal::from_consumption_order(&args[2 + n_move..2 + n_move + n_state])?;
-    let code = Reveal::from_consumption_order(&args[2 + n_move + n_state..])?;
-    Ok(MoveReveals { mv, state, code })
+    let n_extra: usize = extra_bits.iter().sum();
+    let expected = 2 + n_move + n_state + CODE_BITS + n_extra;
+    ensure!(args.len() == expected, "move witness has {} args, expected {expected}", args.len());
+    let mut at = 2;
+    let mut take = |n: usize| -> Result<Reveal> {
+        let r = Reveal::from_consumption_order(&args[at..at + n]);
+        at += n;
+        r
+    };
+    let mv = take(n_move)?;
+    let state = take(n_state)?;
+    let code = take(CODE_BITS)?;
+    let mut extras = Vec::new();
+    for &n in extra_bits {
+        extras.push(take(n)?);
+    }
+    Ok(MoveReveals { mv, state, code, extras })
 }
 
 /// Decode reveals against the prover's keys into a [`Claim`].

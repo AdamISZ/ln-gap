@@ -1,14 +1,13 @@
 //! Off-chain state changes: how a proposed change turns into the next
 //! channel state, and how the counterparty validates it.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Result};
 use bitcoin::Amount;
 use lngap_channel::{ChannelState, ContractOutput, Role};
 use lngap_contract::instance::key_label;
-use lngap_contract::{ContractInstance, DepthKeys, InstanceSpec, Program, CODE_BITS};
+use lngap_contract::{ContractInstance, DepthKeys, InstanceSpec, ProgramRegistry, CODE_BITS};
 use lngap_lamport::keystore::KeyStore;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +21,19 @@ pub enum Change {
     Move { id: u32, mv: Vec<bool>, deadline: u32 },
     /// Fold a terminal contract's `R(s)` into the balances.
     Resolve { id: u32 },
+    /// Fold a *non-terminal* contract's `R(s)` into the balances by mutual
+    /// agreement (e.g. the party on turn has missed its deadline, or a bond
+    /// is released). The responder's policy decides.
+    Cancel { id: u32 },
+}
+
+impl Change {
+    pub fn contract_id(&self) -> Option<u32> {
+        match self {
+            Change::Pay { .. } => None,
+            Change::Open { id, .. } | Change::Move { id, .. } | Change::Resolve { id } | Change::Cancel { id } => Some(*id),
+        }
+    }
 }
 
 /// A channel state on the wire, with contracts as specs (keys may be partial).
@@ -50,10 +62,10 @@ impl StateSpec {
                     && a.deadline == b.deadline && a.keys_seq == b.keys_seq && a.keys.len() == b.keys.len()
             })
     }
-    pub fn into_state(self, programs: &HashMap<String, Arc<dyn Program>>) -> Result<ChannelState> {
+    pub fn into_state(self, programs: &ProgramRegistry) -> Result<ChannelState> {
         let mut contracts: Vec<Arc<dyn ContractOutput>> = Vec::new();
         for c in self.contracts {
-            let p = programs.get(&c.program).ok_or_else(|| anyhow!("unknown program {}", c.program))?.clone();
+            let p = programs.resolve(&c.program)?;
             contracts.push(Arc::new(c.into_instance(p)?));
         }
         Ok(ChannelState { seq: self.seq, balances: self.balances, contracts })
@@ -74,7 +86,7 @@ pub fn same_state(a: &ChannelState, b: &ChannelState) -> bool {
 
 /// Apply `change` to `current`, producing the next state's spec with every
 /// key slot empty. Validates the change against the program.
-pub fn apply_change(current: &ChannelState, change: &Change, programs: &HashMap<String, Arc<dyn Program>>) -> Result<StateSpec> {
+pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramRegistry) -> Result<StateSpec> {
     let mut spec = StateSpec::from_state(current);
     spec.seq += 1;
     let seq = spec.seq;
@@ -87,7 +99,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &HashMap<
         }
         Change::Open { id, program, stakes, deadline } => {
             ensure!(spec.contracts.iter().all(|c| c.id != *id), "contract {id} already exists");
-            let p = programs.get(program).ok_or_else(|| anyhow!("unknown program {program}"))?;
+            let p = programs.resolve(program)?;
             for r in Role::BOTH {
                 ensure!(spec.balances[r.idx()] >= stakes[r.idx()], "{r} cannot stake {}", stakes[r.idx()]);
                 spec.balances[r.idx()] -= stakes[r.idx()];
@@ -106,7 +118,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &HashMap<
         }
         Change::Move { id, mv, deadline } => {
             let c = spec.contracts.iter_mut().find(|c| c.id == *id).ok_or_else(|| anyhow!("no contract {id}"))?;
-            let p = programs.get(&c.program).ok_or_else(|| anyhow!("unknown program {}", c.program))?;
+            let p = programs.resolve(&c.program)?;
             let mover = p.turn_bits(&c.state)?.ok_or_else(|| anyhow!("contract {id} is terminal"))?;
             let new = p.transition_bits(&c.state, mv, mover)?;
             let m = p.max_depth_from_bits(&new)?;
@@ -115,11 +127,13 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &HashMap<
             c.keys_seq = seq;
             c.keys = vec![None; m as usize];
         }
-        Change::Resolve { id } => {
+        Change::Resolve { id } | Change::Cancel { id } => {
             let pos = spec.contracts.iter().position(|c| c.id == *id).ok_or_else(|| anyhow!("no contract {id}"))?;
             let c = spec.contracts.remove(pos);
-            let p = programs.get(&c.program).ok_or_else(|| anyhow!("unknown program {}", c.program))?;
-            ensure!(p.turn_bits(&c.state)?.is_none(), "contract {id} is not terminal");
+            let p = programs.resolve(&c.program)?;
+            if matches!(change, Change::Resolve { .. }) {
+                ensure!(p.turn_bits(&c.state)?.is_none(), "contract {id} is not terminal");
+            }
             let r = p.resolution_bits(&c.state)?;
             let d = r.payout.dist(c.value);
             spec.balances[0] += d[0];
@@ -131,10 +145,10 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &HashMap<
 
 /// Fill in `me`'s keys for every depth where `me` is the prover and the
 /// slot is empty. Returns what was filled (to send to the counterparty).
-pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs: &HashMap<String, Arc<dyn Program>>) -> Result<Vec<(u32, u32, DepthKeys)>> {
+pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs: &ProgramRegistry) -> Result<Vec<(u32, u32, DepthKeys)>> {
     let mut filled = Vec::new();
     for c in &mut spec.contracts {
-        let p = programs.get(&c.program).ok_or_else(|| anyhow!("unknown program {}", c.program))?;
+        let p = programs.resolve(&c.program)?;
         let mut prover = p.turn_bits(&c.state)?;
         for (i, slot) in c.keys.iter_mut().enumerate() {
             let d = i as u32 + 1;

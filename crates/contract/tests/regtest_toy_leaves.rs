@@ -98,7 +98,7 @@ fn check_depth(
             let mut tx = build_spend(op, &Timelock::NONE, vec![TxOut { value: Amount::from_sat(19_000), script_pubkey: sink.clone() }]);
             let sig = sign_tapscript(&challenger.payment, &tx, 0, std::slice::from_ref(&prevout), &leaf.script).unwrap();
             let mut w = WitnessStack::new();
-            w.push(sig.as_ref().to_vec()).extend(spec.witness_args(prior.as_ref(), &mv, &new, &code));
+            w.push(sig.as_ref().to_vec()).extend(spec.witness_args(prior.as_ref(), &mv, &new, &code, &[]));
             tx.input[0].witness = w.build(&leaf.script, &tree.control_block(&leaf_name).unwrap());
             let accepted = rt.test_accept(&tx).is_ok();
             let detects = (spec.detects)(claim);
@@ -126,7 +126,7 @@ fn check_depth(
     let code = prover.code.reveal_bits(&uint_to_bits(u32::from(claim.code), CODE_BITS)).unwrap();
     let prior = prior_prover.map(|p| p.state.reveal_bits(&claim.prior).unwrap());
     let mut w = WitnessStack::new();
-    w.push(sig.as_ref().to_vec()).extend(spec.witness_args(prior.as_ref(), &mv, &new, &code));
+    w.push(sig.as_ref().to_vec()).extend(spec.witness_args(prior.as_ref(), &mv, &new, &code, &[]));
     tx.input[0].witness = w.build(&leaf.script, &tree.control_block(&leaf_name).unwrap());
     assert!(rt.test_accept(&tx).is_err(), "wrong challenger key must fail");
 }

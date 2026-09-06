@@ -55,7 +55,7 @@ impl LamportExt for Builder {
     }
 
     fn expect_uint(mut self, pk: &PublicKey, value: u32) -> Self {
-        assert!(pk.n_bits() <= 31 && value >> pk.n_bits() == 0, "value fits key");
+        assert!(pk.n_bits() <= 32 && (pk.n_bits() == 32 || value >> pk.n_bits() == 0), "value fits key");
         for i in (0..pk.n_bits()).rev() {
             let bit = (value >> i) & 1 == 1;
             let h = if bit { &pk.bits[i].h1 } else { &pk.bits[i].h0 };

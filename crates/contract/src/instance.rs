@@ -12,7 +12,7 @@ use lngap_lamport::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use crate::leaves::{move_leaf, settle_leaf, split_leaf, LeafCtx, PriorState};
-use crate::{Outcome, Program, CODE_BITS};
+use crate::{MoveExtras, Outcome, Program, CODE_BITS};
 
 /// The prover's Lamport public keys for one depth position.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,12 +164,18 @@ impl ContractInstance {
         let mut leaves: Vec<Leaf> = self.disprove_specs(depth).iter().map(|d| d.leaf(&challenger)).collect();
         if depth < self.max_depth() {
             let nk = self.depth_keys(depth + 1);
-            leaves.push(move_leaf(ctx, depth + 1, nk.prover, &nk.mv, &nk.state, &nk.code));
+            let ex = self.program.move_extras(depth + 1, nk.prover);
+            leaves.push(move_leaf(ctx, depth + 1, nk.prover, &nk.mv, &nk.state, &nk.code, &ex));
         }
         for o in self.program.outcomes() {
             leaves.push(split_leaf(ctx, &o, self.window(ctx.params, depth, &o), &lctx.code));
         }
         TapTree::new(leaves)
+    }
+
+    /// Extras the Move at `depth` must reveal.
+    pub fn move_extras(&self, depth: u32) -> MoveExtras {
+        self.program.move_extras(depth, self.prover_at(depth))
     }
 
     /// The disprove specs at `depth` (for choosing which leaf to use).
@@ -211,7 +217,8 @@ impl ContractOutput for ContractInstance {
         let mut leaves = vec![ctx.revoke_leaf(), settle_leaf(ctx, self.deadline)];
         if self.max_depth() >= 1 {
             let k = self.depth_keys(1);
-            leaves.push(move_leaf(ctx, 1, k.prover, &k.mv, &k.state, &k.code));
+            let ex = self.program.move_extras(1, k.prover);
+            leaves.push(move_leaf(ctx, 1, k.prover, &k.mv, &k.state, &k.code, &ex));
         }
         TapTree::new(leaves)
     }

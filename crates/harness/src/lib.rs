@@ -12,7 +12,7 @@ use lngap_channel::chain::Chain;
 use lngap_channel::funding::{build_funding_tx, sign_funding_input};
 use lngap_channel::protocol::{funding_tree, run_bus as run_channel_bus};
 use lngap_channel::{ChannelParams, ChannelState, PartyKeys, Role};
-use lngap_contract::Program;
+use lngap_contract::{Program, ProgramRegistry};
 use lngap_party::{run_bus, PEnvelope, Party};
 use tracing::info;
 
@@ -73,8 +73,12 @@ impl Harness {
         let chain: Arc<dyn Chain> = rt.clone();
         let user_rev = [user_keys.revocation_hash(0), user_keys.revocation_hash(1)];
         let hub_rev = [hub_keys.revocation_hash(0), hub_keys.revocation_hash(1)];
-        let mut user = Party::new(Role::User, user_seed, pubs[1].clone(), params, funding.clone(), initial.clone(), hub_rev, chain.clone(), programs.clone())?;
-        let mut hub = Party::new(Role::Hub, hub_seed, pubs[0].clone(), params, funding, initial, user_rev, chain, programs)?;
+        let mut reg = ProgramRegistry::new();
+        for p in programs {
+            reg.register(p);
+        }
+        let mut user = Party::new(Role::User, user_seed, pubs[1].clone(), params, funding.clone(), initial.clone(), hub_rev, chain.clone(), reg.clone())?;
+        let mut hub = Party::new(Role::Hub, hub_seed, pubs[0].clone(), params, funding, initial, user_rev, chain, reg)?;
 
         let m1 = user.channel.initial_commit_sigs()?;
         let m2 = hub.channel.initial_commit_sigs()?;

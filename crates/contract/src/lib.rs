@@ -22,6 +22,28 @@ use serde::{Deserialize, Serialize};
 
 pub use instance::{ContractInstance, DepthKeys, InstanceSpec};
 pub use leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx, PriorState};
+pub use registry::ProgramRegistry;
+pub mod registry;
+
+/// A statement someone else committed to with a Lamport key: the leaf checks
+/// `expect_uint(pk, value)`, and whoever spends supplies the preimages,
+/// which they hold because the key's owner handed them over (a receipt, an
+/// attestation) or revealed them on-chain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Extra {
+    /// Where the spender looks the preimages up (`receipt/<id>`, `attest/<name>/<key>`).
+    pub label: String,
+    pub pk: lngap_lamport::PublicKey,
+    pub value: u32,
+}
+
+/// What a Move leaf requires beyond the prover's own commitments.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MoveExtras {
+    /// The move is only valid at or after this height (`OP_CLTV`).
+    pub cltv: Option<u32>,
+    pub expects: Vec<Extra>,
+}
 
 /// How `V` is divided for an outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +119,13 @@ pub trait Contract: Send + Sync + Debug + 'static {
     /// The disprove leaves for a Move at one depth. See [`LeafBuilder`].
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec>;
 
+    /// Extra requirements on the Move leaf at `depth` (fixed at signing, so
+    /// they may depend on the contract's parameters and the depth only).
+    fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras {
+        let _ = (depth, prover);
+        MoveExtras::default()
+    }
+
     fn describe_state(&self, s: &Self::State) -> String {
         format!("{s:?}")
     }
@@ -117,6 +146,7 @@ pub trait Program: Send + Sync + Debug {
     fn turn_bits(&self, s: &[bool]) -> Result<Option<Role>>;
     fn max_depth_from_bits(&self, s: &[bool]) -> Result<u32>;
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec>;
+    fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras;
     fn describe_state_bits(&self, s: &[bool]) -> String;
     fn describe_move_bits(&self, m: &[bool]) -> String;
 
@@ -162,6 +192,9 @@ impl<C: Contract> Program for C {
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
         Contract::disprove_leaves(self, ctx)
     }
+    fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras {
+        Contract::move_extras(self, depth, prover)
+    }
     fn describe_state_bits(&self, s: &[bool]) -> String {
         match self.state_from_bits(s) {
             Ok(st) => self.describe_state(&st),
@@ -183,7 +216,7 @@ pub fn bits_str(b: &[bool]) -> String {
 /// Re-exports used by contract authors.
 pub mod prelude {
     pub use crate::leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx};
-    pub use crate::{Contract, Invalid, Outcome, Payout};
+    pub use crate::{Contract, Extra, Invalid, MoveExtras, Outcome, Payout};
     pub use bitcoin::opcodes::all::*;
     pub use lngap_channel::Role;
     pub use lngap_lamport::{bits_to_uint, uint_to_bits};

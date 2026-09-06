@@ -13,7 +13,7 @@ use lngap_channel::{CommitCtx, Role};
 use lngap_lamport::gadgets::LamportExt;
 use lngap_lamport::{PublicKey, Reveal};
 
-use crate::{Outcome, CODE_BITS};
+use crate::{Extra, MoveExtras, Outcome, CODE_BITS};
 
 /// Where a disprove leaf gets the state before the disputed move.
 #[derive(Clone, Debug)]
@@ -49,6 +49,8 @@ pub enum Field {
     Move(Range<usize>),
     New(Range<usize>),
     Code,
+    /// The challenger's own reveal of `needs[i]` (not part of the claim).
+    Need(usize),
 }
 
 /// What a Move claimed, decoded, for native re-checking.
@@ -70,6 +72,8 @@ pub struct DisproveSpec {
     pub consumes: Vec<Field>,
     pub body: ScriptBuf,
     pub detects: Arc<dyn Fn(&Claim) -> bool + Send + Sync>,
+    /// Statements the challenger must be able to reveal to use this leaf.
+    pub needs: Vec<Extra>,
 }
 
 impl std::fmt::Debug for DisproveSpec {
@@ -91,8 +95,9 @@ impl DisproveSpec {
     }
 
     /// Witness elements after the challenger's signature, in consumption order.
-    /// `prior` is `None` when the prior state is a constant.
-    pub fn witness_args(&self, prior: Option<&Reveal>, mv: &Reveal, new: &Reveal, code: &Reveal) -> Vec<Vec<u8>> {
+    /// `prior` is `None` when the prior state is a constant; `needs` are the
+    /// challenger's reveals for `self.needs`, by index.
+    pub fn witness_args(&self, prior: Option<&Reveal>, mv: &Reveal, new: &Reveal, code: &Reveal, needs: &[Reveal]) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
         for f in &self.consumes {
             match f {
@@ -104,6 +109,7 @@ impl DisproveSpec {
                 Field::Move(r) => out.extend(mv.slice(r.clone()).consumption_order()),
                 Field::New(r) => out.extend(new.slice(r.clone()).consumption_order()),
                 Field::Code => out.extend(code.consumption_order()),
+                Field::Need(i) => out.extend(needs[*i].consumption_order()),
             }
         }
         out
@@ -124,11 +130,21 @@ pub struct LeafBuilder<'a> {
     consumes: Vec<Field>,
     n_inputs: usize,
     inputs_open: bool,
+    needs: Vec<Extra>,
 }
 
 impl<'a> LeafBuilder<'a> {
     pub fn new(ctx: &'a LeafCtx) -> Self {
-        LeafBuilder { ctx, b: Builder::new(), consumes: vec![], n_inputs: 0, inputs_open: true }
+        LeafBuilder { ctx, b: Builder::new(), consumes: vec![], n_inputs: 0, inputs_open: true, needs: vec![] }
+    }
+    /// Input phase: require the challenger to reveal `extra` (an
+    /// `expect_uint` check; leaves nothing on the stack).
+    pub fn need(mut self, extra: Extra) -> Self {
+        assert!(self.inputs_open, "declare needs before computing");
+        self.b = self.b.expect_uint(&extra.pk, extra.value);
+        self.consumes.push(Field::Need(self.needs.len()));
+        self.needs.push(extra);
+        self
     }
     fn park(mut self) -> Self {
         assert!(self.inputs_open, "declare all inputs before computing");
@@ -198,9 +214,19 @@ impl<'a> LeafBuilder<'a> {
         s.b = f(s.b);
         s
     }
+    /// Finish. A leaf with no computed inputs (only `need`s) must still leave
+    /// a truthy element: pass `always` = true for "accepts whenever the
+    /// challenger holds the needs".
     pub fn finish(self, name: &str, detects: impl Fn(&Claim) -> bool + Send + Sync + 'static) -> DisproveSpec {
         let s = self.restore();
-        DisproveSpec { name: name.to_string(), consumes: s.consumes, body: s.b.into_script(), detects: Arc::new(detects) }
+        DisproveSpec { name: name.to_string(), consumes: s.consumes, body: s.b.into_script(), detects: Arc::new(detects), needs: s.needs }
+    }
+    /// A leaf satisfied by the challenger's needs alone.
+    pub fn finish_needs_only(self, name: &str) -> DisproveSpec {
+        assert!(self.n_inputs == 0, "needs-only leaf has no decoded inputs");
+        let mut s = self.restore();
+        s.b = s.b.push_opcode(OP_PUSHNUM_1);
+        DisproveSpec { name: name.to_string(), consumes: s.consumes, body: s.b.into_script(), detects: Arc::new(|_| true), needs: s.needs }
     }
 }
 
@@ -213,29 +239,41 @@ fn reveal_verify(mut b: Builder, pk: &PublicKey) -> Builder {
 }
 
 /// The Move leaf at depth `d` for prover `P`: both signatures, then P's
-/// reveals of move, new state and outcome code. Carries `CSV to_self_delay`
-/// when P is the commitment's broadcaster and this is depth 1.
-/// Witness: `sig_U, sig_H, move reveal, new-state reveal, code reveal`.
-pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new: &PublicKey, code: &PublicKey) -> Leaf {
+/// reveals of move, new state and outcome code, then any extra statements
+/// the contract requires (`expect_uint`). Carries `CSV to_self_delay` when P
+/// is the commitment's broadcaster and this is depth 1, and `CLTV` if the
+/// contract says the move is only allowed from some height.
+/// Witness: `sig_U, sig_H, move reveal, new-state reveal, code reveal, extras...`.
+pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new: &PublicKey, code: &PublicKey, extras: &MoveExtras) -> Leaf {
     let delayed = depth == 1 && prover == ctx.broadcaster;
     let mut b = Builder::new();
     let mut tl = Timelock::NONE;
+    if let Some(h) = extras.cltv {
+        b = b.cltv(h);
+        tl.cltv = Some(h);
+    }
     if delayed {
         b = b.csv(ctx.params.to_self_delay);
-        tl = Timelock::csv(ctx.params.to_self_delay);
+        tl.csv = Some(ctx.params.to_self_delay);
     }
     b = ctx.two_of_two_verify(b);
     b = reveal_verify(b, mv);
     b = reveal_verify(b, new);
     b = reveal_verify(b, code);
+    for e in &extras.expects {
+        b = b.expect_uint(&e.pk, e.value);
+    }
     Leaf::new(format!("move_{depth}"), b.push_opcode(OP_PUSHNUM_1).into_script(), tl)
 }
 
 /// Move witness args after the two signatures.
-pub fn move_witness_args(mv: &Reveal, new: &Reveal, code: &Reveal) -> Vec<Vec<u8>> {
+pub fn move_witness_args(mv: &Reveal, new: &Reveal, code: &Reveal, extras: &[Reveal]) -> Vec<Vec<u8>> {
     let mut v = mv.consumption_order();
     v.extend(new.consumption_order());
     v.extend(code.consumption_order());
+    for e in extras {
+        v.extend(e.consumption_order());
+    }
     v
 }
 
