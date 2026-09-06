@@ -17,6 +17,8 @@ use lngap_party::{run_bus, PEnvelope, Party};
 use tracing::info;
 
 pub const FUNDING: Amount = Amount::from_sat(200_000);
+pub mod scenarios;
+
 pub const HALF: Amount = Amount::from_sat(100_000);
 const CONTRIB: Amount = Amount::from_sat(100_500);
 

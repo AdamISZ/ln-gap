@@ -10,6 +10,7 @@
 pub mod instance;
 pub mod leaves;
 pub mod onchain;
+pub mod testing;
 pub mod toy;
 
 use std::fmt::Debug;

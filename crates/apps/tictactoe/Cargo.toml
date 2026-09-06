@@ -1,0 +1,13 @@
+[package]
+name = "lngap-tictactoe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-lamport = { path = "../../lamport" }
+lngap-channel = { path = "../../channel" }
+lngap-contract = { path = "../../contract" }
+bitcoin.workspace = true
+anyhow.workspace = true

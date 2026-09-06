@@ -161,7 +161,7 @@ impl ContractInstance {
         ensure!(depth >= 1 && depth <= self.max_depth(), "depth {depth} out of range");
         let lctx = self.leaf_ctx(depth);
         let challenger = ctx.key(lctx.challenger()).payment;
-        let mut leaves: Vec<Leaf> = self.program.disprove_leaves(&lctx).iter().map(|d| d.leaf(&challenger)).collect();
+        let mut leaves: Vec<Leaf> = self.disprove_specs(depth).iter().map(|d| d.leaf(&challenger)).collect();
         if depth < self.max_depth() {
             let nk = self.depth_keys(depth + 1);
             leaves.push(move_leaf(ctx, depth + 1, nk.prover, &nk.mv, &nk.state, &nk.code));
@@ -173,8 +173,26 @@ impl ContractInstance {
     }
 
     /// The disprove specs at `depth` (for choosing which leaf to use).
+    /// At depth 1 the prior state is a constant, so a leaf that reads only
+    /// prior fields has a constant verdict; those that can never accept are
+    /// dropped (they would also collide as identical scripts).
     pub fn disprove_specs(&self, depth: u32) -> Vec<crate::DisproveSpec> {
-        self.program.disprove_leaves(&self.leaf_ctx(depth))
+        let lctx = self.leaf_ctx(depth);
+        let specs = self.program.disprove_leaves(&lctx);
+        match &lctx.prior {
+            PriorState::Committed(_) => specs,
+            PriorState::Constant(prior) => specs
+                .into_iter()
+                .filter(|s| {
+                    let prior_only = s.consumes.iter().all(|f| matches!(f, crate::leaves::Field::Prior(_)));
+                    if !prior_only {
+                        return true;
+                    }
+                    let dummy = crate::Claim { prior: prior.clone(), mv: vec![false; self.program.n_move_bits()], new: vec![false; self.program.n_state_bits()], code: 0, mover: lctx.prover };
+                    (s.detects)(&dummy)
+                })
+                .collect(),
+        }
     }
 }
 

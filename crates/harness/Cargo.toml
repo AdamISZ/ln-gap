@@ -14,3 +14,4 @@ bitcoin.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+lngap-tictactoe = { path = "../apps/tictactoe" }

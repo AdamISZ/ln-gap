@@ -10,8 +10,9 @@ the pre-signed Settle for that state could be broadcast immediately by anyone
 holding it, spending the contract output before the counterparty's revocation
 sweep. So the broadcaster's own version of the `settle` leaf carries
 `CSV to_self_delay` in addition to the CLTV deadline, exactly as the
-broadcaster's own `move` leaf does. Honest settlement after a force-close is
-delayed by `to_self_delay` blocks; the counterparty's version is not delayed.
+broadcaster's own `move` leaf does. Since either version's broadcaster could
+be the cheater, *every* version's `settle` leaf carries the CSV: honest
+settlement after a force-close waits `to_self_delay` blocks.
 
 ## D2. Off-chain deadlines leave room for a force-close
 
@@ -57,6 +58,46 @@ spends. The harness is the interpreter.
 Every pre-signed transaction pays a fixed 1000-sat fee from the value it
 carries. The commitment transaction's fee comes from the broadcaster's own
 balance ("price the closer").
+
+## D9. Scenario T6 as written is not fraud
+
+After the hub's legal Move_2 (cell 3) the user is on turn in an open game, so
+`R(s')` is *HubWins* (user forfeits): "code HubWins" is the honest code. T6 is
+therefore run as a status fraud (hub claims the board is won by O, code
+HubWins) disproved by `status_mismatch`, plus T6b, a pure code fraud (code
+Draw on an open board) disproved by `code_mismatch`.
+
+## D10. Contract changes are negotiated in two phases
+
+A Lamport key's hashes must be in the counterparty's leaves before the state
+is signed, and only the key's owner can produce them. So a contract change is
+`Draft` (change + resulting state with the proposer's keys) → `DraftKeys`
+(the responder's keys for its prover depths) → the ordinary channel update.
+The channel's update policy accepts a `Propose` only if it equals the agreed
+draft. Keys are labelled `c{id}/s{seq}/d{depth}/{field}` with the seq at which
+the contract tuple was last changed, so no key is ever bound to two values.
+
+## D11. Disprove leaves are declarative and two-phase
+
+A leaf body declares its inputs first (decoded and parked on the altstack),
+then computes. This keeps Lamport decoding from ever seeing a script value on
+top of the stack, and lets the framework derive the witness layout from the
+declaration order. Each leaf also carries a native `detects` closure; the
+tests assert interpreter and native agree on every claim, and the party uses
+`detects` to pick the leaf.
+
+## D12. One check per leaf, per cell where needed
+
+Tic-tac-toe uses 9 `cell_occupied_i` and 9 `board_mismatch_i` leaves rather
+than indexing the board in script. The tree grows (26–28 leaves) but every
+leaf stays under 400 B except `status_mismatch` (1.4 KB, the win-line check).
+
+## D13. Force-close triggers
+
+A party force-closes when an update it is waiting on has stalled for
+`stall_blocks = 2` blocks, or when the counterparty is on turn in a contract
+and the deadline has passed. Both are reactions of the watch loop, not
+harness instructions.
 
 ## TODO
 

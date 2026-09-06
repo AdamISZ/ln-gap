@@ -320,6 +320,7 @@ dependencies = [
  "lngap-contract",
  "lngap-lamport",
  "lngap-party",
+ "lngap-tictactoe",
  "tracing",
  "tracing-subscriber",
 ]
@@ -349,6 +350,18 @@ dependencies = [
  "lngap-lamport",
  "serde",
  "tracing",
+]
+
+[[package]]
+name = "lngap-tictactoe"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-lamport",
 ]
 
 [[package]]
