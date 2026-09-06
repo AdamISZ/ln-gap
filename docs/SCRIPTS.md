@@ -27,7 +27,23 @@ Preimages are 20 bytes; a witness element per bit costs 21 bytes.
 
 ### M0 deliverable
 
-Leaf `decode_uint(8) 100 OP_GREATERTHAN`: script 444 B; spend witness 658 B
+Leaf `decode_uint(8) 100 OP_GREATERTHAN`: script 452 B; spend witness 658 B
 (8 × 21 + script + 33-byte control block). Confirmed on regtest, txid
 `14f36963103f84cf6dc994eb174241dda4ef18deafd126ca0cdd5ce12f828af5` (throwaway
 chain; reproduce with `cargo test -p lngap-lamport -- --nocapture`).
+
+## Channel leaves (`lngap-channel`)
+
+Every revocable output of `X`'s commitment carries the same `revoke` leaf.
+
+| Output | Leaf | Script | Witness (consumption order) | Timelock |
+|---|---|---|---|---|
+| funding | `funding` | `<U.funding> OP_CHECKSIG <H.funding> OP_CHECKSIGADD 2 OP_NUMEQUAL` | `sig_U, sig_H` | — |
+| `to_local` (X's) | `revoke` | `OP_HASH160 <rev_hash_X> OP_EQUALVERIFY <Y.payment> OP_CHECKSIG` | `secret_X, sig_Y` | — |
+| `to_local` (X's) | `delayed` | `<to_self_delay> OP_CSV OP_DROP <X.delayed> OP_CHECKSIG` | `sig_X` | CSV 6 |
+| `to_remote` (Y's) | `claim` | `<Y.payment> OP_CHECKSIG` | `sig_Y` | — |
+| contract `C_i` | `revoke` | as above | as above | — |
+
+Commitment fee (1000 sat) comes out of the broadcaster's `to_local`. Sweeps
+(penalty, claims) pay 1000 sat and go to the sweeper's payout script, a
+single-leaf `<payout> OP_CHECKSIG` taproot output.

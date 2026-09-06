@@ -1,0 +1,17 @@
+[package]
+name = "lngap-channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-btc = { path = "../btc" }
+bitcoin.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

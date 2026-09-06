@@ -228,3 +228,16 @@ impl Drop for Regtest {
         }
     }
 }
+
+impl Regtest {
+    /// Confirmed balance held by `spk` (via `scantxoutset`).
+    pub fn balance_of(&self, spk: &Script) -> Result<Amount> {
+        let desc = format!("raw({})", hex::encode(spk.as_bytes()));
+        let v: serde_json::Value = self.rpc.call(
+            "scantxoutset",
+            &[serde_json::Value::String("start".into()), serde_json::json!([desc])],
+        )?;
+        let btc = v.get("total_amount").and_then(|a| a.as_f64()).unwrap_or(0.0);
+        Ok(Amount::from_btc(btc)?)
+    }
+}
