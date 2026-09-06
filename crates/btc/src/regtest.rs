@@ -25,6 +25,41 @@ pub struct Regtest {
     mine_to: Address,
 }
 
+/// If `tools/explorer.sh` left a node running on this datadir (it records
+/// its RPC port in `<datadir>/rpcport`), stop it and wait for it to exit.
+fn stop_node_serving(datadir: &std::path::Path) {
+    let Ok(port) = std::fs::read_to_string(datadir.join("rpcport")) else { return };
+    let port = port.trim();
+    let bin = std::env::var("LNGAP_BITCOIN_CLI").unwrap_or_else(|_| "bitcoin-cli".into());
+    let ok = Command::new(&bin)
+        .args(["-regtest", &format!("-datadir={}", datadir.display()), &format!("-rpcport={port}"), "stop"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        info!(datadir = %datadir.display(), port, "stopped the node still serving the old chain");
+        let lock = datadir.join("regtest").join(".lock");
+        for _ in 0..100 {
+            // bitcoind removes nothing on exit, but the lock becomes acquirable; poll the RPC instead
+            let alive = Command::new(&bin)
+                .args(["-regtest", &format!("-datadir={}", datadir.display()), &format!("-rpcport={port}"), "getblockcount"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !alive {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = lock;
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
@@ -39,14 +74,23 @@ impl Regtest {
         let bin = std::env::var("LNGAP_BITCOIND").unwrap_or_else(|_| "bitcoind".into());
         let keep = std::env::var("LNGAP_KEEP_DATADIR").map(|v| v == "1").unwrap_or(false);
         let (datadir, tmp) = if keep {
-            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let label = std::env::var("LNGAP_RUN_LABEL").unwrap_or_default();
-            let prefix = if label.is_empty() { "run".to_string() } else { label };
-            let d = std::env::current_dir()?.join("regtest-data").join(format!(
-                "{prefix}-{}-{n}",
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis()
-            ));
+            let base = std::env::current_dir()?.join("regtest-data");
+            let d = if label.is_empty() {
+                // ad-hoc (e.g. tests): a unique directory per node
+                static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                base.join(format!("run-{}-{n}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis()))
+            } else {
+                // one fixed directory per scenario, wiped every run: a run is
+                // throwaway and reproducible in seconds
+                let d = base.join(&label);
+                stop_node_serving(&d);
+                if d.exists() {
+                    std::fs::remove_dir_all(&d).with_context(|| format!("wiping {}", d.display()))?;
+                }
+                d
+            };
             std::fs::create_dir_all(&d)?;
             (d, None)
         } else {

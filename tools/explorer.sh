@@ -2,7 +2,7 @@
 # Open a kept LN-GAP regtest chain in a browser explorer.
 #
 #   cargo run -p lngap-harness --bin scenarios -- --keep T4
-#   tools/explorer.sh regtest-data/T4-<...>        # then browse http://127.0.0.1:3002
+#   tools/explorer.sh regtest-data/T4               # then browse http://127.0.0.1:3002
 #
 # Starts bitcoind on the datadir (RPC port $RPC_PORT, default 18555, so it
 # does not clash with a regtest node on 18443) and btc-rpc-explorer on
@@ -32,6 +32,7 @@ if ! bitcoin-cli -regtest -datadir="$DATADIR" -rpcport="$RPC_PORT" getblockcount
     bitcoin-cli -regtest -datadir="$DATADIR" -rpcport="$RPC_PORT" getblockcount >/dev/null 2>&1 && break
   done
 fi
+echo "$RPC_PORT" > "$DATADIR/rpcport"   # lets the scenario runner stop this node before wiping the dir
 echo "bitcoind: height $(bitcoin-cli -regtest -datadir="$DATADIR" -rpcport="$RPC_PORT" getblockcount) on rpcport $RPC_PORT"
 [ -f "$DATADIR/SCENARIO.md" ] && echo "scenario report: $DATADIR/SCENARIO.md"
 # stop the node we started (or found) when the explorer exits for any reason

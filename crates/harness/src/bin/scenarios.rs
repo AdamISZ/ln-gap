@@ -1,20 +1,16 @@
 //! Run every scenario against regtest, print the narrative, and write
 //! docs/SCENARIOS.md. With `--keep`, each scenario's regtest datadir is left
-//! under ./regtest-data/<scenario>-<millis>-<n> (bitcoind is stopped; start
-//! it again on that datadir to inspect the chain).
+//! at ./regtest-data/<scenario>/ together with its report (SCENARIO.md); the
+//! directory is wiped at the start of the next run of that scenario, after
+//! stopping any node tools/explorer.sh still has on it.
 //! Usage: cargo run -p lngap-harness --bin scenarios [-- --keep] [filter]
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-/// Datadirs under ./regtest-data created for scenario `id` (newest run's; a
-/// two-channel scenario has one node, others too, but keep it general).
-fn kept_datadirs(id: &str) -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir("regtest-data")
-        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&format!("{id}-")))).collect())
-        .unwrap_or_default();
-    v.sort();
-    v
+/// The kept datadir for scenario `id`.
+fn kept_datadir(id: &str) -> PathBuf {
+    PathBuf::from("regtest-data").join(id)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -35,7 +31,6 @@ fn main() -> anyhow::Result<()> {
         }
         eprintln!("===== {} — {}", sc.id, sc.title);
         std::env::set_var("LNGAP_RUN_LABEL", sc.id);
-        let before = kept_datadirs(sc.id);
         match (sc.run)() {
             Ok(r) => {
                 let mut section = String::new();
@@ -48,8 +43,8 @@ fn main() -> anyhow::Result<()> {
                 out.push_str(&section);
                 // with --keep, the report travels with the chain it describes
                 if std::env::var("LNGAP_KEEP_DATADIR").is_ok() {
-                    // only the datadir(s) this run created, never an earlier kept chain's
-                    for d in kept_datadirs(sc.id).into_iter().filter(|d| !before.contains(d)) {
+                    let d = kept_datadir(sc.id);
+                    if d.exists() {
                         std::fs::write(d.join("SCENARIO.md"), &section)?;
                         eprintln!("kept {} with its report in SCENARIO.md", d.display());
                     }
