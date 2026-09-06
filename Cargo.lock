@@ -296,6 +296,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-contract"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-lamport",
+ "serde",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "lngap-lamport"
 version = "0.1.0"
 dependencies = [

@@ -180,8 +180,10 @@ pub fn revoke_leaf(rev_hash: &Hash160, counterparty_payment: &XOnlyPublicKey) ->
 /// One contract output on a commitment transaction, as the channel sees it.
 /// Implemented by `lngap-contract`; the channel only needs its value, its
 /// taptree per commitment version and its pre-signed graph.
-pub trait ContractOutput: Send + Sync + std::fmt::Debug {
+pub trait ContractOutput: Send + Sync + std::fmt::Debug + 'static {
     fn id(&self) -> u32;
+    /// For downcasting to the concrete instance type.
+    fn as_any(&self) -> &dyn std::any::Any;
     fn value(&self) -> Amount;
     /// The output's taptree on `ctx.broadcaster`'s commitment.
     fn tree(&self, ctx: &CommitCtx) -> Result<TapTree>;

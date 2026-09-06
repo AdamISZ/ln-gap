@@ -1,0 +1,15 @@
+[package]
+name = "lngap-contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-btc = { path = "../btc" }
+lngap-lamport = { path = "../lamport" }
+lngap-channel = { path = "../channel" }
+bitcoin.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true

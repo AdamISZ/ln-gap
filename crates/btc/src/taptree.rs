@@ -91,3 +91,14 @@ impl TapTree {
             .collect()
     }
 }
+
+impl TapTree {
+    /// Which of my leaves does this script-path witness spend through?
+    pub fn identify_leaf(&self, w: &bitcoin::Witness) -> Option<&Leaf> {
+        let ls = w.taproot_leaf_script()?;
+        if ls.version != LeafVersion::TapScript {
+            return None;
+        }
+        self.leaves.iter().find(|l| l.script.as_script() == ls.script)
+    }
+}
