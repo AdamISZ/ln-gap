@@ -39,9 +39,13 @@ impl Regtest {
         let bin = std::env::var("LNGAP_BITCOIND").unwrap_or_else(|_| "bitcoind".into());
         let keep = std::env::var("LNGAP_KEEP_DATADIR").map(|v| v == "1").unwrap_or(false);
         let (datadir, tmp) = if keep {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let label = std::env::var("LNGAP_RUN_LABEL").unwrap_or_default();
+            let prefix = if label.is_empty() { "run".to_string() } else { label };
             let d = std::env::current_dir()?.join("regtest-data").join(format!(
-                "run-{}",
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs()
+                "{prefix}-{}-{n}",
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis()
             ));
             std::fs::create_dir_all(&d)?;
             (d, None)

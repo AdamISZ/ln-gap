@@ -1,4 +1,7 @@
-//! Run every scenario against regtest and write docs/SCENARIOS.md.
+//! Run every scenario against regtest, print the narrative, and write
+//! docs/SCENARIOS.md. With `--keep`, each scenario's regtest datadir is left
+//! under ./regtest-data/<scenario>-<millis>-<n> (bitcoind is stopped; start
+//! it again on that datadir to inspect the chain).
 //! Usage: cargo run -p lngap-harness --bin scenarios [-- --keep] [filter]
 
 use std::fmt::Write as _;
@@ -21,6 +24,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         eprintln!("===== {} — {}", sc.id, sc.title);
+        std::env::set_var("LNGAP_RUN_LABEL", sc.id);
         match (sc.run)() {
             Ok(r) => {
                 writeln!(out, "## {} — {}\n\n**Expected:** {}\n\n**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user {} sat, hub {} sat\n", r.id, r.title, r.expected, r.balances[0].to_sat(), r.balances[1].to_sat())?;
