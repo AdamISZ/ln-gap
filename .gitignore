@@ -1,0 +1,4 @@
+/target
+/docs/planning/
+**/*.rs.bk
+/regtest-data/
