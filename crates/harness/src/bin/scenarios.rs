@@ -35,6 +35,7 @@ fn main() -> anyhow::Result<()> {
         }
         eprintln!("===== {} — {}", sc.id, sc.title);
         std::env::set_var("LNGAP_RUN_LABEL", sc.id);
+        let before = kept_datadirs(sc.id);
         match (sc.run)() {
             Ok(r) => {
                 let mut section = String::new();
@@ -47,7 +48,8 @@ fn main() -> anyhow::Result<()> {
                 out.push_str(&section);
                 // with --keep, the report travels with the chain it describes
                 if std::env::var("LNGAP_KEEP_DATADIR").is_ok() {
-                    for d in kept_datadirs(sc.id) {
+                    // only the datadir(s) this run created, never an earlier kept chain's
+                    for d in kept_datadirs(sc.id).into_iter().filter(|d| !before.contains(d)) {
                         std::fs::write(d.join("SCENARIO.md"), &section)?;
                         eprintln!("kept {} with its report in SCENARIO.md", d.display());
                     }

@@ -61,7 +61,23 @@ not clash with a regtest node on 18443) and
 installed on first use under `tools/explorer/` (needs `node`; the install
 skips native modules, which the explorer only uses for ZMQ). Paste a txid from
 `SCENARIO.md`; the Scripts tab shows the witness elements (signatures, Lamport
-preimages, leaf script, control block). Ctrl-C stops both processes.
+preimages, leaf script, control block) as raw pushes. Ctrl-C stops both processes.
+
+### Decoding a transaction
+
+The explorer does not parse tapscript leaves. This does, and it knows the
+LN-GAP gadgets:
+
+```
+cargo run -p lngap-harness --bin decode -- regtest-data/<dir> <txid> [--rpcport 18555]
+```
+
+It prints the role of the transaction and of the output it spends (from the
+datadir's `SCENARIO.md`), the leaf with `CSV`/`CLTV`, the 2-of-2, `bit_decode`
+and `expect_bit` gadgets named, every witness element classified, and the
+Lamport preimages resolved to the bits they commit to (e.g. `1101` = move 1,
+state 1, code 01 for an attestation-gated payment). The node for that datadir
+must be running, e.g. via `tools/explorer.sh`.
 
 Every leaf test spends through the real interpreter: a throwaway regtest node
 is started per test, the output is funded, and the spend is checked with

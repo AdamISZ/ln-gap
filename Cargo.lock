@@ -315,6 +315,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "bitcoincore-rpc",
+ "hex",
  "lngap-btc",
  "lngap-channel",
  "lngap-contract",
