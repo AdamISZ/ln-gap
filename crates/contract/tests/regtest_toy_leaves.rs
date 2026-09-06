@@ -43,7 +43,7 @@ fn coinflip_disprove_leaves_match_native_checks() {
 
     let (s1, k1) = secrets(Role::User, 10, &*prog);
     let (s2, k2) = secrets(Role::Hub, 20, &*prog);
-    let inst = ContractInstance::new(7, prog.clone(), Amount::from_sat(20_000), prog.initial_bits(), 300, vec![k1, k2]).unwrap();
+    let inst = ContractInstance::new(7, prog.clone(), Amount::from_sat(20_000), prog.initial_bits(), 300, 1, vec![k1, k2]).unwrap();
     let sink = user.payout_tree().script_pubkey();
 
     // depth 1: user is prover, prior = initial (constant)
@@ -140,7 +140,7 @@ fn graph_shape_and_signing() {
     let params = ChannelParams::regtest(Amount::from_sat(200_000));
     let (_, k1) = secrets(Role::User, 10, &*prog);
     let (_, k2) = secrets(Role::Hub, 20, &*prog);
-    let inst = ContractInstance::new(1, prog.clone(), Amount::from_sat(20_000), prog.initial_bits(), 300, vec![k1, k2]).unwrap();
+    let inst = ContractInstance::new(1, prog.clone(), Amount::from_sat(20_000), prog.initial_bits(), 300, 1, vec![k1, k2]).unwrap();
     for broadcaster in Role::BOTH {
         let ctx = CommitCtx { params: &params, keys: &pubs, broadcaster, seq: 1, rev_hash: [1u8; 20] };
         let tree = lngap_channel::ContractOutput::tree(&inst, &ctx).unwrap();

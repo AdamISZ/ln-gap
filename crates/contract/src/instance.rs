@@ -37,6 +37,8 @@ pub struct InstanceSpec {
     pub value: Amount,
     pub state: Vec<bool>,
     pub deadline: u32,
+    /// Channel seq at which the keys were generated (part of their labels).
+    pub keys_seq: u64,
     /// Index `d - 1`; `None` until that depth's prover supplied keys.
     pub keys: Vec<Option<DepthKeys>>,
 }
@@ -48,7 +50,7 @@ impl InstanceSpec {
     pub fn into_instance(self, program: Arc<dyn Program>) -> Result<ContractInstance> {
         ensure!(program.name() == self.program, "program mismatch");
         let keys = self.keys.into_iter().enumerate().map(|(i, k)| k.ok_or_else(|| anyhow!("missing keys for depth {}", i + 1))).collect::<Result<Vec<_>>>()?;
-        ContractInstance::new(self.id, program, self.value, self.state, self.deadline, keys)
+        ContractInstance::new(self.id, program, self.value, self.state, self.deadline, self.keys_seq, keys)
     }
 }
 
@@ -61,6 +63,9 @@ pub struct ContractInstance {
     pub state: Vec<bool>,
     /// Absolute height by which the party on turn must have moved (`OP_CLTV`).
     pub deadline: u32,
+    /// Channel seq at which the keys were generated; the reveal labels are
+    /// `key_label(id, keys_seq, depth, field)`.
+    pub keys_seq: u64,
     /// Index `d - 1`.
     pub keys: Vec<DepthKeys>,
 }
@@ -68,12 +73,12 @@ pub struct ContractInstance {
 impl PartialEq for ContractInstance {
     fn eq(&self, o: &Self) -> bool {
         self.id == o.id && self.program.name() == o.program.name() && self.value == o.value
-            && self.state == o.state && self.deadline == o.deadline && self.keys == o.keys
+            && self.state == o.state && self.deadline == o.deadline && self.keys_seq == o.keys_seq && self.keys == o.keys
     }
 }
 
 impl ContractInstance {
-    pub fn new(id: u32, program: Arc<dyn Program>, value: Amount, state: Vec<bool>, deadline: u32, keys: Vec<DepthKeys>) -> Result<ContractInstance> {
+    pub fn new(id: u32, program: Arc<dyn Program>, value: Amount, state: Vec<bool>, deadline: u32, keys_seq: u64, keys: Vec<DepthKeys>) -> Result<ContractInstance> {
         ensure!(state.len() == program.n_state_bits(), "state has {} bits, program wants {}", state.len(), program.n_state_bits());
         let m = program.max_depth_from_bits(&state)? as usize;
         ensure!(keys.len() == m, "{} depth keys but M = {m}", keys.len());
@@ -86,7 +91,7 @@ impl ContractInstance {
             ensure!(k.code.n_bits() == CODE_BITS, "depth {}: code key size", i + 1);
             prover = Some(p.other());
         }
-        Ok(ContractInstance { id, program, value, state, deadline, keys })
+        Ok(ContractInstance { id, program, value, state, deadline, keys_seq, keys })
     }
 
     pub fn spec(&self) -> InstanceSpec {
@@ -96,6 +101,7 @@ impl ContractInstance {
             value: self.value,
             state: self.state.clone(),
             deadline: self.deadline,
+            keys_seq: self.keys_seq,
             keys: self.keys.iter().cloned().map(Some).collect(),
         }
     }

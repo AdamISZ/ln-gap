@@ -310,6 +310,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-lamport",
+ "lngap-party",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lngap-lamport"
 version = "0.1.0"
 dependencies = [
@@ -320,6 +335,20 @@ dependencies = [
  "rand",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "lngap-party"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-lamport",
+ "serde",
+ "tracing",
 ]
 
 [[package]]

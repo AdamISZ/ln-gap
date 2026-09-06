@@ -229,7 +229,16 @@ impl ChannelParty {
 
     /// Broadcast a transaction and log it under `role`.
     pub fn broadcast(&mut self, tx: &Transaction, role: &str) -> Result<Txid> {
-        let txid = self.chain.broadcast(tx).with_context(|| format!("{} broadcasting {role}", self.me))?;
+        let txid = match self.chain.broadcast(tx) {
+            Ok(t) => t,
+            // Both parties may legitimately race to broadcast the same
+            // pre-signed transaction (Settle, Split); the second is a no-op.
+            Err(e) if format!("{e:#}").contains("already") => {
+                info!(party = %self.me, %role, "already broadcast by the counterparty");
+                tx.compute_txid()
+            }
+            Err(e) => return Err(e).with_context(|| format!("{} broadcasting {role}", self.me)),
+        };
         info!(party = %self.me, %role, %txid, "broadcast");
         self.broadcasts.push(Broadcast { txid, role: role.to_string(), by: self.me });
         Ok(txid)
