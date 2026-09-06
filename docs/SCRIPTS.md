@@ -103,3 +103,44 @@ Graph for M = 2: 7 pre-signed transactions per commitment version.
 `move_d` leaf: 1505 B script (27 bits × ~52 B + 2-of-2); Move witness ≈ 27 × 21 + 128 + script + control block ≈ 2.3 KB.
 `C'_1`: 26 leaves, 9.9 KB of script; `C'_2`: 28 leaves, 12.2 KB (control blocks 161–193 B).
 Graph from the empty board (M = 9): 37 pre-signed transactions per commitment version.
+
+## Names (`lngap-names`), statements as 32-bit Lamport slots
+
+A hub statement is a 32-bit Lamport key (label = what it is about) whose
+preimages for a fixed 32-bit value (id of what it says) the hub hands out or
+reveals on-chain. Leaves check them with `expect_uint` (32 × 23 B = 736 B,
+witness 32 × 21 B = 672 B).
+
+| Statement | Label | Value |
+|---|---|---|
+| receipt | `receipt/<req_id>` | `req_id` |
+| attestation | `attest/<name>/<owner-prefix>` | 32 bits of `SHA256("lngap-names-attest" ‖ name ‖ owner)` |
+
+### `nreg:{params}` — bonded registration (hub locks the bond; user is prover; depth 1)
+
+| Leaf | Script | Timelock |
+|---|---|---|
+| `move_1` (user's claim) | `<d_receipt> OP_CLTV OP_DROP [CSV tsd] 2-of-2-verify, reveal(move 1b, state 1b, code 2b), expect_uint(receipt key, req_id), OP_1` | CLTV `d_receipt` (D3) |
+| `disprove_attested` | `<hub.payment> OP_CHECKSIGVERIFY expect_uint(attest key, attest id) OP_1` — witness: `sig_hub`, the 32 attestation preimages | — |
+| `disprove_state_mismatch` | new state ≠ claimed | — |
+| `disprove_code_mismatch` | code ≠ BondToUser | — |
+| `split_BondToUser` | CSV Δ+Δ' (favours the prover) | CSV 12 |
+| `split_BondToHub` | CSV Δ | CSV 6 |
+| `settle` (on `C`) | CLTV `d_receipt + 20`, CSV tsd: bond back to the hub | |
+
+### `attestpay:{params}` — payment gated on an attestation (depth 1)
+
+| Leaf | Script |
+|---|---|
+| `move_1` (prover presents) | `[CSV tsd] 2-of-2-verify, reveals, expect_uint(attest key, attest id), OP_1` |
+| `disprove_state_mismatch`, `disprove_code_mismatch` | generic consistency only (D6) |
+| `split_Paid` / `split_Refund` | CSV Δ+Δ' / Δ |
+| `settle` | CLTV `h_sale`: refund the locker |
+
+### Anchor chain
+
+Anchor output = P2TR whose output key is the hub's anchor key tweaked (BIP-341
+tap tweak) with the registry Merkle root. Spent key-path with the tweaked
+key; one input, one output, 1000 sat fee. The auditor recomputes the root of
+the published ledger as of each anchor's height and checks the tweak and that
+each anchor spends the previous one.

@@ -319,8 +319,10 @@ dependencies = [
  "lngap-channel",
  "lngap-contract",
  "lngap-lamport",
+ "lngap-names",
  "lngap-party",
  "lngap-tictactoe",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]
@@ -336,6 +338,23 @@ dependencies = [
  "rand",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "lngap-names"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-lamport",
+ "lngap-party",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

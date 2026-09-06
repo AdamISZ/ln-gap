@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("===== {} — {}", sc.id, sc.title);
         match (sc.run)() {
             Ok(r) => {
-                writeln!(out, "## {} — {}\n\n**Expected:** {}\n\n**Final balances:** user {} sat, hub {} sat\n", r.id, r.title, r.expected, r.balances[0].to_sat(), r.balances[1].to_sat())?;
+                writeln!(out, "## {} — {}\n\n**Expected:** {}\n\n**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user {} sat, hub {} sat\n", r.id, r.title, r.expected, r.balances[0].to_sat(), r.balances[1].to_sat())?;
                 writeln!(out, "| block | tx | broadcast by | txid |\n|---|---|---|---|")?;
                 for (h, role, txid, by) in &r.txs {
                     writeln!(out, "| {h} | `{role}` | {by} | `{txid}` |")?;

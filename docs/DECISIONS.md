@@ -99,8 +99,38 @@ A party force-closes when an update it is waiting on has stalled for
 and the deadline has passed. Both are reactions of the watch loop, not
 harness instructions.
 
+## D14. Statements are 32-bit Lamport slots the party layer can learn
+
+Receipts and attestations are Lamport keys owned by the hub. A party keeps a
+store of statements (label → reveal) filled by messages, by drafts (an
+off-chain Move must show the extras its leaf would require), and by scanning
+every confirmed witness for preimages of keys it knows. That last channel is
+how Alice copies the attestation the hub revealed in Bob's channel (N7) or in
+its own disproof (N3).
+
+## D15. Refused valid moves go on-chain
+
+If the counterparty rejects a Move draft, the proposer force-closes and makes
+the move on-chain. Rejection is a message, not a stall, so this is explicit.
+A cheating proposer (N3) triggers the same path and loses on-chain.
+
+## D16. One registration bond covers commit and reveal
+
+The N-REG bond is opened with the commit's receipt; the attestation the hub
+must produce to reclaim it is `attest(name, owner)`, which needs the reveal
+anchored too. The reveal gets its own receipt but no second bond.
+
+## D17. Names contract ids and parameters travel in the program name
+
+`nreg:{json}` / `attestpay:{json}` carry the receipt id, the statement keys
+and deadlines, so both parties rebuild identical leaves from the name alone.
+Verbose (a few KB per contract) but unambiguous.
+
 ## TODO
 
+- **N8 / anchor verification.** Equivocation and omission are reported by
+  the off-chain auditor only; enforcing them needs SPV in the dispute path
+  (plan §10).
 - **T9 / liveness rule.** Scenario T9 documents that an honest user who ignores
   a hub force-close during their own turn forfeits the stake (Settle pays R(s)
   = hub wins). Agreed as the PoC reading on 2026-09-06; revisit whether the

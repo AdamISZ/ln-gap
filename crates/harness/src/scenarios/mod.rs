@@ -2,6 +2,7 @@
 //! scenario drives a fresh harness, asserts the plan's expected outcome, and
 //! returns a report for `docs/SCENARIOS.md`.
 
+pub mod names;
 pub mod tictactoe;
 
 use anyhow::Result;
@@ -46,12 +47,14 @@ impl Report {
 /// transactions are only disproofs and sweeps.
 pub fn assert_cross_cutting(h: &Harness) {
     h.assert_signing_rule();
-    let n = h.roles_seen().len() as u64;
+    let n = h.seen.iter().filter(|s| s.by.is_some()).count() as u64;
     let u = h.balance(Role::User);
     let b = h.balance(Role::Hub);
     assert_eq!(u + b + Amount::from_sat(1_000) * n, FUNDING, "balances {u} + {b} + {n} × 1000 sat fees != funding");
 }
 
 pub fn all() -> Vec<Scenario> {
-    tictactoe::scenarios()
+    let mut v = tictactoe::scenarios();
+    v.extend(names::scenarios());
+    v
 }

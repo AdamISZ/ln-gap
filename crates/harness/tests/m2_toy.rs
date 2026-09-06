@@ -33,7 +33,7 @@ fn open(h: &mut Harness, user_bit: bool, hub_bit: bool) {
 
 #[test]
 fn c1_cooperative_flip_then_close() {
-    let mut h = Harness::new("c1", programs()).unwrap();
+    let mut h = Harness::with_programs("c1", programs()).unwrap();
     open(&mut h, true, false); // xor = 1 → hub wins
     h.settle_offchain().unwrap(); // user reveals, hub reveals, contract resolved
     let st = h.user.channel.current_state().clone();
@@ -55,7 +55,7 @@ fn c2_hub_stalls_before_moving_user_settles_by_deadline() {
     // user reveals off-chain (seq 2); hub's turn; hub goes dark and never
     // moves on-chain either. User force-closes; after the deadline Settle
     // pays R(s) = UserWins (hub forfeits).
-    let mut h = Harness::new("c2", programs()).unwrap();
+    let mut h = Harness::with_programs("c2", programs()).unwrap();
     open(&mut h, true, false);
     h.hub.faults.stop_from_seq = Some(2);
     h.hub.faults.passive_onchain = true;
@@ -83,7 +83,7 @@ fn c3_force_move_chain_on_chain() {
     // hub stops cooperating right after the contract opens (seq 1, user on
     // turn). User force-closes and reveals on-chain (Move_1); hub reveals
     // on-chain (Move_2); nobody can move further; Split pays the winner.
-    let mut h = Harness::new("c3", programs()).unwrap();
+    let mut h = Harness::with_programs("c3", programs()).unwrap();
     open(&mut h, true, true); // xor 0 → user wins
     h.hub.faults.stop_from_seq = Some(1);
     h.step_until(80, |h| h.roles_seen().iter().any(|r| r.starts_with("split_"))).unwrap();
@@ -103,7 +103,7 @@ fn c3_force_move_chain_on_chain() {
 
 #[test]
 fn c4_hub_silent_after_move_1() {
-    let mut h = Harness::new("c4", programs()).unwrap();
+    let mut h = Harness::with_programs("c4", programs()).unwrap();
     open(&mut h, false, true);
     h.hub.faults.stop_from_seq = Some(1);
     h.hub.faults.passive_onchain = true;
@@ -127,7 +127,7 @@ fn c5_hub_cheats_on_chain_and_is_disproved() {
         ("code", Arc::new(|c: &Claim| Claim { code: CoinFlip::HUB_WINS, ..c.clone() }) as Arc<dyn Fn(&Claim) -> Claim + Send + Sync>),
         ("state", Arc::new(|c: &Claim| Claim { new: vec![true, false, true, false], ..c.clone() })),
     ] {
-        let mut h = Harness::new(&format!("c5-{label}"), programs()).unwrap();
+        let mut h = Harness::with_programs(&format!("c5-{label}"), programs()).unwrap();
         open(&mut h, true, true); // honest outcome: xor 0 → user wins
         h.hub.faults.stop_from_seq = Some(1);
         h.hub.faults.cheat_move = Some(cheat);
@@ -147,7 +147,7 @@ fn c5_hub_cheats_on_chain_and_is_disproved() {
 
 #[test]
 fn c6_revoked_state_with_contract_output_is_swept() {
-    let mut h = Harness::new("c6", programs()).unwrap();
+    let mut h = Harness::with_programs("c6", programs()).unwrap();
     open(&mut h, true, false);
     h.settle_offchain().unwrap(); // through to seq 4, contract resolved: user 90k, hub 110k
     assert_eq!(h.user.channel.current_seq(), 4);

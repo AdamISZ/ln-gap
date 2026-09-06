@@ -81,6 +81,8 @@ pub struct MoveCtx<'a> {
     pub has: &'a dyn Fn(&str) -> bool,
 }
 pub type MovePolicy = Box<dyn Fn(&MoveCtx) -> Option<Vec<bool>> + Send + Sync>;
+/// Should I propose folding this contract now (e.g. a bond I no longer need)?
+pub type CancelPolicy = Box<dyn Fn(&MoveCtx) -> bool + Send + Sync>;
 
 /// What the change-acceptance policy sees for a counterparty's draft.
 pub struct ChangeCtx<'a> {
@@ -128,6 +130,7 @@ pub struct Party {
     waiting_since: Option<u32>,
     moves: HashMap<u32, VecDeque<Vec<bool>>>,
     move_policies: HashMap<u32, MovePolicy>,
+    cancel_policies: HashMap<u32, CancelPolicy>,
     change_policy: Option<ChangePolicy>,
     /// Statements held: reveals under their labels.
     reveals: HashMap<String, Reveal>,
@@ -179,6 +182,7 @@ impl Party {
             waiting_since: None,
             moves: HashMap::new(),
             move_policies: HashMap::new(),
+            cancel_policies: HashMap::new(),
             change_policy: None,
             reveals: HashMap::new(),
             watched: HashMap::new(),
@@ -304,6 +308,10 @@ impl Party {
     pub fn set_move_policy(&mut self, id: u32, p: MovePolicy) {
         self.move_policies.insert(id, p);
     }
+    /// A policy for proposing to fold contract `id` cooperatively.
+    pub fn set_cancel_policy(&mut self, id: u32, p: CancelPolicy) {
+        self.cancel_policies.insert(id, p);
+    }
     /// Policy for accepting the counterparty's drafts (default: any valid
     /// change, and Cancel only once the party on turn missed its deadline).
     pub fn set_change_policy(&mut self, p: ChangePolicy) {
@@ -381,6 +389,13 @@ impl Party {
             (i.id, i.turn(), i.state.clone(), i.deadline)
         }).collect();
         for (id, turn, state, deadline) in contracts {
+            if let Some(p) = self.cancel_policies.get(&id) {
+                let has = |l: &str| self.has_reveal(l);
+                if p(&MoveCtx { height: self.height, contract_id: id, state: &state, has: &has }) && !self.cancel_tried.contains(&id) {
+                    self.cancel_tried.insert(id);
+                    return self.propose_change(Change::Cancel { id });
+                }
+            }
             match turn {
                 Some(r) if r == self.role => {
                     if let Some(mv) = self.peek_move(id, &state) {
@@ -423,9 +438,15 @@ impl Party {
             PartyMsg::DraftKeys { seq, keys } => self.on_draft_keys(seq, keys)?,
             PartyMsg::Reject { seq, reason } => {
                 self.say(format!("draft seq {seq} rejected by counterparty: {reason}"));
+                let was_move = matches!(self.pending_change, Some((_, Change::Move { .. })));
                 self.pending_draft = None;
                 self.pending_change = None;
                 self.waiting_since = None;
+                if was_move && self.channel.closing.is_none() {
+                    // a valid move refused off-chain is enforced on-chain
+                    self.say(format!("counterparty refuses my move; force-closing at state {} to make it on-chain", self.channel.current_seq()));
+                    self.channel.force_close()?;
+                }
                 vec![]
             }
             PartyMsg::Statement { label, reveal } => {

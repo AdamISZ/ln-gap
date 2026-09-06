@@ -22,7 +22,7 @@ fn sat(n: u64) -> Amount {
 /// Fresh harness with the reference game queued: U:4 H:1 U:0 H:8 U:6 H:3 U:2.
 fn setup(label: &str) -> Result<Harness> {
     let programs: Vec<Arc<dyn Program>> = vec![Arc::new(TicTacToe)];
-    let mut h = Harness::new(label, programs)?;
+    let mut h = Harness::with_programs(label, programs)?;
     let mv = |c: u8| Contract::move_bits(&TicTacToe, &c);
     h.user.queue_moves(1, vec![mv(4), mv(0), mv(6), mv(2)]);
     h.hub.queue_moves(1, vec![mv(1), mv(8), mv(3)]);

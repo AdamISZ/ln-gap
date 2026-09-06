@@ -17,6 +17,7 @@ use lngap_party::{run_bus, PEnvelope, Party};
 use tracing::info;
 
 pub const FUNDING: Amount = Amount::from_sat(200_000);
+pub mod names_world;
 pub mod scenarios;
 
 pub const HALF: Amount = Amount::from_sat(100_000);
@@ -39,6 +40,8 @@ pub struct Harness {
     pub funding_txid: Txid,
     pub funding_height: u32,
     pub seen: Vec<SeenTx>,
+    /// Roles for transactions neither party broadcast (e.g. anchors).
+    pub external_roles: std::collections::HashMap<Txid, String>,
 }
 
 pub fn init_log() {
@@ -50,13 +53,21 @@ pub fn init_log() {
 
 impl Harness {
     /// Fresh regtest, fresh keys, one 100k/100k channel, both parties knowing `programs`.
-    pub fn new(label: &str, programs: Vec<Arc<dyn Program>>) -> Result<Harness> {
+    pub fn new(label: &str, programs: ProgramRegistry) -> Result<Harness> {
         init_log();
         let rt = Arc::new(Regtest::start()?);
         Harness::with_regtest(rt, label, programs)
     }
 
-    pub fn with_regtest(rt: Arc<Regtest>, label: &str, programs: Vec<Arc<dyn Program>>) -> Result<Harness> {
+    pub fn with_programs(label: &str, programs: Vec<Arc<dyn Program>>) -> Result<Harness> {
+        let mut reg = ProgramRegistry::new();
+        for p in programs {
+            reg.register(p);
+        }
+        Harness::new(label, reg)
+    }
+
+    pub fn with_regtest(rt: Arc<Regtest>, label: &str, reg: ProgramRegistry) -> Result<Harness> {
         let params = ChannelParams::regtest(FUNDING);
         let user_seed = Seed::from_label(&format!("{label}/user"));
         let hub_seed = Seed::from_label(&format!("{label}/hub"));
@@ -73,10 +84,6 @@ impl Harness {
         let chain: Arc<dyn Chain> = rt.clone();
         let user_rev = [user_keys.revocation_hash(0), user_keys.revocation_hash(1)];
         let hub_rev = [hub_keys.revocation_hash(0), hub_keys.revocation_hash(1)];
-        let mut reg = ProgramRegistry::new();
-        for p in programs {
-            reg.register(p);
-        }
         let mut user = Party::new(Role::User, user_seed, pubs[1].clone(), params, funding.clone(), initial.clone(), hub_rev, chain.clone(), reg.clone())?;
         let mut hub = Party::new(Role::Hub, hub_seed, pubs[0].clone(), params, funding, initial, user_rev, chain, reg)?;
 
@@ -93,7 +100,7 @@ impl Harness {
         hub.set_height(h);
         info!(%funding_txid, funding_height, "channel funded");
         let seen = vec![SeenTx { height: funding_height, txid: funding_txid, role: "funding".into(), by: None }];
-        Ok(Harness { rt, user, hub, funding_txid, funding_height, seen })
+        Ok(Harness { rt, user, hub, funding_txid, funding_height, seen, external_roles: Default::default() })
     }
 
     pub fn height(&self) -> u32 {
@@ -135,11 +142,18 @@ impl Harness {
         self.rt.mine(1)?;
         let h = self.height();
         let txs = self.rt.block_txs(h)?;
-        self.record_block(h, &txs);
-        self.user.on_block(h, &txs)?;
-        self.hub.on_block(h, &txs)?;
+        self.deliver(h, &txs)?;
         self.settle_offchain()?;
         Ok(h)
+    }
+
+    /// Deliver an already-mined block to both parties (multi-channel worlds
+    /// mine once and deliver to every channel).
+    pub fn deliver(&mut self, h: u32, txs: &[Transaction]) -> Result<()> {
+        self.record_block(h, txs);
+        self.user.on_block(h, txs)?;
+        self.hub.on_block(h, txs)?;
+        Ok(())
     }
 
     pub fn steps(&mut self, n: u32) -> Result<()> {
@@ -167,7 +181,8 @@ impl Harness {
             let by = self.user.channel.broadcasts.iter().map(|b| (b, Role::User)).chain(self.hub.channel.broadcasts.iter().map(|b| (b, Role::Hub))).find(|(b, _)| b.txid == txid);
             let (role, by) = match by {
                 Some((b, r)) => (b.role.clone(), Some(r)),
-                None => ("external".to_string(), None),
+                None if self.external_roles.contains_key(&txid) => (self.external_roles[&txid].clone(), None),
+                None => continue,
             };
             info!(height, %txid, role, ?by, "confirmed");
             self.seen.push(SeenTx { height, txid, role, by });
@@ -208,7 +223,7 @@ impl Harness {
             let r = s.role.as_str();
             let single = r.starts_with("disprove_") || r.starts_with("revoke_sweep") || r.starts_with("claim_to_");
             let dual = r.starts_with("commitment_") || r == "settle" || r.starts_with("move_") || r.starts_with("split_") || r == "coop_close";
-            assert!(single || dual || r == "funding" || r == "external", "unexpected tx role {r}");
+            assert!(single || dual || r == "funding" || r == "anchor", "unexpected tx role {r}");
         }
     }
 }
