@@ -3,3 +3,4 @@
 **/*.rs.bk
 /regtest-data/
 /tools/explorer/node_modules/
+/tools/scriptgen/target/

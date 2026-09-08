@@ -289,3 +289,27 @@ impl Regtest {
         Ok(Amount::from_btc(btc)?)
     }
 }
+
+impl Regtest {
+    /// Mine one block containing exactly `txs` (plus the coinbase), bypassing
+    /// the mempool: the regtest stand-in for a miner including a transaction
+    /// directly. Consensus rules still apply; an invalid tx makes the call
+    /// fail with the validation error. Returns the block height.
+    pub fn mine_with(&self, txs: &[Transaction]) -> Result<u32> {
+        let raw: Vec<serde_json::Value> = txs.iter().map(|t| serde_json::Value::String(serialize_hex(t))).collect();
+        let v: serde_json::Value = self
+            .rpc
+            .call("generateblock", &[serde_json::Value::String(self.mine_to.to_string()), serde_json::Value::Array(raw)])
+            .context("generateblock")?;
+        let bh: BlockHash = v.get("hash").and_then(|h| h.as_str()).ok_or_else(|| anyhow!("generateblock: no hash"))?.parse()?;
+        let info: serde_json::Value = self.rpc.call("getblockheader", &[serde_json::Value::String(bh.to_string())])?;
+        Ok(info.get("height").and_then(|h| h.as_u64()).map(|h| h as u32).ok_or_else(|| anyhow!("no height"))?)
+    }
+
+    /// Consensus-check a transaction by attempting to mine it into a block
+    /// on a throwaway basis is not possible without side effects, so this
+    /// simply reports whether `generateblock` accepts it (and mines it if so).
+    pub fn mine_with_check(&self, tx: &Transaction) -> std::result::Result<u32, String> {
+        self.mine_with(std::slice::from_ref(tx)).map_err(|e| format!("{e:#}"))
+    }
+}

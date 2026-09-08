@@ -1,0 +1,14 @@
+# Standalone generator (own workspace, not part of the LN-GAP workspace):
+# builds the BitVM project's Script hash gadgets once and dumps them as hex
+# into crates/contract/scripts/. Run: cd tools/scriptgen && cargo run --release
+[package]
+name = "lngap-scriptgen"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+bitvm = { git = "https://github.com/BitVM/BitVM", rev = "7d1ca3660cac08aab62e76f3aa4daec0d7403ecc" }
+bitcoin = { version = "0.32", features = ["rand-std"] }
+

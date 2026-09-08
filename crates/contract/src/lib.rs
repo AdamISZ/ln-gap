@@ -24,6 +24,7 @@ pub use instance::{ContractInstance, DepthKeys, InstanceSpec};
 pub use leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx, PriorState};
 pub use registry::ProgramRegistry;
 pub mod registry;
+pub mod script_hash;
 
 /// A statement someone else committed to with a Lamport key: the leaf checks
 /// `expect_uint(pk, value)`, and whoever spends supplies the preimages,
