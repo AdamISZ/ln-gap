@@ -20,6 +20,7 @@ const SHA256_80: &[u8] = include_bytes!("../scripts/sha256_80.bin");
 const SHA256_U4_32: &[u8] = include_bytes!("../scripts/sha256_u4_32.bin");
 const SHA256_U4_64: &[u8] = include_bytes!("../scripts/sha256_u4_64.bin");
 const SHA256_U4_80: &[u8] = include_bytes!("../scripts/sha256_u4_80.bin");
+const SHA256_COMPRESS_U4: &[u8] = include_bytes!("../scripts/sha256_compress_u4.bin");
 
 /// The SHA-256 script for an `n`-byte message (`n` ∈ {32, 64, 80}).
 pub fn sha256_script(n: usize) -> ScriptBuf {
@@ -109,6 +110,41 @@ pub fn message_witness_u4(msg: &[u8]) -> Vec<Vec<u8>> {
 pub fn sha256_u4_equals(b: Builder, n: usize, digest: &[u8; 32]) -> Builder {
     let mut b = append(b, &sha256_u4_script(n));
     for nib in nibbles(digest).iter().rev() {
+        b = push_scriptnum(b, *nib).push_opcode(OP_EQUALVERIFY);
+    }
+    b.push_opcode(OP_PUSHNUM_1)
+}
+
+// ----- one compression: midstate in, midstate out (tools/scriptgen/src/compress.rs) -----
+//
+// Stack in (consumption order): 64 state nibbles with the last nibble first
+// (state = 8 big-endian words), then 128 block nibbles with the last first.
+// Stack out: 64 nibbles of the new state, last nibble on top.
+
+pub fn sha256_compress_script() -> ScriptBuf {
+    ScriptBuf::from_bytes(SHA256_COMPRESS_U4.to_vec())
+}
+
+/// A midstate as 32 bytes (big-endian words).
+pub fn state_bytes(state: &[u32; 8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (i, w) in state.iter().enumerate() {
+        out[4 * i..4 * i + 4].copy_from_slice(&w.to_be_bytes());
+    }
+    out
+}
+
+/// Witness elements for one compression, consumption order.
+pub fn compress_witness(state: &[u32; 8], block: &[u8; 64]) -> Vec<Vec<u8>> {
+    let mut v = message_witness_u4(&state_bytes(state));
+    v.extend(message_witness_u4(block));
+    v
+}
+
+/// Append the compression and a check that the new state equals `expected`.
+pub fn sha256_compress_equals(b: Builder, expected: &[u32; 8]) -> Builder {
+    let mut b = append(b, &sha256_compress_script());
+    for nib in nibbles(&state_bytes(expected)).iter().rev() {
         b = push_scriptnum(b, *nib).push_opcode(OP_EQUALVERIFY);
     }
     b.push_opcode(OP_PUSHNUM_1)

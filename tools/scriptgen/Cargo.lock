@@ -894,7 +894,10 @@ name = "lngap-scriptgen"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "bitcoin-script",
  "bitvm",
+ "rand",
+ "sha2",
 ]
 
 [[package]]

@@ -2,6 +2,7 @@
 //! files, and print their sizes.
 //! SHA-256 conventions (bitvm/src/hash/sha256.rs): input = `n` single-byte
 //! script numbers, last byte pushed first; output = 32 single-byte elements.
+mod compress;
 use bitvm::hash::sha256::sha256;
 use std::path::PathBuf;
 
@@ -23,5 +24,15 @@ fn main() {
     for n in [32usize, 64, 80] {
         let s = bitvm::hash::blake3::blake3_compute_script(n).compile();
         println!("blake3({n}): {} bytes", s.len());
+    }
+    for add in [false, true] {
+        match compress::self_test(add) {
+            Ok((len, stack)) => {
+                println!("sha256_compress_u4(add_table={add}): OK, {len} bytes, max stack {stack}");
+                let s = compress::sha256_compress_u4(add).compile();
+                std::fs::write(out.join(format!("sha256_compress_u4{}.bin", if add { "_addtable" } else { "" })), s.as_bytes()).unwrap();
+            }
+            Err(e) => println!("sha256_compress_u4(add_table={add}): {e}"),
+        }
     }
 }
