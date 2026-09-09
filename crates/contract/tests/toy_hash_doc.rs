@@ -1,4 +1,5 @@
-//! The toy hash from docs/HASH_IN_SCRIPT.md, built opcode for opcode and run
+//! The toy hash from docs/planning/research/HASH_IN_SCRIPT.md (private planning
+//! area), built opcode for opcode and run
 //! on regtest. If this test passes, the listing in the doc is correct.
 //!
 //! ToyHash over 2-bit digits ("crumbs"): state (a, b), block (m0, m1),

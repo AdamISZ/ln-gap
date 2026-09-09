@@ -165,4 +165,4 @@ The unrolled-hash-with-nibble-tables technique is the BitVM project's
 reasoning written up by BitVMX. Lamport/Winternitz-carried state between
 scripts goes back to Rubin's "Script state from Lamport signatures"
 (2021). `OP_PICK` tables predate all of it. See
-`docs/planning/PRIOR_ART_BISECTION.md` for citations.
+`PRIOR_ART_BISECTION.md` in this folder for citations.
