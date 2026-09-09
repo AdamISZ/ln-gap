@@ -109,7 +109,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             }
             let state = p.initial_bits();
             let m = p.max_depth_from_bits(&state)?;
-            let has_claim = p.claim().is_some();
+            let has_claim = (1..=m).any(|d| p.claim(d).is_some());
             spec.contracts.push(InstanceSpec {
                 id: *id,
                 program: program.clone(),
@@ -131,7 +131,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             c.deadline = *deadline;
             c.keys_seq = seq;
             c.keys = vec![None; m as usize];
-            c.challenger_keys = if p.claim().is_some() { vec![None; m as usize] } else { vec![] };
+            c.challenger_keys = if (1..=m).any(|d| p.claim(d).is_some()) { vec![None; m as usize] } else { vec![] };
         }
         Change::Resolve { id } | Change::Cancel { id } => {
             let pos = spec.contracts.iter().position(|c| c.id == *id).ok_or_else(|| anyhow!("no contract {id}"))?;
@@ -163,29 +163,36 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
     let mut filled = MyKeys::default();
     for c in &mut spec.contracts {
         let p = programs.resolve(&c.program)?;
-        let claim = p.claim();
+        let has_claim = (1..=c.keys.len() as u32).any(|d| p.claim(d).is_some());
         let mut prover = p.turn_bits(&c.state)?;
         for i in 0..c.keys.len() {
             let d = i as u32 + 1;
             let pr = prover.ok_or_else(|| anyhow!("depth {d} beyond terminal"))?;
+            let claim = p.claim(d);
             if pr == me && c.keys[i].is_none() {
                 let claim_keys = match &claim {
-                    Some(spec) => Some(ClaimKeys {
-                        end: ks.generate_wots(&end_label(c.id, c.keys_seq, d), 32)?,
-                        rounds: (1..=spec.rounds())
-                            .map(|r| (0..spec.k - 1).map(|t| ks.generate_wots(&round_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
-                            .collect::<Result<Vec<_>>>()?,
-                        inner: if spec.inner {
-                            Some(InnerKeys {
-                                sched: (16..inner::ROUNDS).map(|i| ks.generate_wots(&inner::sched_label(c.id, c.keys_seq, d, i), 4)).collect::<Result<Vec<_>>>()?,
-                                states: (1..=inner::SEARCH.rounds())
-                                    .map(|r| (0..inner::INNER_K - 1).map(|t| ks.generate_wots(&inner::inner_state_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
-                                    .collect::<Result<Vec<_>>>()?,
-                            })
-                        } else {
-                            None
-                        },
-                    }),
+                    Some(spec) => {
+                        let nb = spec.wots_bytes();
+                        Some(ClaimKeys {
+                            end: ks.generate_wots(&end_label(c.id, c.keys_seq, d), nb)?,
+                            rounds: (1..=spec.rounds())
+                                .map(|r| (0..spec.k - 1).map(|t| ks.generate_wots(&round_label(c.id, c.keys_seq, d, r, t), nb)).collect::<Result<Vec<_>>>())
+                                .collect::<Result<Vec<_>>>()?,
+                            inner: if spec.inner {
+                                Some(InnerKeys {
+                                    re_cur: ks.generate_wots(&inner::re_cur_label(c.id, c.keys_seq, d), nb)?,
+                                    re_next: ks.generate_wots(&inner::re_next_label(c.id, c.keys_seq, d), nb)?,
+                                    block: (0..16).map(|j| ks.generate_wots(&inner::block_label(c.id, c.keys_seq, d, j), 4)).collect::<Result<Vec<_>>>()?,
+                                    sched: (16..inner::ROUNDS).map(|i| ks.generate_wots(&inner::sched_label(c.id, c.keys_seq, d, i), 4)).collect::<Result<Vec<_>>>()?,
+                                    states: (1..=inner::SEARCH.rounds())
+                                        .map(|r| (0..inner::INNER_K - 1).map(|t| ks.generate_wots(&inner::inner_state_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
+                                        .collect::<Result<Vec<_>>>()?,
+                                })
+                            } else {
+                                None
+                            },
+                        })
+                    }
                     None => None,
                 };
                 let k = DepthKeys {
@@ -198,19 +205,20 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
                 filled.prover.push((c.id, d, k.clone()));
                 c.keys[i] = Some(k);
             }
-            if let Some(spec) = &claim {
-                if pr != me && c.challenger_keys[i].is_none() {
-                    let ck = ChallengerKeys {
+            if has_claim && pr != me && c.challenger_keys[i].is_none() {
+                let ck = match &claim {
+                    Some(spec) => ChallengerKeys {
                         indices: (1..=spec.rounds()).map(|r| ks.generate(&index_label(c.id, c.keys_seq, d, r), spec.index_bits())).collect::<Result<Vec<_>>>()?,
                         inner_indices: if spec.inner {
                             (1..=inner::SEARCH.rounds()).map(|r| ks.generate(&inner::inner_index_label(c.id, c.keys_seq, d, r), inner::SEARCH.index_bits())).collect::<Result<Vec<_>>>()?
                         } else {
                             vec![]
                         },
-                    };
-                    filled.challenger.push((c.id, d, ck.clone()));
-                    c.challenger_keys[i] = Some(ck);
-                }
+                    },
+                    None => ChallengerKeys { indices: vec![], inner_indices: vec![] },
+                };
+                filled.challenger.push((c.id, d, ck.clone()));
+                c.challenger_keys[i] = Some(ck);
             }
             prover = Some(pr.other());
         }

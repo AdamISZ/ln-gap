@@ -47,7 +47,7 @@ fn sizes(h: &Harness) -> String {
     h.seen.iter().map(|s| format!("{} {} vB", s.role, s.vsize)).collect::<Vec<_>>().join("; ")
 }
 
-const INNER_CHAIN: [&str; 5] = ["p_sched", "p_inner_1", "q_inner_1", "p_inner_2", "q_inner_2"];
+const INNER_CHAIN: [&str; 7] = ["p_re_cur", "p_re_next", "p_sched", "p_inner_1", "q_inner_1", "p_inner_2", "q_inner_2"];
 
 #[test]
 fn honest_claim_is_paid_without_dispute() {
@@ -64,7 +64,7 @@ fn honest_claim_is_paid_without_dispute() {
 #[test]
 fn false_end_state_is_disproved_at_round_63() {
     let mut h = setup("p2-badend");
-    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32; 8]| { let mut t = *s; t[0] ^= 1; t }));
+    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32]| { let mut t = s.to_vec(); t[0] ^= 1; t }));
     h.step_until(160, |h| roles(h).iter().any(|r| r.starts_with("round_"))).unwrap();
     h.steps(2).unwrap();
     let r = roles(&h);
@@ -77,7 +77,7 @@ fn false_end_state_is_disproved_at_round_63() {
     assert_eq!(h.balance(Role::Hub), sat(50_000 - K) + out);
     // contract 100k minus move, dispute, 4 level-1 rounds, 5 inner-chain txs (three of them
     // paying ~2.4k by size), and the size-based fee of the round tx: well under 10k in all
-    assert!(out > sat(100_000 - 20 * K) && out < sat(100_000 - 11 * K), "fees along the whole dispute are small: {out}");
+    assert!(out > sat(100_000 - 25 * K) && out < sat(100_000 - 13 * K), "fees along the whole dispute are small: {out}");
     assert_eq!(h.balance(Role::User), sat(50_000 - K - K));
     println!("{}", h.narrative());
     println!("SIZES {}", sizes(&h));
@@ -86,7 +86,7 @@ fn false_end_state_is_disproved_at_round_63() {
 #[test]
 fn false_schedule_word_is_disproved() {
     let mut h = setup("p2-badsched");
-    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32; 8]| { let mut t = *s; t[2] ^= 0x10; t }));
+    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32]| { let mut t = s.to_vec(); t[2] ^= 0x10; t }));
     h.user.faults.cheat_schedule = Some(Arc::new(|i: u32, w: u32| if i == 40 { w ^ 0x0100_0000 } else { w }));
     h.step_until(160, |h| roles(h).iter().any(|r| r.starts_with("sched_"))).unwrap();
     h.steps(2).unwrap();
@@ -105,10 +105,11 @@ fn false_inner_state_is_disproved_mid_compression() {
     // propagates; it claims the resulting end state (so level 1 isolates step 15)
     let bad = |i: u32, s: &[u32; 8]| { let mut t = *s; if i == 30 { t[6] ^= 0x8000; } t };
     let prog = HashChain::standard();
-    let states = prog.spec.states();
-    let cheated_end = round_states(&states[15], &schedule(&prog.spec.blocks[15]), Some(&bad))[64];
+    let states = prog.spec.states(&vec![]);
+    let s15: [u32; 8] = states[15][..].try_into().unwrap();
+    let cheated_end = round_states(&s15, &schedule(&prog.block()), Some(&bad))[64].to_vec();
     assert_ne!(cheated_end, states[16]);
-    h.user.faults.cheat_claim = Some(Arc::new(move |_s: &[u32; 8]| cheated_end));
+    h.user.faults.cheat_claim = Some(Arc::new(move |_s: &[u32]| cheated_end.clone()));
     h.user.faults.cheat_inner = Some(Arc::new(bad));
     h.step_until(160, |h| roles(h).iter().any(|r| r.starts_with("round_"))).unwrap();
     h.steps(2).unwrap();
@@ -123,13 +124,13 @@ fn false_inner_state_is_disproved_mid_compression() {
 #[test]
 fn prover_silent_at_inner_level_is_timed_out() {
     let mut h = setup("p2-silentinner");
-    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32; 8]| { let mut t = *s; t[7] ^= 2; t }));
+    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32]| { let mut t = s.to_vec(); t[7] ^= 2; t }));
     h.user.faults.silent_in_inner = true;
     h.step_until(160, |h| roles(h).iter().any(|r| r == "dispute_timeout")).unwrap();
     h.steps(2).unwrap();
     let r = roles(&h);
     assert_eq!(r.iter().filter(|x| x.starts_with("q_round_")).count(), 2, "{r:?}");
-    assert!(!r.contains(&"p_sched".to_string()), "{r:?}");
+    assert!(!r.contains(&"p_re_cur".to_string()), "{r:?}");
     let q = h.seen.iter().find(|s| s.role == "q_round_2").unwrap().height;
     let t = h.seen.iter().find(|s| s.role == "dispute_timeout").unwrap().height;
     assert_eq!(t - q, u32::from(h.params().delta));
@@ -150,9 +151,9 @@ fn griefing_challenger_plays_out_to_the_round_and_loses() {
     }
     assert!(!r.iter().any(|x| x.starts_with("round_") || x.starts_with("sched_")), "nothing can be disproved: {r:?}");
     assert!(h.hub.narrative().iter().any(|l| l.contains("isolated round 63 is correct")));
-    // user keeps the contract: 100k - move - dispute - 4 rounds - 5 inner txs (size-based fees) - timeout
+    // user keeps the contract: 100k - move - dispute - 4 rounds - 7 inner txs (size-based fees) - timeout
     let out = output_of(&h, |r| r == "dispute_timeout");
-    assert!(out > sat(100_000 - 20 * K) && out < sat(100_000 - 12 * K), "{out}");
+    assert!(out > sat(100_000 - 25 * K) && out < sat(100_000 - 14 * K), "{out}");
     assert_eq!(h.balance(Role::User), sat(50_000 - K - K) + out);
     println!("SIZES {}", sizes(&h));
     println!("{}", h.narrative());

@@ -8,8 +8,10 @@
 //! disprove any inconsistency in one transaction.
 
 pub mod claim;
+pub mod flat;
 pub mod inner;
 pub mod instance;
+pub mod simple;
 pub mod leaves;
 pub mod onchain;
 pub mod testing;
@@ -22,7 +24,7 @@ use bitcoin::Amount;
 use lngap_channel::Role;
 use serde::{Deserialize, Serialize};
 
-pub use claim::{ChallengerKeys, ClaimKeys, ClaimSpec};
+pub use claim::{ChallengerKeys, ClaimData, ClaimKeys, ClaimSpec};
 pub use instance::{ContractInstance, DepthKeys, InstanceSpec};
 pub use leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx, PriorState};
 pub use registry::ProgramRegistry;
@@ -130,9 +132,15 @@ pub trait Contract: Send + Sync + Debug + 'static {
         MoveExtras::default()
     }
 
-    /// A bisection-verified claim the prover's Move commits (see `claim`).
-    fn claim(&self) -> Option<claim::ClaimSpec> {
+    /// A bisection-verified claim the prover's Move at `depth` commits (see `claim`).
+    fn claim(&self, depth: u32) -> Option<claim::ClaimSpec> {
+        let _ = depth;
         None
+    }
+    /// The honest prover data for the claim's load steps at `depth`.
+    fn claim_data(&self, depth: u32) -> claim::ClaimData {
+        let _ = depth;
+        vec![]
     }
 
     fn describe_state(&self, s: &Self::State) -> String {
@@ -156,7 +164,8 @@ pub trait Program: Send + Sync + Debug {
     fn max_depth_from_bits(&self, s: &[bool]) -> Result<u32>;
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec>;
     fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras;
-    fn claim(&self) -> Option<claim::ClaimSpec>;
+    fn claim(&self, depth: u32) -> Option<claim::ClaimSpec>;
+    fn claim_data(&self, depth: u32) -> claim::ClaimData;
     fn describe_state_bits(&self, s: &[bool]) -> String;
     fn describe_move_bits(&self, m: &[bool]) -> String;
 
@@ -205,8 +214,11 @@ impl<C: Contract> Program for C {
     fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras {
         Contract::move_extras(self, depth, prover)
     }
-    fn claim(&self) -> Option<claim::ClaimSpec> {
-        Contract::claim(self)
+    fn claim(&self, depth: u32) -> Option<claim::ClaimSpec> {
+        Contract::claim(self, depth)
+    }
+    fn claim_data(&self, depth: u32) -> claim::ClaimData {
+        Contract::claim_data(self, depth)
     }
     fn describe_state_bits(&self, s: &[bool]) -> String {
         match self.state_from_bits(s) {

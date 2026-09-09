@@ -190,13 +190,19 @@ impl HashChain {
     }
     /// The same chain with the phase-1 compression-level terminal leaf.
     pub fn flat() -> HashChain {
-        let start = [0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+        use crate::claim::{Init, Src, Step};
+        let start = crate::claim::IV.to_vec();
         let block: [u8; 64] = core::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(3));
-        HashChain { spec: crate::claim::ClaimSpec { n_steps: 16, k: 4, start, blocks: vec![block; 16], inner: false } }
+        let words: [Src; 16] = core::array::from_fn(|j| Src::Const(u32::from_be_bytes(block[4 * j..4 * j + 4].try_into().unwrap())));
+        HashChain { spec: crate::claim::ClaimSpec { n_words: 8, start, steps: vec![Step::compress("compress", Init::D, words); 16], k: 4, inner: false } }
+    }
+    /// The constant block.
+    pub fn block(&self) -> [u8; 64] {
+        crate::flat::flat_block(&self.spec.steps[0])
     }
     /// The honest end state.
-    pub fn end_state(&self) -> [u32; 8] {
-        *self.spec.states().last().unwrap()
+    pub fn end_state(&self) -> Vec<u32> {
+        self.spec.states(&vec![]).last().unwrap().clone()
     }
 }
 
@@ -248,8 +254,8 @@ impl Contract for HashChain {
         ensure!(b.len() == 1);
         Ok(b[0])
     }
-    fn claim(&self) -> Option<crate::claim::ClaimSpec> {
-        Some(self.spec.clone())
+    fn claim(&self, depth: u32) -> Option<crate::claim::ClaimSpec> {
+        (depth == 1).then(|| self.spec.clone())
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
         vec![

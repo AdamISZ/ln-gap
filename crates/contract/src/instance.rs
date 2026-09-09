@@ -93,22 +93,32 @@ impl ContractInstance {
         ensure!(state.len() == program.n_state_bits(), "state has {} bits, program wants {}", state.len(), program.n_state_bits());
         let m = program.max_depth_from_bits(&state)? as usize;
         ensure!(keys.len() == m, "{} depth keys but M = {m}", keys.len());
-        let claim = program.claim();
-        if let Some(spec) = &claim {
+        let m = keys.len();
+        let has_claim = (1..=m as u32).any(|d| program.claim(d).is_some());
+        if has_claim {
             ensure!(challenger_keys.len() == m, "{} challenger key sets but M = {m}", challenger_keys.len());
-            let rounds = spec.rounds() as usize;
             for (i, (k, ck)) in keys.iter().zip(&challenger_keys).enumerate() {
-                let c = k.claim.as_ref().ok_or_else(|| anyhow!("depth {}: prover claim keys missing", i + 1))?;
-                ensure!(c.rounds.len() == rounds && c.rounds.iter().all(|r| r.len() as u32 == spec.k - 1), "depth {}: round keys", i + 1);
-                ensure!(ck.indices.len() == rounds && ck.indices.iter().all(|pk| pk.n_bits() == spec.index_bits()), "depth {}: index keys", i + 1);
+                let d = i as u32 + 1;
+                let Some(spec) = program.claim(d) else {
+                    ensure!(k.claim.is_none() && ck.indices.is_empty(), "depth {d}: claim keys without a claim");
+                    continue;
+                };
+                let rounds = spec.rounds() as usize;
+                let c = k.claim.as_ref().ok_or_else(|| anyhow!("depth {d}: prover claim keys missing"))?;
+                let nb = spec.wots_bytes() * 2;
+                ensure!(c.end.params.message_digits == nb, "depth {d}: end key size");
+                ensure!(c.rounds.len() == rounds && c.rounds.iter().all(|r| r.len() as u32 == spec.k - 1 && r.iter().all(|pk| pk.params.message_digits == nb)), "depth {d}: round keys");
+                ensure!(ck.indices.len() == rounds && ck.indices.iter().all(|pk| pk.n_bits() == spec.index_bits()), "depth {d}: index keys");
                 if spec.inner {
-                    let ik = c.inner.as_ref().ok_or_else(|| anyhow!("depth {}: inner keys missing", i + 1))?;
+                    let ik = c.inner.as_ref().ok_or_else(|| anyhow!("depth {d}: inner keys missing"))?;
                     let ir = crate::inner::SEARCH.rounds() as usize;
-                    ensure!(ik.sched.len() as u32 == crate::inner::ROUNDS - 16, "depth {}: schedule keys", i + 1);
-                    ensure!(ik.states.len() == ir && ik.states.iter().all(|r| r.len() as u32 == crate::inner::INNER_K - 1), "depth {}: inner state keys", i + 1);
-                    ensure!(ck.inner_indices.len() == ir && ck.inner_indices.iter().all(|pk| pk.n_bits() == crate::inner::SEARCH.index_bits()), "depth {}: inner index keys", i + 1);
+                    ensure!(ik.re_cur.params.message_digits == nb && ik.re_next.params.message_digits == nb, "depth {d}: re-commitment keys");
+                    ensure!(ik.block.len() == 16, "depth {d}: block keys");
+                    ensure!(ik.sched.len() as u32 == crate::inner::ROUNDS - 16, "depth {d}: schedule keys");
+                    ensure!(ik.states.len() == ir && ik.states.iter().all(|r| r.len() as u32 == crate::inner::INNER_K - 1), "depth {d}: inner state keys");
+                    ensure!(ck.inner_indices.len() == ir && ck.inner_indices.iter().all(|pk| pk.n_bits() == crate::inner::SEARCH.index_bits()), "depth {d}: inner index keys");
                 } else {
-                    ensure!(c.inner.is_none() && ck.inner_indices.is_empty(), "depth {}: inner keys on a flat claim", i + 1);
+                    ensure!(c.inner.is_none() && ck.inner_indices.is_empty(), "depth {d}: inner keys on a flat claim");
                 }
             }
         } else {
@@ -126,8 +136,12 @@ impl ContractInstance {
         Ok(ContractInstance { id, program, value, state, deadline, keys_seq, keys, challenger_keys })
     }
 
-    pub fn claim_spec(&self) -> Option<ClaimSpec> {
-        self.program.claim()
+    pub fn claim_spec(&self, depth: u32) -> Option<ClaimSpec> {
+        self.program.claim(depth)
+    }
+    /// Does any depth carry a claim?
+    pub fn has_claim(&self) -> bool {
+        (1..=self.max_depth()).any(|d| self.program.claim(d).is_some())
     }
     pub fn claim_keys(&self, depth: u32) -> Option<&ClaimKeys> {
         self.keys[depth as usize - 1].claim.as_ref()
@@ -137,7 +151,7 @@ impl ContractInstance {
     }
     /// The trees of the dispute chain at `depth`: `D_0, R_1, R_1', …, R_R'`.
     pub fn dispute_trees(&self, ctx: &CommitCtx, depth: u32) -> Result<Vec<TapTree>> {
-        let spec = self.claim_spec().ok_or_else(|| anyhow!("no claim"))?;
+        let spec = self.claim_spec(depth).ok_or_else(|| anyhow!("no claim at depth {depth}"))?;
         crate::claim::dispute_trees(ctx, self.prover_at(depth), self.claim_keys(depth).unwrap(), self.challenger_keys(depth).unwrap(), &spec)
     }
 
@@ -215,7 +229,7 @@ impl ContractInstance {
             let ex = self.program.move_extras(depth + 1, nk.prover);
             leaves.push(move_leaf(ctx, depth + 1, nk.prover, &nk.mv, &nk.state, &nk.code, &ex, nk.claim.as_ref().map(|c| &c.end)));
         }
-        if self.claim_spec().is_some() {
+        if self.claim_spec(depth).is_some() {
             leaves.push(dispute_leaf(ctx));
         }
         for o in self.program.outcomes() {
@@ -300,7 +314,7 @@ impl ContractOutput for ContractInstance {
                 let split_tx = build_spend(c_d, &tree_d.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, v_d - fee));
                 out.push(PresignedTx::new(format!("split_{d}_{}", o.name), split_tx, vec![c_d_prevout.clone()], &tree_d, &leaf, format!("split at depth {d}: {}", o.name))?);
             }
-            if let Some(spec) = self.claim_spec() {
+            if let Some(spec) = self.claim_spec(d) {
                 let chain = dispute_graph(ctx, self.prover_at(d), self.claim_keys(d).unwrap(), self.challenger_keys(d).unwrap(), &spec, &tree_d, c_d, &c_d_prevout)?;
                 for mut p in chain {
                     p.label = format!("d{d}/{}", p.label);

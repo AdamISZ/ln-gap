@@ -54,7 +54,7 @@ fn honest_claim_is_paid_without_dispute() {
 #[test]
 fn false_end_state_is_disproved_at_the_last_step() {
     let mut h = setup("p1-badend");
-    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32; 8]| { let mut t = *s; t[0] ^= 1; t }));
+    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32]| { let mut t = s.to_vec(); t[0] ^= 1; t }));
     h.step_until(120, |h| roles(h).iter().any(|r| r.starts_with("step_"))).unwrap();
     h.steps(2).unwrap();
     let r = roles(&h);
@@ -74,9 +74,9 @@ fn false_end_state_is_disproved_at_the_last_step() {
 fn false_midstate_is_disproved_mid_chain() {
     let mut h = setup("p1-badmid");
     // the prover's "computation" goes wrong from step 6 on, and it claims the end state of that computation
-    let bad = |i: u32, s: &[u32; 8]| { let mut t = *s; if i >= 6 { t[3] ^= 0x40; } t };
+    let bad = |i: u32, s: &[u32]| { let mut t = s.to_vec(); if i >= 6 { t[3] ^= 0x40; } t };
     h.user.faults.cheat_midstates = Some(Arc::new(bad));
-    h.user.faults.cheat_claim = Some(Arc::new(move |s: &[u32; 8]| bad(16, s)));
+    h.user.faults.cheat_claim = Some(Arc::new(move |s: &[u32]| bad(16, s)));
     h.step_until(120, |h| roles(h).iter().any(|r| r.starts_with("step_"))).unwrap();
     h.steps(2).unwrap();
     let r = roles(&h);
@@ -89,7 +89,7 @@ fn false_midstate_is_disproved_mid_chain() {
 #[test]
 fn silent_prover_is_timed_out() {
     let mut h = setup("p1-silentp");
-    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32; 8]| { let mut t = *s; t[7] ^= 2; t }));
+    h.user.faults.cheat_claim = Some(Arc::new(|s: &[u32]| { let mut t = s.to_vec(); t[7] ^= 2; t }));
     h.user.faults.silent_in_rounds = true;
     h.step_until(80, |h| roles(h).iter().any(|r| r == "dispute_timeout")).unwrap();
     h.steps(2).unwrap();

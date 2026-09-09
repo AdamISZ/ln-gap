@@ -1,26 +1,40 @@
 //! Claims verified by bisection.
 //!
-//! A *claim* is a straight-line chain of `n` SHA-256 compression steps
-//! `s_0 → s_1 → … → s_n` where `s_0` is a constant of the contract, each
-//! step's 64-byte block is a constant of the contract (phase 1; later steps
-//! take prover-committed inputs), and the prover commits `s_n` in its Move
-//! with a Winternitz key. The challenger may dispute; rounds of branching
-//! factor `k` isolate one step, and a terminal leaf recomputes it.
+//! A *claim* is a straight-line program over a register file of `n_words`
+//! 32-bit words: a constant start state and a list of steps, each either a
+//! SHA-256 compression (init from the IV or the digest register `D`; block
+//! words from constants, registers, or the prover's *data* for that step;
+//! output to `D`; optional predicates over the registers and block words,
+//! and copies of block words into registers) or a *simple* step
+//! (predicates over the registers, register-to-register copies). Prover
+//! data (headers, Merkle siblings, transaction bytes) only ever enters as
+//! block words, which the inner chain commits per word. The prover commits
+//! the end state in its Move with a Winternitz key. The challenger may
+//! dispute; level-1 rounds of branching factor `k` isolate one step over
+//! full register-file commitments, then:
 //!
-//! Graph off `C'_d` (P = prover at depth d, Q = challenger):
+//! - a compression step is searched further inside (`inner.rs`: schedule
+//!   words, round-level bisection, one-round terminal leaf), with its
+//!   predicates, copies and untouched registers checked by small leaves;
+//! - a simple step is disproved by one leaf (`simple.rs`).
 //!
-//! With `spec.inner` the terminal step is replaced by the inner chain of
-//! `inner.rs` (schedule words, then round-level bisection).
+//! Sizes: a state commitment is `2 (8 n_words + 3)` witness items and a
+//! leaf may verify at most two of them under the 1000-item stack limit, so
+//! `n_words ≤ 24`; with `n_words > 8` use `k = 2` (one state per round).
 //!
 //! ```text
 //! C'_d ─ dispute (2-of-2, Q broadcasts) → D_0
-//!   D_0     ─ p_round_1 (P commits k-1 midstates)   → R_1     | timeout: Q sweeps after Δ
-//!   R_1     ─ q_round_1 (Q commits a segment index) → R_1'    | timeout: P sweeps after Δ
-//!   R_1'    ─ p_round_2                              → R_2     | timeout: Q
+//!   D_0     ─ p_round_1 (P commits k-1 states)          → R_1     | timeout: Q sweeps after Δ
+//!   R_1     ─ q_round_1 (Q commits a segment index)     → R_1'    | timeout: P sweeps after Δ
 //!   …
-//!   R_R'    ─ step_<path> (Q proves the isolated step is wrong; no timelock)
-//!           | timeout: P sweeps after Δ (the claim stood)
+//!   R_R     ─ q_round_R        (compression step)       → inner chain
+//!           ─ q_round_R_check  (simple step)            → check chain
 //! ```
+//!
+//! Both chains start with the prover re-committing the isolated step's
+//! input and output states under path-independent keys, so that every
+//! disprove leaf is shared by all paths and only two small families of
+//! "re-commitment mismatch" leaves depend on the path.
 
 use anyhow::{ensure, Result};
 use bitcoin::opcodes::all::*;
@@ -35,25 +49,144 @@ use lngap_lamport::winternitz::{WotsExt, WotsPublic, WotsSig};
 use lngap_lamport::{PublicKey, Reveal};
 use serde::{Deserialize, Serialize};
 
-use crate::inner::{self, InnerKeys};
+use crate::inner::InnerKeys;
 use crate::instance::key_label;
-use crate::script_hash::{append_script, nibbles as byte_nibbles, push_scriptnum, sha256_compress_script, state_bytes};
+use crate::script_hash::nibbles as byte_nibbles;
 
-/// The chain a claim asserts.
+/// SHA-256 initial state.
+pub const IV: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+
+/// A word source for a compression's block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Src {
+    Const(u32),
+    /// Register word `i` of the step's input state.
+    Reg(usize),
+    /// Word `k` of the prover's data for this step (unconstrained by any leaf).
+    Data(usize),
+}
+
+/// A compression's initial state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Init {
+    Iv,
+    /// The digest register (words 0..8).
+    D,
+}
+
+/// Copy `n` nibbles from nibble offset `src` to `dst`. Offsets index the
+/// register file (`8 n_words` nibbles); in a compression step, offsets
+/// from `8 n_words` on index the 128 block nibbles (sources only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Copy {
+    pub src: usize,
+    pub dst: usize,
+    pub n: usize,
+}
+
+/// A predicate over the step's input state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Pred {
+    /// Nibbles `[off, off + nibbles.len())` equal the constant.
+    EqConst { off: usize, nibbles: Vec<u8> },
+    /// Nibbles `[a, a+n)` equal nibbles `[b, b+n)`.
+    EqNibbles { a: usize, b: usize, n: usize },
+    /// `D` (words 0..8, as the 32 hash bytes) read as a 256-bit little-endian
+    /// number is at most `target` (little-endian bytes).
+    LeTarget { target: [u8; 32] },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Step {
+    /// `D = compress(init, block)`; `preds` must hold over (registers,
+    /// block); `copies` move block nibbles into registers other than `D`;
+    /// everything else is unchanged.
+    Compress { name: String, init: Init, block: [Src; 16], preds: Vec<Pred>, copies: Vec<Copy> },
+    /// Predicates must hold on the input state; `copies` are applied
+    /// (register to register); everything else is unchanged.
+    Simple { name: String, preds: Vec<Pred>, copies: Vec<Copy> },
+}
+
+impl Step {
+    pub fn compress(name: &str, init: Init, block: [Src; 16]) -> Step {
+        Step::Compress { name: name.into(), init, block, preds: vec![], copies: vec![] }
+    }
+    pub fn with_preds(mut self, p: Vec<Pred>) -> Step {
+        match &mut self {
+            Step::Compress { preds, .. } | Step::Simple { preds, .. } => *preds = p,
+        }
+        self
+    }
+    pub fn with_copies(mut self, c: Vec<Copy>) -> Step {
+        match &mut self {
+            Step::Compress { copies, .. } | Step::Simple { copies, .. } => *copies = c,
+        }
+        self
+    }
+    pub fn nop() -> Step {
+        Step::Simple { name: "nop".into(), preds: vec![], copies: vec![] }
+    }
+    pub fn check(name: &str, preds: Vec<Pred>) -> Step {
+        Step::Simple { name: name.into(), preds, copies: vec![] }
+    }
+    pub fn copy(name: &str, copies: Vec<Copy>) -> Step {
+        Step::Simple { name: name.into(), preds: vec![], copies }
+    }
+    pub fn preds(&self) -> &[Pred] {
+        match self {
+            Step::Compress { preds, .. } | Step::Simple { preds, .. } => preds,
+        }
+    }
+    pub fn copies(&self) -> &[Copy] {
+        match self {
+            Step::Compress { copies, .. } | Step::Simple { copies, .. } => copies,
+        }
+    }
+    /// Does this compression take prover data?
+    pub fn has_data(&self) -> bool {
+        matches!(self, Step::Compress { block, .. } if block.iter().any(|s| matches!(s, Src::Data(_))))
+    }
+    pub fn n_data(&self) -> usize {
+        match self {
+            Step::Compress { block, .. } => block.iter().filter(|s| matches!(s, Src::Data(_))).count(),
+            _ => 0,
+        }
+    }
+    pub fn name(&self) -> String {
+        match self {
+            Step::Compress { name, .. } | Step::Simple { name, .. } => name.clone(),
+        }
+    }
+    /// Register nibbles this step writes (besides `D` for a compression).
+    pub fn copy_mask(&self, n_words: usize) -> Vec<bool> {
+        let mut m = vec![false; 8 * n_words];
+        for c in self.copies() {
+            for i in c.dst..c.dst + c.n {
+                m[i] = true;
+            }
+        }
+        m
+    }
+}
+
+/// The program a claim asserts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimSpec {
-    pub n_steps: u32,
-    /// Branching factor; `n_steps` must be a power of `k`.
+    pub n_words: usize,
+    pub start: Vec<u32>,
+    /// Length must be a power of `k`.
+    pub steps: Vec<Step>,
+    /// Level-1 branching factor.
     pub k: u32,
-    pub start: [u32; 8],
-    /// One 64-byte block per step.
-    #[serde(with = "blocks_serde")]
-    pub blocks: Vec<[u8; 64]>,
-    /// Two-level search: after isolating a compression, bisect its 64 rounds
-    /// (`inner.rs`) instead of recomputing the whole compression in one leaf.
+    /// Two-level search (inner round-level bisection) for compression steps;
+    /// otherwise a single compression-level terminal leaf (phase 1; requires
+    /// `n_words == 8` and compression-only steps with constant blocks).
     #[serde(default)]
     pub inner: bool,
 }
+
+/// Prover data: one `Vec<u32>` per compression step that has `Data` sources, in step order.
+pub type ClaimData = Vec<Vec<u32>>;
 
 /// A bisection over `n` steps with branching `k` (`n` a power of `k`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,30 +235,64 @@ impl Search {
     }
 }
 
-mod blocks_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    pub fn serialize<S: Serializer>(v: &Vec<[u8; 64]>, s: S) -> Result<S::Ok, S::Error> {
-        v.iter().map(|b| hex::encode(b)).collect::<Vec<_>>().serialize(s)
+// ----- native evaluation -----
+
+/// Nibbles of a state (8 per word, most significant first).
+pub fn state_nibbles(state: &[u32]) -> Vec<u8> {
+    state.iter().flat_map(|w| (0..8).rev().map(move |i| ((w >> (4 * i)) & 15) as u8)).collect()
+}
+
+pub fn nibbles_state(n: &[u8]) -> Vec<u32> {
+    n.chunks(8).map(|c| c.iter().fold(0u32, |acc, x| (acc << 4) | u32::from(*x))).collect()
+}
+
+/// Big-endian bytes of the words.
+pub fn words_bytes(w: &[u32]) -> Vec<u8> {
+    w.iter().flat_map(|x| x.to_be_bytes()).collect()
+}
+
+pub fn words_from_bytes(b: &[u8]) -> Vec<u32> {
+    b.chunks(4).map(|c| { let mut a = [0u8; 4]; a[..c.len()].copy_from_slice(c); u32::from_be_bytes(a) }).collect()
+}
+
+impl Pred {
+    /// Evaluate over a nibble vector (registers, then block nibbles for a compression).
+    pub fn holds(&self, n: &[u8]) -> bool {
+        match self {
+            Pred::EqConst { off, nibbles } => n[*off..*off + nibbles.len()] == nibbles[..],
+            Pred::EqNibbles { a, b, n: len } => n[*a..*a + *len] == n[*b..*b + *len],
+            Pred::LeTarget { target } => {
+                let d = words_bytes(&nibbles_state(&n[..64]));
+                // little-endian: compare from byte 31 down
+                for i in (0..32).rev() {
+                    if d[i] != target[i] {
+                        return d[i] < target[i];
+                    }
+                }
+                true
+            }
+        }
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<[u8; 64]>, D::Error> {
-        let v: Vec<String> = Vec::deserialize(d)?;
-        v.iter()
-            .map(|h| {
-                let bytes = hex::decode(h).map_err(serde::de::Error::custom)?;
-                bytes.try_into().map_err(|_| serde::de::Error::custom("block must be 64 bytes"))
-            })
-            .collect()
+    pub fn name(&self) -> String {
+        match self {
+            Pred::EqConst { off, nibbles } => format!("eq_const@{off}x{}", nibbles.len()),
+            Pred::EqNibbles { a, b, n } => format!("eq@{a}={b}x{n}"),
+            Pred::LeTarget { .. } => "le_target".into(),
+        }
     }
 }
 
 impl ClaimSpec {
     pub fn search(&self) -> Search {
-        let mut n = self.n_steps;
+        let mut n = self.steps.len() as u32;
         while n > 1 {
-            assert!(n % self.k == 0, "n_steps must be a power of k");
+            assert!(n % self.k == 0, "steps must be a power of k");
             n /= self.k;
         }
-        Search { n: self.n_steps, k: self.k }
+        Search { n: self.steps.len() as u32, k: self.k }
+    }
+    pub fn n_steps(&self) -> u32 {
+        self.steps.len() as u32
     }
     pub fn rounds(&self) -> u32 {
         self.search().rounds()
@@ -133,41 +300,118 @@ impl ClaimSpec {
     pub fn index_bits(&self) -> usize {
         self.search().index_bits()
     }
-    /// All `n_steps + 1` states of the honest chain.
-    pub fn states(&self) -> Vec<[u32; 8]> {
-        let mut v = vec![self.start];
-        for b in &self.blocks {
-            let mut s = *v.last().unwrap();
-            sha2::compress256(&mut s, &[(*b).into()]);
+    pub fn round_points(&self, path: &[u32]) -> Vec<u32> {
+        self.search().round_points(path)
+    }
+    pub fn segment(&self, path: &[u32]) -> (u32, u32) {
+        self.search().segment(path)
+    }
+    /// Indices of the steps that take prover data, in order.
+    pub fn data_steps(&self) -> Vec<usize> {
+        self.steps.iter().enumerate().filter(|(_, s)| s.has_data()).map(|(i, _)| i).collect()
+    }
+    /// The words of a compression's init and block for an input state and data.
+    pub fn compress_inputs(step: &Step, state: &[u32], data: &[u32]) -> ([u32; 8], [u8; 64]) {
+        let Step::Compress { init, block, .. } = step else { panic!("not a compression") };
+        let init_w: [u32; 8] = match init {
+            Init::Iv => IV,
+            Init::D => state[..8].try_into().unwrap(),
+        };
+        let mut b = [0u8; 64];
+        for (j, src) in block.iter().enumerate() {
+            let w = match src {
+                Src::Const(c) => *c,
+                Src::Reg(i) => state[*i],
+                Src::Data(k) => data[*k],
+            };
+            b[4 * j..4 * j + 4].copy_from_slice(&w.to_be_bytes());
+        }
+        (init_w, b)
+    }
+    /// Apply one step (`data` for a compression with data sources). Returns
+    /// the output state and whether the step's predicates held.
+    pub fn apply(&self, step: &Step, state: &[u32], data: &[u32]) -> (Vec<u32>, bool) {
+        let mut n = state_nibbles(state);
+        let (out_d, space): (Option<[u32; 8]>, Vec<u8>) = match step {
+            Step::Compress { .. } => {
+                let (mut s, b) = Self::compress_inputs(step, state, data);
+                let mut space = n.clone();
+                space.extend(byte_nibbles(&b));
+                sha2::compress256(&mut s, &[b.into()]);
+                (Some(s), space)
+            }
+            Step::Simple { .. } => (None, n.clone()),
+        };
+        let ok = step.preds().iter().all(|p| p.holds(&space));
+        for c in step.copies() {
+            n[c.dst..c.dst + c.n].copy_from_slice(&space[c.src..c.src + c.n]);
+        }
+        let mut out = nibbles_state(&n);
+        if let Some(d) = out_d {
+            out[..8].copy_from_slice(&d);
+        }
+        (out, ok)
+    }
+    /// Is `next` a correct output of `step` on `cur` with `data`?
+    pub fn step_ok(&self, step: &Step, cur: &[u32], next: &[u32], data: &[u32]) -> bool {
+        let (expect, ok) = self.apply(step, cur, data);
+        ok && expect == next
+    }
+    /// The data slice for step `i` (empty for steps without data).
+    pub fn data_for<'a>(&self, data: &'a ClaimData, i: usize) -> &'a [u32] {
+        match self.data_steps().iter().position(|x| *x == i) {
+            Some(k) => &data[k],
+            None => &[],
+        }
+    }
+    /// All `n + 1` states of the chain for `data`.
+    pub fn states(&self, data: &ClaimData) -> Vec<Vec<u32>> {
+        let mut v = vec![self.start.clone()];
+        for (i, step) in self.steps.iter().enumerate() {
+            let (s, _) = self.apply(step, v.last().unwrap(), self.data_for(data, i));
             v.push(s);
         }
         v
     }
-    /// The step indices at which the prover commits midstates in round `r`
-    /// (1-based) given the segment indices chosen so far.
-    pub fn round_points(&self, path: &[u32]) -> Vec<u32> {
-        self.search().round_points(path)
+    /// The state expected at the end of steps `[lo, hi)` from `start` with `data`.
+    pub fn segment_reference(&self, lo: usize, hi: usize, start: &[u32], data: &ClaimData) -> Vec<u32> {
+        let mut s = start.to_vec();
+        for i in lo..hi {
+            s = self.apply(&self.steps[i], &s, self.data_for(data, i)).0;
+        }
+        s
     }
-    /// `(lo, len)` of the segment after applying `path` (segment indices, one per completed round).
-    pub fn segment(&self, path: &[u32]) -> (u32, u32) {
-        self.search().segment(path)
+    pub fn wots_bytes(&self) -> u32 {
+        4 * self.n_words as u32
     }
 }
 
-/// Where a terminal leaf gets a midstate.
+// ----- sources along a level-1 path -----
+
+/// Where a leaf gets a level-1 state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StateSource {
-    Const([u32; 8]),
-    /// The prover's `s_n` from its Move.
+    Const(Vec<u32>),
+    /// The prover's end state from its Move.
     End,
     /// The prover's commitment `t` (0-based) in round `r` (1-based).
     Round(u32, u32),
 }
 
-/// Sources of the isolated step's input and claimed output for a full path.
+impl StateSource {
+    pub fn name(&self) -> String {
+        match self {
+            StateSource::Const(_) => "const".into(),
+            StateSource::End => "end".into(),
+            StateSource::Round(r, t) => format!("r{r}t{t}"),
+        }
+    }
+}
+
+/// Sources of the isolated step's input and claimed output for a full path, and the step index.
 pub fn step_sources(spec: &ClaimSpec, path: &[u32]) -> (StateSource, StateSource, u32) {
     assert_eq!(path.len() as u32, spec.rounds());
-    let mut lo_src = StateSource::Const(spec.start);
+    let mut lo_src = StateSource::Const(spec.start.clone());
     let mut hi_src = StateSource::End;
     for (r, &j) in path.iter().enumerate() {
         let r1 = r as u32 + 1;
@@ -181,7 +425,27 @@ pub fn step_sources(spec: &ClaimSpec, path: &[u32]) -> (StateSource, StateSource
     (lo_src, hi_src, lo)
 }
 
-/// Every index path of length `rounds` over `k`.
+/// All distinct (source, role) pairs a terminal leaf may need: every
+/// `Round(r, t)`, plus `Const(start)` for inputs and `End` for outputs.
+pub fn cur_sources(spec: &ClaimSpec) -> Vec<StateSource> {
+    let mut v = vec![StateSource::Const(spec.start.clone())];
+    for r in 1..=spec.rounds() {
+        for t in 0..spec.k - 1 {
+            v.push(StateSource::Round(r, t));
+        }
+    }
+    v
+}
+pub fn next_sources(spec: &ClaimSpec) -> Vec<StateSource> {
+    let mut v = vec![StateSource::End];
+    for r in 1..=spec.rounds() {
+        for t in 0..spec.k - 1 {
+            v.push(StateSource::Round(r, t));
+        }
+    }
+    v
+}
+
 pub fn all_paths(spec: &ClaimSpec) -> Vec<Vec<u32>> {
     spec.search().all_paths()
 }
@@ -189,6 +453,8 @@ pub fn all_paths(spec: &ClaimSpec) -> Vec<Vec<u32>> {
 pub fn path_name(path: &[u32]) -> String {
     path.iter().map(|j| j.to_string()).collect::<Vec<_>>().join("")
 }
+
+// ----- keys -----
 
 /// The prover's Winternitz keys for a claim at one depth.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,8 +485,23 @@ pub fn index_label(id: u32, seq: u64, depth: u32, r: u32) -> String {
     key_label(id, seq, depth, &format!("claim/round{r}/index"))
 }
 
+pub fn source_key<'a>(src: &StateSource, keys: &'a ClaimKeys) -> &'a WotsPublic {
+    match src {
+        StateSource::End => &keys.end,
+        StateSource::Round(r, t) => &keys.rounds[*r as usize - 1][*t as usize],
+        StateSource::Const(_) => panic!("constant source has no key"),
+    }
+}
+
+/// Words of a committed state from a verified Winternitz message.
+pub fn state_from_msg(msg: &[u8]) -> Vec<u32> {
+    words_from_bytes(msg)
+}
+
+// ----- shared script pieces -----
+
 /// Verify a WOTS signature and discard the digits.
-fn wots_verify_drop(mut b: Builder, pk: &WotsPublic) -> Builder {
+pub(crate) fn wots_verify_drop(mut b: Builder, pk: &WotsPublic) -> Builder {
     b = b.wots_verify(pk);
     for _ in 0..pk.params.message_digits / 2 {
         b = b.push_opcode(OP_2DROP);
@@ -228,13 +509,48 @@ fn wots_verify_drop(mut b: Builder, pk: &WotsPublic) -> Builder {
     b
 }
 
-fn timeout_leaf(ctx: &CommitCtx, sweeper: Role) -> Leaf {
+pub(crate) fn timeout_leaf(ctx: &CommitCtx, sweeper: Role) -> Leaf {
     Leaf::new(
         "timeout",
         Builder::new().csv(ctx.params.delta).checksig(&ctx.key(sweeper).payment).into_script(),
         Timelock::csv(ctx.params.delta),
     )
 }
+
+/// Push a state's nibbles (constant) or verify its commitment, leaving
+/// `8 * n_words` nibbles (last nibble on top); then park them on the altstack.
+pub(crate) fn load_source(b: Builder, src: &StateSource, keys: &ClaimKeys, n_words: usize) -> Builder {
+    let b = match src {
+        StateSource::Const(s) => state_nibbles(s).into_iter().fold(b, crate::script_hash::push_scriptnum),
+        _ => b.wots_verify(source_key(src, keys)),
+    };
+    park(b, 8 * n_words)
+}
+
+pub(crate) fn park(mut b: Builder, n: usize) -> Builder {
+    for _ in 0..n {
+        b = b.push_opcode(OP_TOALTSTACK);
+    }
+    b
+}
+
+pub(crate) fn unpark(mut b: Builder, n: usize) -> Builder {
+    for _ in 0..n {
+        b = b.push_opcode(OP_FROMALTSTACK);
+    }
+    b
+}
+
+/// Fee of a pre-signed transaction spending a leaf of `script_len` bytes:
+/// the fixed fee, or 0.2 sat/vB of the estimated size (the witness of a
+/// signature-heavy leaf is about a third of its script) if that is more.
+/// Deterministic, so both parties pre-sign the same transaction.
+pub fn stage_fee(ctx: &CommitCtx, script_len: usize) -> bitcoin::Amount {
+    let est_vsize = (script_len as u64 * 4 / 3) / 4 + 60;
+    ctx.params.presign_fee.max(bitcoin::Amount::from_sat(est_vsize / 5))
+}
+
+// ----- level-1 trees -----
 
 /// `D_0` / `R_{r-1}'`: waiting for the prover's round `r`.
 pub fn wait_p_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, r: u32) -> Result<TapTree> {
@@ -246,86 +562,18 @@ pub fn wait_p_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, r: u32) -> R
     TapTree::new(vec![leaf, timeout_leaf(ctx, prover.other())])
 }
 
-/// `R_r`: waiting for the challenger's index for round `r`.
-pub fn wait_q_tree(ctx: &CommitCtx, prover: Role, ck: &ChallengerKeys, r: u32) -> Result<TapTree> {
+/// `R_r`: waiting for the challenger's index for round `r`. In the last
+/// round (with `spec.inner`) a second leaf, `q_round_R_check`, carries the
+/// same index into the check chain for simple steps.
+pub fn wait_q_tree(ctx: &CommitCtx, prover: Role, ck: &ChallengerKeys, spec: &ClaimSpec, r: u32) -> Result<TapTree> {
     let pk = &ck.indices[r as usize - 1];
     let mut b = ctx.two_of_two_verify(Builder::new());
     for i in (0..pk.n_bits()).rev() {
         b = b.bit_decode(&pk.bits[i]).push_opcode(OP_DROP);
     }
-    let leaf = Leaf::new(format!("q_round_{r}"), b.push_opcode(OP_PUSHNUM_1).into_script(), Timelock::NONE);
-    TapTree::new(vec![leaf, timeout_leaf(ctx, prover)])
-}
-
-/// Terminal leaf body for one path (after `<Q> OP_CHECKSIGVERIFY`).
-fn step_body(mut b: Builder, cur: &StateSource, next_pk: &WotsPublic, block: &[u8; 64], keys: &ClaimKeys) -> Builder {
-    // claimed next: verify, reverse, park (digit 63 ends on the altstack top)
-    b = b.wots_verify(next_pk);
-    for i in 1..64i64 {
-        b = b.push_int(i).push_opcode(OP_ROLL);
-    }
-    for _ in 0..64 {
-        b = b.push_opcode(OP_TOALTSTACK);
-    }
-    match cur {
-        StateSource::Const(s) => {
-            for nib in byte_nibbles(block) {
-                b = push_scriptnum(b, nib);
-            }
-            for nib in byte_nibbles(&state_bytes(s)) {
-                b = push_scriptnum(b, nib);
-            }
-        }
-        src => {
-            let pk = source_key(src, keys);
-            b = b.wots_verify(pk);
-            for _ in 0..64 {
-                b = b.push_opcode(OP_TOALTSTACK);
-            }
-            for nib in byte_nibbles(block) {
-                b = push_scriptnum(b, nib);
-            }
-            for _ in 0..64 {
-                b = b.push_opcode(OP_FROMALTSTACK);
-            }
-        }
-    }
-    b = append_script(b, &sha256_compress_script());
-    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_EQUAL);
-    for _ in 1..64 {
-        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_ROT).push_opcode(OP_EQUAL).push_opcode(OP_BOOLAND);
-    }
-    b.push_opcode(OP_NOT)
-}
-
-pub fn source_key<'a>(src: &StateSource, keys: &'a ClaimKeys) -> &'a WotsPublic {
-    match src {
-        StateSource::End => &keys.end,
-        StateSource::Round(r, t) => &keys.rounds[*r as usize - 1][*t as usize],
-        StateSource::Const(_) => panic!("constant source has no key"),
-    }
-}
-
-/// The terminal leaf script for `path`, and its name. Paths whose isolated
-/// step has the same sources and block produce identical scripts, so leaves
-/// are named by a hash of the script and deduplicated in the tree.
-pub fn terminal_leaf(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec: &ClaimSpec, path: &[u32]) -> (String, bitcoin::ScriptBuf) {
-    let q = ctx.key(prover.other()).payment;
-    let (cur, next, step) = step_sources(spec, path);
-    let next_pk = source_key(&next, keys);
-    let script = step_body(Builder::new().checksigverify(&q), &cur, next_pk, &spec.blocks[step as usize], keys).into_script();
-    let h = lngap_btc::hash160(script.as_bytes());
-    (format!("step_{}", hex::encode(&h[..4])), script)
-}
-
-/// `R_R'`: the challenger isolates one step and disproves it, or the prover times out.
-pub fn terminal_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec: &ClaimSpec) -> Result<TapTree> {
-    let mut leaves: Vec<Leaf> = Vec::new();
-    for path in all_paths(spec) {
-        let (name, script) = terminal_leaf(ctx, prover, keys, spec, &path);
-        if !leaves.iter().any(|l| l.name == name) {
-            leaves.push(Leaf::new(name, script, Timelock::NONE));
-        }
+    let mut leaves = vec![Leaf::new(format!("q_round_{r}"), b.clone().push_opcode(OP_PUSHNUM_1).into_script(), Timelock::NONE)];
+    if r == spec.rounds() && spec.inner {
+        leaves.push(Leaf::new(format!("q_round_{r}_check"), b.push_opcode(OP_PUSHNUM_1).push_opcode(OP_NOP).into_script(), Timelock::NONE));
     }
     leaves.push(timeout_leaf(ctx, prover));
     TapTree::new(leaves)
@@ -334,16 +582,6 @@ pub fn terminal_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec: &Cla
 /// The `dispute` leaf on `C'_d`: plain 2-of-2, pre-signed; the challenger broadcasts it.
 pub fn dispute_leaf(ctx: &CommitCtx) -> Leaf {
     Leaf::new("dispute", ctx.two_of_two(Builder::new()).into_script(), Timelock::NONE)
-}
-
-/// Witness args for a terminal step leaf (after Q's signature): the
-/// prover's signatures for `next` then `cur` (none for a constant `cur`).
-pub fn step_witness(cur: &StateSource, next_sig: &WotsSig, cur_sig: Option<&WotsSig>) -> Vec<Vec<u8>> {
-    let mut v = next_sig.consumption_order();
-    if !matches!(cur, StateSource::Const(_)) {
-        v.extend(cur_sig.expect("cur signature").consumption_order());
-    }
-    v
 }
 
 /// Witness args for `p_round_r` after the two channel signatures: the k-1 commitments in order.
@@ -356,8 +594,35 @@ pub fn q_round_witness(index: &Reveal) -> Vec<Vec<u8>> {
     index.consumption_order()
 }
 
+/// One stage of a pre-signed chain: the leaf spent, the tree of the new output, a description.
+pub struct Stage {
+    pub leaf: String,
+    pub next: TapTree,
+    pub what: String,
+}
+
+/// Append a chain of stages to `out`, each spending the previous output by
+/// size-based fee (`stage_fee`).
+pub(crate) fn chain_stages(out: &mut Vec<PresignedTx>, ctx: &CommitCtx, mut op: OutPoint, mut prevout: TxOut, mut tree: TapTree, stages: Vec<Stage>) -> Result<()> {
+    let mut value = prevout.value;
+    for st in stages {
+        let l = tree.leaf(&st.leaf)?;
+        value -= stage_fee(ctx, l.script.len());
+        let tx = build_spend(op, &l.timelock, vec![TxOut { value, script_pubkey: st.next.script_pubkey() }]);
+        let next_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
+        let next_prevout = tx.output[0].clone();
+        out.push(PresignedTx::new(st.leaf.clone(), tx, vec![prevout.clone()], &tree, &st.leaf, st.what)?);
+        op = next_op;
+        prevout = next_prevout;
+        tree = st.next;
+    }
+    Ok(())
+}
+
 /// Build the dispute chain hanging off `C'_d` (whose tree contains the
-/// `dispute` leaf). Labels: `dispute`, `p_round_r`, `q_round_r`.
+/// `dispute` leaf). Labels: `dispute`, `p_round_r`, `q_round_r`, then the
+/// inner chain (`p_re_cur`, `p_re_next`, `p_sched`, `p_inner_r`, `q_inner_r`)
+/// and the check chain (`q_round_R_check`, `c_re_cur`, `c_re_next`).
 #[allow(clippy::too_many_arguments)]
 pub fn dispute_graph(
     ctx: &CommitCtx,
@@ -384,87 +649,67 @@ pub fn dispute_graph(
     let mut tree = d0;
     for r in 1..=rounds {
         // p_round_r: -> R_r
-        let rr = wait_q_tree(ctx, prover, ck, r)?;
+        let rr = wait_q_tree(ctx, prover, ck, spec, r)?;
         value -= fee;
         let tx = build_spend(op, &tree.leaf(&format!("p_round_{r}"))?.timelock, vec![TxOut { value, script_pubkey: rr.script_pubkey() }]);
         let next_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
         let next_prevout = tx.output[0].clone();
-        out.push(PresignedTx::new(format!("p_round_{r}"), tx, vec![prevout.clone()], &tree, &format!("p_round_{r}"), format!("{prover} commits round {r} midstates"))?);
+        out.push(PresignedTx::new(format!("p_round_{r}"), tx, vec![prevout.clone()], &tree, &format!("p_round_{r}"), format!("{prover} commits round {r} states"))?);
         op = next_op;
         prevout = next_prevout;
         tree = rr;
-        // q_round_r: -> R_r' (wait_p for round r+1, or the terminal / inner level)
-        let rq = if r < rounds { wait_p_tree(ctx, prover, keys, r + 1)? } else { last_tree(ctx, prover, keys, spec)? };
-        value -= fee;
-        let tx = build_spend(op, &tree.leaf(&format!("q_round_{r}"))?.timelock, vec![TxOut { value, script_pubkey: rq.script_pubkey() }]);
-        let next_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
-        let next_prevout = tx.output[0].clone();
-        out.push(PresignedTx::new(format!("q_round_{r}"), tx, vec![prevout.clone()], &tree, &format!("q_round_{r}"), format!("{} picks a segment in round {r}", prover.other()))?);
-        op = next_op;
-        prevout = next_prevout;
-        tree = rq;
-    }
-    if spec.inner {
-        // the inner chain: p_sched, p_inner_1, q_inner_1, p_inner_2, q_inner_2
-        let ir = inner::SEARCH.rounds();
-        let mut stages: Vec<(String, TapTree, String)> = vec![("p_sched".into(), inner::wait_inner_p_tree(ctx, prover, keys, 1)?, format!("{prover} publishes the schedule words"))];
-        for r in 1..=ir {
-            stages.push((format!("p_inner_{r}"), inner::wait_inner_q_tree(ctx, prover, keys, &ck.inner_indices, spec, r)?, format!("{prover} commits inner round {r} states")));
-            let next = if r < ir { inner::wait_inner_p_tree(ctx, prover, keys, r + 1)? } else { inner::round_terminal_tree(ctx, prover, keys, spec)? };
-            stages.push((format!("q_inner_{r}"), next, format!("{} picks a segment in inner round {r}", prover.other())));
-        }
-        for (leaf, next_tree, what) in stages {
-            // these leaves verify dozens of Winternitz signatures: pay by size
-            let l = tree.leaf(&leaf)?;
-            value -= stage_fee(ctx, l.script.len());
-            let tx = build_spend(op, &l.timelock, vec![TxOut { value, script_pubkey: next_tree.script_pubkey() }]);
+        if r < rounds {
+            // q_round_r: -> R_r' (wait_p for round r+1)
+            let rq = wait_p_tree(ctx, prover, keys, r + 1)?;
+            value -= fee;
+            let tx = build_spend(op, &tree.leaf(&format!("q_round_{r}"))?.timelock, vec![TxOut { value, script_pubkey: rq.script_pubkey() }]);
             let next_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
             let next_prevout = tx.output[0].clone();
-            out.push(PresignedTx::new(leaf.clone(), tx, vec![prevout.clone()], &tree, &leaf, what)?);
+            out.push(PresignedTx::new(format!("q_round_{r}"), tx, vec![prevout.clone()], &tree, &format!("q_round_{r}"), format!("{} picks a segment in round {r}", prover.other()))?);
             op = next_op;
             prevout = next_prevout;
-            tree = next_tree;
+            tree = rq;
         }
     }
-    let _ = (op, prevout, tree);
+    // the last index: into the inner chain (compression steps), the check chain (simple steps), or the flat terminal
+    if spec.inner {
+        let (stages, _) = crate::inner::compress_chain(ctx, prover, keys, ck, spec)?;
+        chain_stages(&mut out, ctx, op, prevout.clone(), tree.clone(), stages)?;
+        let (stages, _) = crate::simple::check_chain(ctx, prover, keys, spec)?;
+        chain_stages(&mut out, ctx, op, prevout, tree, stages)?;
+    } else {
+        let stages = vec![Stage { leaf: format!("q_round_{rounds}"), next: crate::flat::terminal_tree(ctx, prover, keys, spec)?, what: format!("{} picks a segment in round {rounds}", prover.other()) }];
+        chain_stages(&mut out, ctx, op, prevout, tree, stages)?;
+    }
     Ok(out)
 }
 
-/// Fee of a pre-signed transaction spending a leaf of `script_len` bytes:
-/// the fixed fee, or 0.2 sat/vB of the estimated size (the witness of a
-/// signature-heavy leaf is about a third of its script) if that is more.
-/// Deterministic, so both parties pre-sign the same transaction.
-pub fn stage_fee(ctx: &CommitCtx, script_len: usize) -> bitcoin::Amount {
-    let est_vsize = (script_len as u64 * 4 / 3) / 4 + 60;
-    ctx.params.presign_fee.max(bitcoin::Amount::from_sat(est_vsize / 5))
-}
-
-/// The tree after the last level-1 index: the compression terminal, or the
-/// start of the inner chain.
-fn last_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec: &ClaimSpec) -> Result<TapTree> {
-    if spec.inner {
-        inner::wait_sched_tree(ctx, prover, keys)
-    } else {
-        terminal_tree(ctx, prover, keys, spec)
-    }
-}
-
-/// The trees along the chain, in order: `D_0, R_1, R_1', …, R_R'` (for the
-/// party to identify which leaf spent which output).
+/// The trees along the chains, in order: `D_0, R_1, R_1', …, R_R` (the
+/// level-1 outputs), then the inner chain's outputs, then the check chain's
+/// (for the party to identify which leaf spent which output).
 pub fn dispute_trees(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, ck: &ChallengerKeys, spec: &ClaimSpec) -> Result<Vec<TapTree>> {
     let rounds = spec.rounds();
     let mut v = vec![wait_p_tree(ctx, prover, keys, 1)?];
     for r in 1..=rounds {
-        v.push(wait_q_tree(ctx, prover, ck, r)?);
-        v.push(if r < rounds { wait_p_tree(ctx, prover, keys, r + 1)? } else { last_tree(ctx, prover, keys, spec)? });
-    }
-    if spec.inner {
-        let ir = inner::SEARCH.rounds();
-        v.push(inner::wait_inner_p_tree(ctx, prover, keys, 1)?);
-        for r in 1..=ir {
-            v.push(inner::wait_inner_q_tree(ctx, prover, keys, &ck.inner_indices, spec, r)?);
-            v.push(if r < ir { inner::wait_inner_p_tree(ctx, prover, keys, r + 1)? } else { inner::round_terminal_tree(ctx, prover, keys, spec)? });
+        v.push(wait_q_tree(ctx, prover, ck, spec, r)?);
+        if r < rounds {
+            v.push(wait_p_tree(ctx, prover, keys, r + 1)?);
         }
     }
+    if spec.inner {
+        v.extend(crate::inner::compress_chain(ctx, prover, keys, ck, spec)?.1);
+        v.extend(crate::simple::check_chain(ctx, prover, keys, spec)?.1);
+    } else {
+        v.push(crate::flat::terminal_tree(ctx, prover, keys, spec)?);
+    }
     Ok(v)
+}
+
+/// Number of level-1 trees (`D_0 … R_R`): the inner chain's trees follow at this offset.
+pub fn level1_tree_count(spec: &ClaimSpec) -> usize {
+    2 * spec.rounds() as usize
+}
+
+pub fn nibbles_of_bytes(b: &[u8]) -> Vec<u8> {
+    byte_nibbles(b)
 }
