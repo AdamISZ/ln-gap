@@ -137,7 +137,8 @@ impl DisputeLive {
             let ok = if sub == 1 {
                 self.spec.step_ok(&self.spec.steps[a as usize], &start, &end, self.spec.data_for(&self.data, a as usize))
             } else {
-                self.spec.segment_reference(a as usize, b as usize, &start, &self.data) == end
+                let (reference, preds_ok) = self.spec.segment_reference(a as usize, b as usize, &start, &self.data);
+                preds_ok && reference == end
             };
             if !ok {
                 return t;

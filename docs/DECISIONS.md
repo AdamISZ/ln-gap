@@ -143,6 +143,24 @@ estimated size)`, the estimate being a function of the spent leaf's script
 length so both signers agree; the fixed fee alone is below the 0.1 sat/vB
 relay floor for a 12 kvB transaction. (D8 otherwise stands.)
 
+## D19. Register-file claims; prover data enters as block words
+
+A claim is a program over at most 24 words of 32-bit registers: SHA-256
+compressions and simple check/copy steps. Prover data (headers, siblings,
+transaction bytes) enters only as block words of a compression, committed
+per word in the dispute, and every check on it is a predicate of that
+compression. The width bound comes from the 1000-item execution stack: a
+state commitment is `2 (8 n + 3)` witness items and a disprove leaf verifies
+at most two states. Wide claims use branching 2 at level 1. The isolated
+step's input and output are re-committed under path-independent keys, so
+every disprove leaf is shared by all paths and only the two families of
+re-commitment mismatch leaves depend on the path.
+
+The challenger judges a claim with the data the prover serves off-chain:
+every predicate must hold and the end state must match; a segment with a
+failed predicate counts as wrong. A prover serving different data than it
+commits on-chain is not caught (see the plan's phase 2b limitations).
+
 ## TODO
 
 - **N8 / anchor verification.** Equivocation and omission are reported by

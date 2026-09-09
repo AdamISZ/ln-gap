@@ -374,6 +374,7 @@ dependencies = [
  "lngap-lamport",
  "lngap-names",
  "lngap-party",
+ "lngap-spv",
  "lngap-tictactoe",
  "serde_json",
  "tracing",
@@ -436,6 +437,20 @@ dependencies = [
  "hex",
  "lngap-btc",
  "rand",
+ "sha2",
+]
+
+[[package]]
+name = "lngap-spv"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "serde",
  "sha2",
 ]
 

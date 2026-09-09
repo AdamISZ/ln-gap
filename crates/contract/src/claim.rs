@@ -373,13 +373,21 @@ impl ClaimSpec {
         }
         v
     }
-    /// The state expected at the end of steps `[lo, hi)` from `start` with `data`.
-    pub fn segment_reference(&self, lo: usize, hi: usize, start: &[u32], data: &ClaimData) -> Vec<u32> {
+    /// Do all predicates hold along the chain for `data`?
+    pub fn valid(&self, data: &ClaimData) -> bool {
+        self.segment_reference(0, self.steps.len(), &self.start, data).1
+    }
+    /// The state expected at the end of steps `[lo, hi)` from `start` with
+    /// `data`, and whether every predicate in the segment held.
+    pub fn segment_reference(&self, lo: usize, hi: usize, start: &[u32], data: &ClaimData) -> (Vec<u32>, bool) {
         let mut s = start.to_vec();
+        let mut all_ok = true;
         for i in lo..hi {
-            s = self.apply(&self.steps[i], &s, self.data_for(data, i)).0;
+            let (next, ok) = self.apply(&self.steps[i], &s, self.data_for(data, i));
+            all_ok &= ok;
+            s = next;
         }
-        s
+        (s, all_ok)
     }
     pub fn wots_bytes(&self) -> u32 {
         4 * self.n_words as u32

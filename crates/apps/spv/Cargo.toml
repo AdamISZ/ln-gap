@@ -1,0 +1,15 @@
+[package]
+name = "lngap-spv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-channel = { path = "../../channel" }
+lngap-contract = { path = "../../contract" }
+bitcoin.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+hex.workspace = true
+sha2 = { version = "0.10", features = ["compress"] }

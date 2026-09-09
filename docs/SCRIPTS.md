@@ -104,28 +104,40 @@ Graph for M = 2: 7 pre-signed transactions per commitment version.
 `C'_1`: 26 leaves, 9.9 KB of script; `C'_2`: 28 leaves, 12.2 KB (control blocks 161–193 B).
 Graph from the empty board (M = 9): 37 pre-signed transactions per commitment version.
 
-## Bisection claims (`lngap-contract::claim`, `::inner`, `lngap-script32`)
+## Bisection claims (`lngap-contract::claim`, `::inner`, `::simple`, `lngap-script32`)
 
-A claim is a chain of SHA-256 compressions the prover commits the end of
-with a 256-bit Winternitz signature in its Move (4-bit digits, 64 message +
-3 checksum digits; witness 1.4 KB, verifier 5 KB). Off `C'_d` a pre-signed
-chain lets the challenger bisect (D18):
+A claim is a program over `n_words ≤ 24` registers (D19): compression
+steps and simple steps. The prover commits the end state in its Move with
+a Winternitz signature over `4 n_words` bytes (4-bit digits; 1.4 KB witness
+and 5 KB verifier for 8 words, 6 KB and 21 KB for 24). Off `C'_d` a
+pre-signed chain lets the challenger bisect:
 
 | Output | Leaf | Script | Witness after sigs | Timelock |
 |---|---|---|---|---|
 | `C'_d` | `dispute` | 2-of-2 | — | — |
-| `D_0`, `R_r'` | `p_round_r` | 2-of-2-verify, `k−1` × Winternitz verify+drop, `OP_1` | the `k−1` midstate signatures | timeout leaf: Q after Δ |
+| `D_0`, `R_r'` | `p_round_r` | 2-of-2-verify, `k−1` × Winternitz verify+drop, `OP_1` | the `k−1` state signatures | timeout leaf: Q after Δ |
 | `R_r` | `q_round_r` | 2-of-2-verify, `log2 k` × `bit_decode OP_DROP`, `OP_1` | the index preimages | timeout: P after Δ |
-| `R_R'` | `p_sched` | 2-of-2-verify, 48 × 32-bit Winternitz verify+drop (10 digits each), `OP_1` — 35.7 KB | 48 signatures, 962 items | timeout: Q |
-| `S_r` | `p_inner_r` | 2-of-2-verify, 7 × Winternitz verify+drop, `OP_1` | 7 state signatures | timeout: Q |
-| `I_r` | `q_inner_r` | 2-of-2-verify, 3 × `bit_decode OP_DROP`, `OP_1` | 3 preimages | timeout: P |
-| `I_1` | `sched_<hash>` (×48 per block) | `<Q> OP_CHECKSIGVERIFY`, verify `W[i]` and its committed inputs (constants for `i−16 < 16`), park on the altstack, push tables, schedule step, "differs" check | `sig_Q`, input signatures, `W[i]` signature | — |
-| `T` | `round_<hash>` (×64 per block, plus source variants of rounds 0 and 63) | `<Q> OP_CHECKSIGVERIFY`, verify `W[r]`, `s_r`, (`cur` for r = 63), `s_{r+1}`; tables; one SHA-256 round (+ feed-forward add); "differs" check | `sig_Q` and the signatures in that order | — |
+| `R_R` | `q_round_R_check` | as `q_round_R` + `OP_NOP`: the simple-step variant, into the check chain | | |
+| `S_0` / `C_0` | `p_re_cur` / `c_re_cur` | 2-of-2-verify, verify+drop the re-committed cur (+ 16 × 32-bit block words) | | timeout: Q |
+| `S_0'` / `C_0'` | `p_re_next` / `c_re_next` | verify+drop the re-committed next | | timeout: Q |
+| `S_1` | `p_sched` | 48 × 32-bit Winternitz verify+drop — 35.7 KB, 962 items | 48 signatures | timeout: Q |
+| `S_2`, `S_3` | `p_inner_r` | 7 × Winternitz verify+drop | 7 state signatures | timeout: Q |
+| `I_r` | `q_inner_r` | 3 × `bit_decode OP_DROP` | 3 preimages | timeout: P |
+| `I_1` | `sched_<hash>` ×48 | `<Q> OP_CHECKSIGVERIFY`, verify the 4 inputs then `W[i]` (parked), tables, schedule step, "differs" | 5 word signatures | — |
+| `I_1` | `block_<hash>` | block word `j` vs its constant, or a word of the verified re_cur | word (+ re_cur) signatures | — |
+| `I_1`, `C_1` | `re_cur_mismatch_<src>`, `re_next_mismatch_<src>` | re-commitment vs the path's source (constant nibbles or a verified commitment) | 1–2 state signatures | — |
+| `I_1` | `ckeep_<step>` | re_next ≠ re_cur outside `D` and the step's copy destinations | re_cur, re_next | — |
+| `I_1` | `cpred_<step>` | verify block words 15..0 then re_cur (parked, restored: state deepest), predicates over the 320-nibble space | 16 words, re_cur | — |
+| `I_1` | `ccopy_<step>` | copy destinations of re_next vs block nibbles | 16 words, re_next | — |
+| `T` | `round_<hash>` (64 per init kind) | verify `W[r]`, `s_r`, (`init` for r = 63), `s_{r+1}`; tables; one SHA-256 round (+ feed-forward); "differs" | word and state signatures | — |
+| `C_1` | `simple_<step>` | verify re_cur (parked) and re_next; per nibble `OP_PICK OP_PICK OP_EQUAL` against the expected copy; predicates; AND, NOT | re_cur, re_next | — |
 | any | `timeout` | `<Δ> OP_CSV OP_DROP <X.payment> OP_CHECKSIG` | `sig_X` | CSV Δ |
-| `R_R'` (flat claims) | `step_<hash>` | `<Q> OP_CHECKSIGVERIFY`, two Winternitz midstates, `sha256_u4` compression (368.7 KB), mismatch check | `sig_Q`, next then cur signatures | — |
+| `R_R'` (flat claims) | `step_<hash>` | two Winternitz midstates, `sha256_u4` compression (368.7 KB), mismatch check | next then cur signatures | — |
 
-Leaves are named by a hash of their script and deduplicated: paths whose
-isolated step has the same sources and block share a leaf.
+Predicates in Script: `EqConst` and `EqNibbles` are one `OP_PICK … OP_EQUAL`
+per nibble; `LeTarget` folds the 64 nibbles of `D` from the least
+significant up as `acc' = (n < t) || (n == t && acc)`. Leaves are named by
+a hash of their script and deduplicated.
 
 ### 32-bit word gadgets (`lngap-script32`)
 

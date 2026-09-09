@@ -727,8 +727,14 @@ impl Party {
             let data = self.claim_data(&inst, d);
             let my_states = spec.states(&data);
             let honest = my_states.last().unwrap().clone();
-            let ok = end == honest;
-            self.say(format!("contract {id}: claimed end state {}.. is {}", hex::encode(&msg[..4]), if ok { "correct" } else { "WRONG" }));
+            let valid = spec.valid(&data);
+            let ok = end == honest && valid;
+            self.say(format!(
+                "contract {id}: claimed end state {}.. is {}{}",
+                hex::encode(&msg[..4]),
+                if end == honest { "correct" } else { "WRONG" },
+                if valid { "" } else { "; a predicate of the claim FAILS" }
+            ));
             let l = &mut self.live[idx];
             l.dispute = Some(DisputeLive {
                 depth: d,
