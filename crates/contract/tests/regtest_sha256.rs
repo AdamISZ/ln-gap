@@ -114,3 +114,57 @@ fn sha256_compress_leaf_on_regtest() {
     let h = rt.mine_with_check(&tx).unwrap();
     eprintln!("compress mined at {h}");
 }
+
+/// The full terminal leaf: challenger sig + two Winternitz-committed
+/// midstates + one compression + mismatch check. Accepts iff the prover's
+/// claimed output is wrong.
+#[test]
+fn compress_step_disprove_leaf_on_regtest() {
+    use lngap_btc::keys::Seed;
+    use lngap_btc::script::BuilderExt;
+    use lngap_btc::sighash::sign_tapscript;
+    use lngap_contract::script_hash::{compress_step_disprove, compress_step_witness, state_bytes};
+    use lngap_lamport::winternitz::{WotsParams, WotsSecret};
+
+    let rt = Regtest::start().unwrap();
+    let q = Seed::from_label("challenger").keypair("payment");
+    let ps = WotsParams::for_bytes(32);
+    let cur_sk = WotsSecret::from_entropy(ps, [21u8; 32]);
+    let next_sk = WotsSecret::from_entropy(ps, [22u8; 32]);
+    let block: [u8; 64] = core::array::from_fn(|i| (i as u8).wrapping_mul(13).wrapping_add(7));
+    let mut cur = [0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    sha2::compress256(&mut cur, &[block.into()]);
+    let mut honest_next = cur;
+    sha2::compress256(&mut honest_next, &[block.into()]);
+
+    let leaf = compress_step_disprove(Builder::new().checksigverify(&q.x_only_public_key().0), &cur_sk.public(), &next_sk.public(), &block).into_script();
+    eprintln!("SIZE compress-step disprove leaf: {} bytes", leaf.len());
+    let tree = TapTree::new(vec![Leaf::new("step", leaf.clone(), Timelock::NONE)]).unwrap();
+    let sink = TapTree::new(vec![Leaf::new("x", Builder::new().push_int(1).into_script(), Timelock::NONE)]).unwrap().script_pubkey();
+    let spend = |claimed_next: &[u32; 8]| {
+        let (op, prevout) = rt.fund(&tree.script_pubkey(), Amount::from_sat(2_000_000)).unwrap();
+        let mut tx = build_spend(op, &Timelock::NONE, vec![TxOut { value: Amount::from_sat(1_500_000), script_pubkey: sink.clone() }]);
+        let sig = sign_tapscript(&q, &tx, 0, std::slice::from_ref(&prevout), &leaf).unwrap();
+        let next_sig = next_sk.sign(&state_bytes(claimed_next)).unwrap();
+        let cur_sig = cur_sk.sign(&state_bytes(&cur)).unwrap();
+        let mut w = WitnessStack::new();
+        w.push(sig.as_ref().to_vec()).extend(compress_step_witness(&next_sig, &cur_sig));
+        tx.input[0].witness = w.build(&leaf, &tree.control_block("step").unwrap());
+        tx
+    };
+    // honest prover: the leaf must NOT be spendable
+    let honest = spend(&honest_next);
+    let r = rt.test_accept(&honest);
+    assert!(r.is_err(), "honest step must not be disprovable: {r:?}");
+    // lying prover: one bit off in the claimed next state
+    let mut lie = honest_next;
+    lie[5] ^= 0x100;
+    let tx = spend(&lie);
+    let standard = tx.weight().to_wu() <= 400_000;
+    match rt.test_accept(&tx) {
+        Ok(vs) => eprintln!("compress-step disprove MEMPOOL-ACCEPTED: vsize {vs}, weight {} WU, standard-size: {standard}", tx.weight()),
+        Err(e) => panic!("disprove rejected: {e}; weight {} WU", tx.weight()),
+    }
+    let h = rt.send_and_confirm(&tx).unwrap().1;
+    eprintln!("disprove mined at {h}");
+}

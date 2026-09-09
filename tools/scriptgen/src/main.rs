@@ -3,6 +3,7 @@
 //! SHA-256 conventions (bitvm/src/hash/sha256.rs): input = `n` single-byte
 //! script numbers, last byte pushed first; output = 32 single-byte elements.
 mod compress;
+mod measure;
 use bitvm::hash::sha256::sha256;
 use std::path::PathBuf;
 
@@ -25,6 +26,8 @@ fn main() {
         let s = bitvm::hash::blake3::blake3_compute_script(n).compile();
         println!("blake3({n}): {} bytes", s.len());
     }
+    measure::winternitz_sizes();
+    measure::sha256_stack_size();
     for add in [false, true] {
         match compress::self_test(add) {
             Ok((len, stack)) => {

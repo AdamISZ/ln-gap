@@ -11,6 +11,7 @@ edition = "2021"
 [dependencies]
 bitvm = { git = "https://github.com/BitVM/BitVM", rev = "7d1ca3660cac08aab62e76f3aa4daec0d7403ecc" }
 bitcoin = { version = "0.32", features = ["rand-std"] }
+bitcoin-script-stack = { git = "https://github.com/BitVM/rust-bitcoin-script-stack" }
 bitcoin-script = { git = "https://github.com/BitVM/rust-bitcoin-script" }
 
 sha2 = { version = "0.10", features = ["compress"] }

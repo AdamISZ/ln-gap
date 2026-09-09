@@ -11,6 +11,7 @@
 
 pub mod gadgets;
 pub mod keystore;
+pub mod winternitz;
 
 use anyhow::{bail, ensure, Result};
 use lngap_btc::{hash160, Hash160};

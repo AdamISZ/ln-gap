@@ -149,3 +149,51 @@ pub fn sha256_compress_equals(b: Builder, expected: &[u32; 8]) -> Builder {
     }
     b.push_opcode(OP_PUSHNUM_1)
 }
+
+// ----- the bisection terminal leaf for a SHA-256 compression step -----
+
+use lngap_lamport::winternitz::{WotsExt, WotsPublic, WotsSig};
+
+/// Body of the terminal disprove leaf for one compression step (after the
+/// challenger's `OP_CHECKSIGVERIFY`): verifies the prover's Winternitz
+/// commitments to the step's input midstate (`cur`) and claimed output
+/// midstate (`next`), recomputes `compress(cur, block)` with `block` a
+/// constant of the leaf, and leaves **true iff the recomputation differs
+/// from the claim** — i.e. the prover lied about this step.
+///
+/// Witness (consumption order): `next` signature, then `cur` signature.
+pub fn compress_step_disprove(b: Builder, cur: &WotsPublic, next: &WotsPublic, block: &[u8; 64]) -> Builder {
+    // claimed next state: verify, reverse (so digit 63 ends on the altstack top), park
+    let mut b = b.wots_verify(next);
+    for i in 1..64i64 {
+        b = b.push_int(i).push_opcode(OP_ROLL);
+    }
+    for _ in 0..64 {
+        b = b.push_opcode(OP_TOALTSTACK);
+    }
+    // input state: verify, park, push the block, restore state on top
+    b = b.wots_verify(cur);
+    for _ in 0..64 {
+        b = b.push_opcode(OP_TOALTSTACK);
+    }
+    for nib in nibbles(block) {
+        b = push_scriptnum(b, nib);
+    }
+    for _ in 0..64 {
+        b = b.push_opcode(OP_FROMALTSTACK);
+    }
+    b = append(b, &sha256_compress_script());
+    // compare the 64 output nibbles (last on top) with the parked claim
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_EQUAL);
+    for _ in 1..64 {
+        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_ROT).push_opcode(OP_EQUAL).push_opcode(OP_BOOLAND);
+    }
+    b.push_opcode(OP_NOT)
+}
+
+/// Witness args for [`compress_step_disprove`] in consumption order.
+pub fn compress_step_witness(next_sig: &WotsSig, cur_sig: &WotsSig) -> Vec<Vec<u8>> {
+    let mut v = next_sig.consumption_order();
+    v.extend(cur_sig.consumption_order());
+    v
+}
