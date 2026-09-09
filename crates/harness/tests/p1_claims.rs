@@ -1,5 +1,6 @@
 //! Phase 1 of the SPV dispute path: bisection over a 16-step hash chain on
-//! regtest. Honest claim paid; false end state disproved at the last step;
+//! regtest with the compression-level terminal leaf (`HashChain::flat`; the
+//! two-level search is in `p2_inner.rs`). Honest claim paid; false end state disproved at the last step;
 //! false midstate disproved mid-chain; prover silent -> timeout; griefing
 //! challenger silent -> prover timeout; griefing challenger plays it out ->
 //! the step is correct and the prover times it out.
@@ -19,10 +20,10 @@ fn sat(n: u64) -> Amount {
 }
 
 fn setup(label: &str) -> Harness {
-    let mut h = Harness::new(label, ProgramRegistry::new().with(Arc::new(HashChain::standard()) as Arc<dyn Program>)).unwrap();
+    let mut h = Harness::new(label, ProgramRegistry::new().with(Arc::new(HashChain::flat()) as Arc<dyn Program>)).unwrap();
     h.user.queue_moves(1, vec![vec![true]]);
     // hub non-cooperative from the start so the claim goes on-chain
-    let msgs = h.user.open_contract(1, HashChain::NAME, [STAKE, STAKE]).unwrap();
+    let msgs = h.user.open_contract(1, HashChain::FLAT_NAME, [STAKE, STAKE]).unwrap();
     h.bus(msgs).unwrap();
     h.hub.faults.stop_from_seq = Some(1);
     h

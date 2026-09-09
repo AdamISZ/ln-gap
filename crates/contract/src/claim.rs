@@ -9,6 +9,9 @@
 //!
 //! Graph off `C'_d` (P = prover at depth d, Q = challenger):
 //!
+//! With `spec.inner` the terminal step is replaced by the inner chain of
+//! `inner.rs` (schedule words, then round-level bisection).
+//!
 //! ```text
 //! C'_d ─ dispute (2-of-2, Q broadcasts) → D_0
 //!   D_0     ─ p_round_1 (P commits k-1 midstates)   → R_1     | timeout: Q sweeps after Δ
@@ -32,6 +35,7 @@ use lngap_lamport::winternitz::{WotsExt, WotsPublic, WotsSig};
 use lngap_lamport::{PublicKey, Reveal};
 use serde::{Deserialize, Serialize};
 
+use crate::inner::{self, InnerKeys};
 use crate::instance::key_label;
 use crate::script_hash::{append_script, nibbles as byte_nibbles, push_scriptnum, sha256_compress_script, state_bytes};
 
@@ -45,6 +49,57 @@ pub struct ClaimSpec {
     /// One 64-byte block per step.
     #[serde(with = "blocks_serde")]
     pub blocks: Vec<[u8; 64]>,
+    /// Two-level search: after isolating a compression, bisect its 64 rounds
+    /// (`inner.rs`) instead of recomputing the whole compression in one leaf.
+    #[serde(default)]
+    pub inner: bool,
+}
+
+/// A bisection over `n` steps with branching `k` (`n` a power of `k`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Search {
+    pub n: u32,
+    pub k: u32,
+}
+
+impl Search {
+    pub const fn rounds(&self) -> u32 {
+        let mut r = 0;
+        let mut n = self.n;
+        while n > 1 {
+            n /= self.k;
+            r += 1;
+        }
+        r
+    }
+    pub fn index_bits(&self) -> usize {
+        assert!(self.k.is_power_of_two() && self.k >= 2);
+        self.k.trailing_zeros() as usize
+    }
+    /// The step indices at which the prover commits states in the next
+    /// round given the segment indices chosen so far.
+    pub fn round_points(&self, path: &[u32]) -> Vec<u32> {
+        let (lo, len) = self.segment(path);
+        (1..self.k).map(|t| lo + t * len / self.k).collect()
+    }
+    /// `(lo, len)` of the segment after applying `path`.
+    pub fn segment(&self, path: &[u32]) -> (u32, u32) {
+        let mut lo = 0;
+        let mut len = self.n;
+        for j in path {
+            len /= self.k;
+            lo += j * len;
+        }
+        (lo, len)
+    }
+    /// Every index path of length `rounds` over `k`.
+    pub fn all_paths(&self) -> Vec<Vec<u32>> {
+        let mut paths = vec![vec![]];
+        for _ in 0..self.rounds() {
+            paths = paths.into_iter().flat_map(|p| (0..self.k).map(move |j| { let mut q = p.clone(); q.push(j); q })).collect();
+        }
+        paths
+    }
 }
 
 mod blocks_serde {
@@ -64,19 +119,19 @@ mod blocks_serde {
 }
 
 impl ClaimSpec {
-    pub fn rounds(&self) -> u32 {
-        let mut r = 0;
+    pub fn search(&self) -> Search {
         let mut n = self.n_steps;
         while n > 1 {
             assert!(n % self.k == 0, "n_steps must be a power of k");
             n /= self.k;
-            r += 1;
         }
-        r
+        Search { n: self.n_steps, k: self.k }
+    }
+    pub fn rounds(&self) -> u32 {
+        self.search().rounds()
     }
     pub fn index_bits(&self) -> usize {
-        assert!(self.k.is_power_of_two() && self.k >= 2);
-        self.k.trailing_zeros() as usize
+        self.search().index_bits()
     }
     /// All `n_steps + 1` states of the honest chain.
     pub fn states(&self) -> Vec<[u32; 8]> {
@@ -91,18 +146,11 @@ impl ClaimSpec {
     /// The step indices at which the prover commits midstates in round `r`
     /// (1-based) given the segment indices chosen so far.
     pub fn round_points(&self, path: &[u32]) -> Vec<u32> {
-        let (lo, len) = self.segment(path);
-        (1..self.k).map(|t| lo + t * len / self.k).collect()
+        self.search().round_points(path)
     }
     /// `(lo, len)` of the segment after applying `path` (segment indices, one per completed round).
     pub fn segment(&self, path: &[u32]) -> (u32, u32) {
-        let mut lo = 0;
-        let mut len = self.n_steps;
-        for j in path {
-            len /= self.k;
-            lo += j * len;
-        }
-        (lo, len)
+        self.search().segment(path)
     }
 }
 
@@ -135,12 +183,7 @@ pub fn step_sources(spec: &ClaimSpec, path: &[u32]) -> (StateSource, StateSource
 
 /// Every index path of length `rounds` over `k`.
 pub fn all_paths(spec: &ClaimSpec) -> Vec<Vec<u32>> {
-    let r = spec.rounds() as usize;
-    let mut paths = vec![vec![]];
-    for _ in 0..r {
-        paths = paths.into_iter().flat_map(|p| (0..spec.k).map(move |j| { let mut q = p.clone(); q.push(j); q })).collect();
-    }
-    paths
+    spec.search().all_paths()
 }
 
 pub fn path_name(path: &[u32]) -> String {
@@ -153,12 +196,17 @@ pub struct ClaimKeys {
     pub end: WotsPublic,
     /// `rounds[r-1][t]`: round `r`, commitment `t`.
     pub rounds: Vec<Vec<WotsPublic>>,
+    /// Inner-level keys (`spec.inner`).
+    #[serde(default)]
+    pub inner: Option<InnerKeys>,
 }
 
-/// The challenger's Lamport index keys, one per round.
+/// The challenger's Lamport index keys, one per round (and per inner round).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChallengerKeys {
     pub indices: Vec<PublicKey>,
+    #[serde(default)]
+    pub inner_indices: Vec<PublicKey>,
 }
 
 pub fn end_label(id: u32, seq: u64, depth: u32) -> String {
@@ -345,8 +393,8 @@ pub fn dispute_graph(
         op = next_op;
         prevout = next_prevout;
         tree = rr;
-        // q_round_r: -> R_r' (wait_p for round r+1, or terminal)
-        let rq = if r < rounds { wait_p_tree(ctx, prover, keys, r + 1)? } else { terminal_tree(ctx, prover, keys, spec)? };
+        // q_round_r: -> R_r' (wait_p for round r+1, or the terminal / inner level)
+        let rq = if r < rounds { wait_p_tree(ctx, prover, keys, r + 1)? } else { last_tree(ctx, prover, keys, spec)? };
         value -= fee;
         let tx = build_spend(op, &tree.leaf(&format!("q_round_{r}"))?.timelock, vec![TxOut { value, script_pubkey: rq.script_pubkey() }]);
         let next_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
@@ -356,8 +404,49 @@ pub fn dispute_graph(
         prevout = next_prevout;
         tree = rq;
     }
+    if spec.inner {
+        // the inner chain: p_sched, p_inner_1, q_inner_1, p_inner_2, q_inner_2
+        let ir = inner::SEARCH.rounds();
+        let mut stages: Vec<(String, TapTree, String)> = vec![("p_sched".into(), inner::wait_inner_p_tree(ctx, prover, keys, 1)?, format!("{prover} publishes the schedule words"))];
+        for r in 1..=ir {
+            stages.push((format!("p_inner_{r}"), inner::wait_inner_q_tree(ctx, prover, keys, &ck.inner_indices, spec, r)?, format!("{prover} commits inner round {r} states")));
+            let next = if r < ir { inner::wait_inner_p_tree(ctx, prover, keys, r + 1)? } else { inner::round_terminal_tree(ctx, prover, keys, spec)? };
+            stages.push((format!("q_inner_{r}"), next, format!("{} picks a segment in inner round {r}", prover.other())));
+        }
+        for (leaf, next_tree, what) in stages {
+            // these leaves verify dozens of Winternitz signatures: pay by size
+            let l = tree.leaf(&leaf)?;
+            value -= stage_fee(ctx, l.script.len());
+            let tx = build_spend(op, &l.timelock, vec![TxOut { value, script_pubkey: next_tree.script_pubkey() }]);
+            let next_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
+            let next_prevout = tx.output[0].clone();
+            out.push(PresignedTx::new(leaf.clone(), tx, vec![prevout.clone()], &tree, &leaf, what)?);
+            op = next_op;
+            prevout = next_prevout;
+            tree = next_tree;
+        }
+    }
     let _ = (op, prevout, tree);
     Ok(out)
+}
+
+/// Fee of a pre-signed transaction spending a leaf of `script_len` bytes:
+/// the fixed fee, or 0.2 sat/vB of the estimated size (the witness of a
+/// signature-heavy leaf is about a third of its script) if that is more.
+/// Deterministic, so both parties pre-sign the same transaction.
+pub fn stage_fee(ctx: &CommitCtx, script_len: usize) -> bitcoin::Amount {
+    let est_vsize = (script_len as u64 * 4 / 3) / 4 + 60;
+    ctx.params.presign_fee.max(bitcoin::Amount::from_sat(est_vsize / 5))
+}
+
+/// The tree after the last level-1 index: the compression terminal, or the
+/// start of the inner chain.
+fn last_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec: &ClaimSpec) -> Result<TapTree> {
+    if spec.inner {
+        inner::wait_sched_tree(ctx, prover, keys)
+    } else {
+        terminal_tree(ctx, prover, keys, spec)
+    }
 }
 
 /// The trees along the chain, in order: `D_0, R_1, R_1', …, R_R'` (for the
@@ -367,7 +456,15 @@ pub fn dispute_trees(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, ck: &Chall
     let mut v = vec![wait_p_tree(ctx, prover, keys, 1)?];
     for r in 1..=rounds {
         v.push(wait_q_tree(ctx, prover, ck, r)?);
-        v.push(if r < rounds { wait_p_tree(ctx, prover, keys, r + 1)? } else { terminal_tree(ctx, prover, keys, spec)? });
+        v.push(if r < rounds { wait_p_tree(ctx, prover, keys, r + 1)? } else { last_tree(ctx, prover, keys, spec)? });
+    }
+    if spec.inner {
+        let ir = inner::SEARCH.rounds();
+        v.push(inner::wait_inner_p_tree(ctx, prover, keys, 1)?);
+        for r in 1..=ir {
+            v.push(inner::wait_inner_q_tree(ctx, prover, keys, &ck.inner_indices, spec, r)?);
+            v.push(if r < ir { inner::wait_inner_p_tree(ctx, prover, keys, r + 1)? } else { inner::round_terminal_tree(ctx, prover, keys, spec)? });
+        }
     }
     Ok(v)
 }

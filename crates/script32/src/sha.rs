@@ -142,3 +142,39 @@ pub fn schedule_body(s: &mut Stack) {
     s.roll_word(8 * 1);
     s.drop_word();
 }
+
+/// Consume two 8-word states (word-wise, each with `h` on top) and push
+/// their word-wise sum mod 2^32 in the same layout.
+pub fn add_states(s: &mut Stack) {
+    // top-first: B (8 words), A (8 words). Sum h first, parking each sum so
+    // that restoring yields a+ deepest and h+ on top.
+    for i in 0..8usize {
+        s.roll_word(8 * (8 - i));
+        s.add_word();
+        s.word_to_alt();
+    }
+    for _ in 0..8 {
+        s.word_from_alt();
+    }
+}
+
+/// Consume two runs of `n` nibbles (the claimed value on top, the computed
+/// value below it) and drop the tables, leaving a single boolean that is
+/// true iff the two runs **differ**. Nothing else may be above the tables.
+pub fn differs_and_finish(s: &mut Stack, n: usize) {
+    for i in 0..n {
+        s.roll(2 * n - 1 - 2 * i);
+        s.roll(n - i);
+        s.op(bitcoin::opcodes::all::OP_EQUAL);
+        s.above -= 1;
+        s.to_alt();
+    }
+    s.drop_tables(0);
+    s.from_alt();
+    for _ in 1..n {
+        s.from_alt();
+        s.op(bitcoin::opcodes::all::OP_BOOLAND);
+        s.above -= 1;
+    }
+    s.op(bitcoin::opcodes::all::OP_NOT);
+}

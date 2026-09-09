@@ -8,6 +8,8 @@ license.workspace = true
 lngap-btc = { path = "../btc" }
 bitcoin.workspace = true
 anyhow.workspace = true
+hex.workspace = true
+sha2 = "0.10"
 
 [dev-dependencies]
 rand.workspace = true

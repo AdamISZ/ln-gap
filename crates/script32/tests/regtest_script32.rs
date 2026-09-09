@@ -140,7 +140,7 @@ fn sim_gadgets() {
                 stack.push(((w >> (4 * i)) & 15) as i64);
             }
         }
-        let out = sim::run(&script, stack).unwrap();
+        let out = sim::run_nums(&script, stack).unwrap();
         let out = &out[TABLES.size()..];
         out.chunks(8).map(|c| c.iter().fold(0u32, |acc, n| (acc << 4) | *n as u32)).collect()
     };
@@ -173,7 +173,7 @@ fn sim_sha_pieces() {
                 stack.push(((w >> (4 * i)) & 15) as i64);
             }
         }
-        let out = sim::run(&script, stack).unwrap();
+        let out = sim::run_nums(&script, stack).unwrap();
         let out = &out[TABLES.size()..];
         out.chunks(8).map(|c| c.iter().fold(0u32, |acc, n| (acc << 4) | *n as u32)).collect()
     };
@@ -185,5 +185,34 @@ fn sim_sha_pieces() {
         assert_eq!(run(&|s| round_body(s, K[r]), &inputs), round_native(&state, w, K[r]).to_vec(), "round {r}");
         let (w2, w7, w15, w16): (u32, u32, u32, u32) = (rng.gen(), rng.gen(), rng.gen(), rng.gen());
         assert_eq!(run(&|s| schedule_body(s), &[w2, w7, w15, w16]), vec![schedule_native(w2, w7, w15, w16)]);
+    }
+}
+
+#[test]
+fn sim_add_states_and_differs() {
+    use lngap_script32::sha::{add_states, differs_and_finish};
+    use lngap_script32::sim;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+    let nib = |w: u32| -> Vec<i64> { (0..8).rev().map(|i| ((w >> (4 * i)) & 15) as i64).collect() };
+    for _ in 0..10 {
+        let a: [u32; 8] = core::array::from_fn(|_| rng.gen());
+        let b: [u32; 8] = core::array::from_fn(|_| rng.gen());
+        let mut claimed: [u32; 8] = core::array::from_fn(|i| a[i].wrapping_add(b[i]));
+        let lie = rng.gen_bool(0.5);
+        if lie {
+            claimed[rng.gen_range(0..8)] ^= 1 << rng.gen_range(0..32);
+        }
+        let mut s = Stack::new(Builder::new(), TABLES);
+        s.roll_inputs_above(8 * 24);
+        add_states(&mut s);
+        differs_and_finish(&mut s, 64);
+        let script = s.into_builder().into_script();
+        let mut stack: Vec<i64> = Vec::new();
+        // the claimed value sits below the two operands; the sum lands on top of it
+        for w in claimed.iter().chain(a.iter()).chain(b.iter()) {
+            stack.extend(nib(*w));
+        }
+        let out = sim::run_nums(&script, stack).unwrap();
+        assert_eq!(out, vec![i64::from(lie)], "lie={lie}");
     }
 }

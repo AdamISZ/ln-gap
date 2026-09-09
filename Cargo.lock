@@ -353,6 +353,7 @@ dependencies = [
  "lngap-btc",
  "lngap-channel",
  "lngap-lamport",
+ "lngap-script32",
  "serde",
  "sha2",
  "thiserror",
@@ -420,6 +421,7 @@ dependencies = [
  "lngap-channel",
  "lngap-contract",
  "lngap-lamport",
+ "lngap-script32",
  "serde",
  "sha2",
  "tracing",
@@ -431,8 +433,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "hex",
  "lngap-btc",
  "rand",
+ "sha2",
 ]
 
 [[package]]

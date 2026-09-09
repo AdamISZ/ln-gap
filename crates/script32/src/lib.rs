@@ -113,6 +113,18 @@ impl Stack {
         }
     }
 
+    /// Apply an arbitrary builder transformation (e.g. a signature check)
+    /// that leaves `delta` more elements above the tables.
+    pub fn map(&mut self, delta: isize, f: impl FnOnce(Builder) -> Builder) {
+        self.b = f(std::mem::replace(&mut self.b, Builder::new()));
+        self.above = (self.above as isize + delta) as usize;
+    }
+    /// Push constant nibbles (first pushed deepest).
+    pub fn push_nibbles(&mut self, nibbles: &[u8]) {
+        for n in nibbles {
+            self.int(i64::from(*n));
+        }
+    }
     pub fn op(&mut self, op: bitcoin::opcodes::Opcode) {
         self.b = std::mem::replace(&mut self.b, Builder::new()).push_opcode(op);
     }

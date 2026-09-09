@@ -12,10 +12,16 @@ use lngap_lamport::winternitz::{message_digits, WotsExt, WotsParams, WotsSecret}
 #[test]
 fn winternitz_leaf_on_regtest() {
     let rt = Regtest::start().unwrap();
-    let ps = WotsParams::for_bytes(32);
+    for n_bytes in [32u32, 4] {
+        winternitz_leaf(&rt, n_bytes);
+    }
+}
+
+fn winternitz_leaf(rt: &Regtest, n_bytes: u32) {
+    let ps = WotsParams::for_bytes(n_bytes);
     let sk = WotsSecret::from_entropy(ps, [3u8; 32]);
     let pk = sk.public();
-    let msg: Vec<u8> = (0..32u8).map(|i| i.wrapping_mul(59).wrapping_add(1)).collect();
+    let msg: Vec<u8> = (0..n_bytes as u8).map(|i| i.wrapping_mul(59).wrapping_add(1)).collect();
     // leaf: verify, then require the 64 digits equal the message's nibbles (last nibble on top)
     let mut b = Builder::new().wots_verify(&pk);
     for n in message_digits(&msg).iter().rev() {
@@ -23,7 +29,7 @@ fn winternitz_leaf_on_regtest() {
         b = b.push_opcode(OP_EQUALVERIFY);
     }
     let leaf = b.push_opcode(OP_PUSHNUM_1).into_script();
-    eprintln!("SIZE wots verify leaf: {} bytes", leaf.len());
+    eprintln!("SIZE wots verify leaf ({n_bytes} bytes): {} bytes", leaf.len());
     let tree = TapTree::new(vec![Leaf::new("w", leaf.clone(), Timelock::NONE)]).unwrap();
     let sink = TapTree::new(vec![Leaf::new("x", Builder::new().push_int(1).into_script(), Timelock::NONE)]).unwrap().script_pubkey();
     let spend = |items: Vec<Vec<u8>>| {
@@ -40,12 +46,12 @@ fn winternitz_leaf_on_regtest() {
     eprintln!("wots accepted: vsize {vs}, witness {} bytes", tx.input[0].witness.size());
     // wrong message
     let mut other = msg.clone();
-    other[7] ^= 0x30;
+    other[3] ^= 0x30;
     assert!(rt.test_accept(&spend(sk.sign(&other).unwrap().consumption_order())).is_err());
     // forgery: bump one digit by hashing its signature once more, checksum untouched
     let mut forged = sig.clone();
-    forged.digits[10] += 1;
-    forged.hashes[10] = hash160(&forged.hashes[10]);
+    forged.digits[5] += 1;
+    forged.hashes[5] = hash160(&forged.hashes[5]);
     assert!(rt.test_accept(&spend(forged.consumption_order())).is_err(), "forged digit must fail the checksum");
     rt.send_and_confirm(&tx).unwrap();
 }

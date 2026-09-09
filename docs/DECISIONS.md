@@ -126,6 +126,23 @@ anchored too. The reveal gets its own receipt but no second bond.
 and deadlines, so both parties rebuild identical leaves from the name alone.
 Verbose (a few KB per contract) but unambiguous.
 
+## D18. Two-level dispute search; pre-signed dispute transactions pay by size
+
+A claim whose steps are SHA-256 compressions is searched in two levels:
+bisection over compressions (level 1), then, inside the isolated
+compression, publication of the 48 schedule words and bisection over the 64
+rounds (`k = 8`), ending in a one-round disprove leaf of 11–23 KB instead of
+a 379 KB compression leaf. Costs ~5 more response windows; the largest
+transaction drops from 96 kvB to 12 kvB and the whole dispute from 107 to 53
+kvB. The schedule and the first inner round are separate transactions
+because a transaction's initial witness stack counts against the 1000-item
+execution limit (48 + 7 Winternitz signatures would exceed it).
+
+Pre-signed transactions of the inner chain pay `max(1000 sat, 0.2 sat/vB ×
+estimated size)`, the estimate being a function of the spent leaf's script
+length so both signers agree; the fixed fee alone is below the 0.1 sat/vB
+relay floor for a 12 kvB transaction. (D8 otherwise stands.)
+
 ## TODO
 
 - **N8 / anchor verification.** Equivocation and omission are reported by

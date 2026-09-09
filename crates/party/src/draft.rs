@@ -7,6 +7,7 @@ use anyhow::{anyhow, bail, ensure, Result};
 use bitcoin::Amount;
 use lngap_channel::{ChannelState, ContractOutput, Role};
 use lngap_contract::claim::{end_label, index_label, round_label};
+use lngap_contract::inner::{self, InnerKeys};
 use lngap_contract::instance::key_label;
 use lngap_contract::{ChallengerKeys, ClaimKeys, ContractInstance, DepthKeys, InstanceSpec, ProgramRegistry, CODE_BITS};
 use lngap_lamport::keystore::KeyStore;
@@ -174,6 +175,16 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
                         rounds: (1..=spec.rounds())
                             .map(|r| (0..spec.k - 1).map(|t| ks.generate_wots(&round_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
                             .collect::<Result<Vec<_>>>()?,
+                        inner: if spec.inner {
+                            Some(InnerKeys {
+                                sched: (16..inner::ROUNDS).map(|i| ks.generate_wots(&inner::sched_label(c.id, c.keys_seq, d, i), 4)).collect::<Result<Vec<_>>>()?,
+                                states: (1..=inner::SEARCH.rounds())
+                                    .map(|r| (0..inner::INNER_K - 1).map(|t| ks.generate_wots(&inner::inner_state_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
+                                    .collect::<Result<Vec<_>>>()?,
+                            })
+                        } else {
+                            None
+                        },
                     }),
                     None => None,
                 };
@@ -191,6 +202,11 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
                 if pr != me && c.challenger_keys[i].is_none() {
                     let ck = ChallengerKeys {
                         indices: (1..=spec.rounds()).map(|r| ks.generate(&index_label(c.id, c.keys_seq, d, r), spec.index_bits())).collect::<Result<Vec<_>>>()?,
+                        inner_indices: if spec.inner {
+                            (1..=inner::SEARCH.rounds()).map(|r| ks.generate(&inner::inner_index_label(c.id, c.keys_seq, d, r), inner::SEARCH.index_bits())).collect::<Result<Vec<_>>>()?
+                        } else {
+                            vec![]
+                        },
                     };
                     filled.challenger.push((c.id, d, ck.clone()));
                     c.challenger_keys[i] = Some(ck);

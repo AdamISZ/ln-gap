@@ -8,6 +8,7 @@
 //! disprove any inconsistency in one transaction.
 
 pub mod claim;
+pub mod inner;
 pub mod instance;
 pub mod leaves;
 pub mod onchain;

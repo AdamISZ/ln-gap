@@ -30,7 +30,7 @@ use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::{uint_to_bits, PublicKey, Reveal, PREIMAGE_LEN};
 use tracing::{info, warn};
 
-use dispute::{parse_p_round, parse_q_round, terminal_witness, DisputeLive, Stage};
+use dispute::{parse_p_inner, parse_p_round, parse_p_sched, parse_q_inner, parse_q_round, terminal_witness, DisputeLive, Stage};
 use draft::{apply_change, downcast, fill_my_keys, merge_keys, same_state, Change, MyKeys, StateSpec};
 use lngap_channel::sweep::{build_sweep, SweepInput};
 
@@ -76,11 +76,30 @@ pub struct Faults {
     pub dispute_anyway: bool,
     /// Stop responding in dispute rounds.
     pub silent_in_rounds: bool,
+    /// Stop responding once the dispute reaches the inner level.
+    pub silent_in_inner: bool,
+    /// Publish these schedule words instead of the honest ones (index → word).
+    pub cheat_schedule: Option<Arc<dyn Fn(u32, u32) -> u32 + Send + Sync>>,
+    /// Alter inner round states (round index → state); the alteration
+    /// propagates through the rest of the prover's "computation".
+    pub cheat_inner: Option<Arc<dyn Fn(u32, &[u32; 8]) -> [u32; 8] + Send + Sync>>,
 }
 
 impl std::fmt::Debug for Faults {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Faults(stop_from_seq={:?}, passive_onchain={}, cheat={}, cheat_claim={}, dispute_anyway={}, silent_in_rounds={})", self.stop_from_seq, self.passive_onchain, self.cheat_move.is_some(), self.cheat_claim.is_some(), self.dispute_anyway, self.silent_in_rounds)
+        write!(
+            f,
+            "Faults(stop_from_seq={:?}, passive_onchain={}, cheat={}, cheat_claim={}, dispute_anyway={}, silent_in_rounds={}, silent_in_inner={}, cheat_schedule={}, cheat_inner={})",
+            self.stop_from_seq,
+            self.passive_onchain,
+            self.cheat_move.is_some(),
+            self.cheat_claim.is_some(),
+            self.dispute_anyway,
+            self.silent_in_rounds,
+            self.silent_in_inner,
+            self.cheat_schedule.is_some(),
+            self.cheat_inner.is_some()
+        )
     }
 }
 
@@ -720,6 +739,11 @@ impl Party {
                 trees: vec![],
                 my_states: spec.states(),
                 responded: false,
+                sched: HashMap::new(),
+                inner_known: HashMap::new(),
+                inner_path: vec![],
+                my_sched: None,
+                my_inner: None,
             });
             if keys.prover != self.role && (!ok || self.faults.dispute_anyway) {
                 self.say(format!("contract {id}: disputing the claim"));
@@ -1038,9 +1062,56 @@ impl Party {
                 let j = parse_q_round(&tx, ck, r)?;
                 let dd = self.live[idx].dispute.as_mut().unwrap();
                 dd.path.push(j);
-                next_stage = if r < disp.spec.rounds() { Stage::WaitP(r + 1) } else { Stage::Terminal };
-                let (lo, len) = disp.spec.segment(&self.live[idx].dispute.as_ref().unwrap().path);
+                let (lo, len) = disp.spec.segment(&dd.path);
+                next_stage = if r < disp.spec.rounds() {
+                    Stage::WaitP(r + 1)
+                } else if disp.spec.inner {
+                    Stage::WaitSched
+                } else {
+                    Stage::Terminal
+                };
                 self.say(format!("contract {id}: challenger picked segment {j} in round {r}: steps {lo}..{}", lo + len));
+                if next_stage == Stage::WaitSched {
+                    self.enter_inner_level(idx)?;
+                }
+            }
+            "p_sched" => {
+                let ckeys = inst.claim_keys(disp.depth).expect("claim keys");
+                let words = parse_p_sched(&tx, ckeys)?;
+                let dd = self.live[idx].dispute.as_mut().unwrap();
+                for (i, w, sig) in words {
+                    dd.sched.insert(i, (w, sig));
+                }
+                next_stage = Stage::WaitInnerP(1);
+                self.say(format!("contract {id}: prover's 48 schedule words confirmed"));
+            }
+            n if n.starts_with("p_inner_") => {
+                let r: u32 = n[8..].parse()?;
+                let ckeys = inst.claim_keys(disp.depth).expect("claim keys");
+                let commits = parse_p_inner(&tx, ckeys, &disp.inner_path, r)?;
+                let dd = self.live[idx].dispute.as_mut().unwrap();
+                let points: Vec<u32> = commits.iter().map(|c| c.0).collect();
+                for (i, st, sig) in commits {
+                    dd.inner_known.insert(i, (st, sig));
+                }
+                next_stage = Stage::WaitInnerQ(r);
+                self.say(format!("contract {id}: prover's inner round {r} states confirmed (after rounds {points:?})"));
+            }
+            n if n.starts_with("q_inner_") => {
+                let r: u32 = n[8..].parse()?;
+                let ck = inst.challenger_keys(disp.depth).expect("challenger keys");
+                let j = parse_q_inner(&tx, ck, r)?;
+                let dd = self.live[idx].dispute.as_mut().unwrap();
+                dd.inner_path.push(j);
+                let (lo, len) = lngap_contract::inner::SEARCH.segment(&dd.inner_path);
+                next_stage = if r < lngap_contract::inner::SEARCH.rounds() { Stage::WaitInnerP(r + 1) } else { Stage::RoundTerminal };
+                self.say(format!("contract {id}: challenger picked segment {j} in inner round {r}: rounds {lo}..{}", lo + len));
+            }
+            n if n.starts_with("sched_") || n.starts_with("round_") => {
+                self.live[idx].dispute.as_mut().unwrap().stage = Stage::Resolved;
+                self.live[idx].resolved = true;
+                self.say(format!("contract {id}: disproved by {n} ({})", tx.compute_txid()));
+                return Ok(());
             }
             "timeout" => {
                 self.live[idx].dispute.as_mut().unwrap().stage = Stage::Resolved;
@@ -1080,6 +1151,10 @@ impl Party {
         }
         if self.faults.silent_in_rounds {
             self.say(format!("contract {}: FAULT: staying silent in the dispute", l.id));
+            return Ok(());
+        }
+        if self.faults.silent_in_inner && matches!(disp.stage, Stage::WaitSched | Stage::WaitInnerP(_) | Stage::WaitInnerQ(_) | Stage::RoundTerminal) {
+            self.say(format!("contract {}: FAULT: staying silent at the inner level", l.id));
             return Ok(());
         }
         let inst = self.instance(&l);
@@ -1128,27 +1203,118 @@ impl Party {
                 let args = terminal_witness(&disp)?;
                 let ctx = self.channel.commit_ctx(l.seq, l.version)?;
                 let (leaf_name, _) = lngap_contract::claim::terminal_leaf(&ctx, disp.prover, inst.claim_keys(disp.depth).expect("keys"), &disp.spec, &disp.path);
-                let leaf = disp.tree.leaf(&leaf_name)?.clone();
-                // a ~95 kvB transaction: pay by size (the node's min relay fee is 0.1 sat/vB on Core ≥ 30)
-                let build = |fee: Amount| -> Result<Transaction> {
-                    let mut tx = build_spend(disp.outpoint, &Timelock::NONE, vec![TxOut { value: disp.prevout.value - fee, script_pubkey: self.channel.my_payout_spk() }]);
-                    let sig = sign_tapscript(&self.channel.keys.payment, &tx, 0, std::slice::from_ref(&disp.prevout), &leaf.script)?;
-                    let mut w = WitnessStack::new();
-                    w.push(sig.as_ref().to_vec()).extend(args.clone());
-                    tx.input[0].witness = w.build(&leaf.script, &disp.tree.control_block(&leaf_name)?);
-                    Ok(tx)
-                };
-                let probe = build(self.channel.params.presign_fee)?;
-                let fee = Amount::from_sat((probe.vsize() as u64) / 10 + 100).max(self.channel.params.presign_fee);
-                let tx = build(fee)?;
-                self.say(format!("contract {id}: step {step} is wrong; broadcasting {leaf_name} ({} B witness)", tx.input[0].witness.size()));
-                self.channel.mark_swept(disp.outpoint);
+                self.say(format!("contract {id}: step {step} is wrong"));
+                self.broadcast_disproof(idx, &disp, &leaf_name, args)
+            }
+            Stage::WaitSched => {
+                let mine = disp.my_sched.expect("inner computation");
+                let mut sigs = Vec::new();
+                for i in 16..lngap_contract::inner::ROUNDS {
+                    let mut w = mine[i as usize];
+                    if let Some(cheat) = &self.faults.cheat_schedule {
+                        w = cheat(i, w);
+                    }
+                    let label = lngap_contract::inner::sched_label(id, inst.keys_seq, disp.depth, i);
+                    sigs.push(self.keystore.sign_wots(&label, &w.to_be_bytes())?);
+                }
+                self.say(format!("contract {id}: publishing the 48 schedule words of step {}", disp.isolated_step().2));
+                let extra = lngap_contract::inner::p_sched_witness(&sigs);
                 self.live[idx].dispute.as_mut().unwrap().responded = true;
-                self.channel.broadcast(&tx, &leaf_name)?;
-                Ok(())
+                self.broadcast_dispute_tx(&l, &disp, "p_sched", &extra)
+            }
+            Stage::WaitInnerP(r) => {
+                let mine = disp.my_inner.as_ref().expect("inner computation");
+                let points = lngap_contract::inner::SEARCH.round_points(&disp.inner_path);
+                let mut sigs = Vec::new();
+                for (t, i) in points.iter().enumerate() {
+                    let label = lngap_contract::inner::inner_state_label(id, inst.keys_seq, disp.depth, r, t as u32);
+                    sigs.push(self.keystore.sign_wots(&label, &lngap_contract::script_hash::state_bytes(&mine[*i as usize]))?);
+                }
+                self.say(format!("contract {id}: answering inner round {r} with states after rounds {points:?}"));
+                let extra = lngap_contract::claim::p_round_witness(&sigs);
+                self.live[idx].dispute.as_mut().unwrap().responded = true;
+                self.broadcast_dispute_tx(&l, &disp, &format!("p_inner_{r}"), &extra)
+            }
+            Stage::WaitInnerQ(r) => {
+                if r == 1 {
+                    if let Some(i) = disp.first_bad_sched() {
+                        let ctx = self.channel.commit_ctx(l.seq, l.version)?;
+                        let (leaf_name, args) = disp.sched_disproof(&ctx, inst.claim_keys(disp.depth).expect("keys"), i)?;
+                        self.say(format!("contract {id}: schedule word {i} is wrong"));
+                        return self.broadcast_disproof(idx, &disp, &leaf_name, args);
+                    }
+                }
+                let j = disp.choose_inner_index();
+                let label = lngap_contract::inner::inner_index_label(id, inst.keys_seq, disp.depth, r);
+                let reveal = self.keystore.reveal_uint(&label, j)?;
+                self.say(format!("contract {id}: inner round {r}: first bad segment is {j}"));
+                self.live[idx].dispute.as_mut().unwrap().responded = true;
+                self.broadcast_dispute_tx(&l, &disp, &format!("q_inner_{r}"), &lngap_contract::claim::q_round_witness(&reveal))
+            }
+            Stage::RoundTerminal => {
+                let (lo, len) = lngap_contract::inner::SEARCH.segment(&disp.inner_path);
+                debug_assert_eq!(len, 1);
+                let r = lo;
+                let (expect, claimed) = disp.check_round(r)?;
+                if expect == claimed {
+                    self.say(format!("contract {id}: isolated round {r} is correct; nothing to disprove (the prover will time me out)"));
+                    self.live[idx].dispute.as_mut().unwrap().responded = true;
+                    return Ok(());
+                }
+                let ctx = self.channel.commit_ctx(l.seq, l.version)?;
+                let (leaf_name, args) = disp.round_disproof(&ctx, inst.claim_keys(disp.depth).expect("keys"), r)?;
+                self.say(format!("contract {id}: round {r} is wrong"));
+                self.broadcast_disproof(idx, &disp, &leaf_name, args)
             }
             Stage::Resolved => Ok(()),
         }
+    }
+
+    /// Entering the inner level: compute the isolated step's schedule and
+    /// round states (the prover from its own claimed input, with its faults
+    /// applied; the challenger from the prover's committed input).
+    fn enter_inner_level(&mut self, idx: usize) -> Result<()> {
+        let disp = self.live[idx].dispute.clone().expect("dispute");
+        let (cur_src, _, step) = disp.isolated_step();
+        let cur = if disp.prover == self.role {
+            disp.my_states[step as usize]
+        } else {
+            match cur_src {
+                lngap_contract::claim::StateSource::Const(s) => s,
+                _ => disp.known.get(&step).map(|k| k.0).ok_or_else(|| anyhow!("no committed state {step}"))?,
+            }
+        };
+        let block = disp.spec.blocks[step as usize];
+        let sched = lngap_contract::inner::schedule(&block);
+        let cheat = if disp.prover == self.role { self.faults.cheat_inner.clone() } else { None };
+        let states = lngap_contract::inner::round_states(&cur, &sched, cheat.as_ref().map(|c| c.as_ref() as &dyn Fn(u32, &[u32; 8]) -> [u32; 8]));
+        let dd = self.live[idx].dispute.as_mut().unwrap();
+        dd.my_sched = Some(sched);
+        dd.my_inner = Some(states);
+        self.say(format!("contract {}: descending into compression step {step} (64 rounds)", self.live[idx].id));
+        Ok(())
+    }
+
+    /// The challenger's disproof transaction for `leaf_name`: pays by size
+    /// (the node's min relay fee is 0.1 sat/vB on Core ≥ 30).
+    fn broadcast_disproof(&mut self, idx: usize, disp: &DisputeLive, leaf_name: &str, args: Vec<Vec<u8>>) -> Result<()> {
+        let leaf = disp.tree.leaf(leaf_name)?.clone();
+        let build = |fee: Amount| -> Result<Transaction> {
+            let mut tx = build_spend(disp.outpoint, &Timelock::NONE, vec![TxOut { value: disp.prevout.value - fee, script_pubkey: self.channel.my_payout_spk() }]);
+            let sig = sign_tapscript(&self.channel.keys.payment, &tx, 0, std::slice::from_ref(&disp.prevout), &leaf.script)?;
+            let mut w = WitnessStack::new();
+            w.push(sig.as_ref().to_vec()).extend(args.clone());
+            tx.input[0].witness = w.build(&leaf.script, &disp.tree.control_block(leaf_name)?);
+            Ok(tx)
+        };
+        let probe = build(self.channel.params.presign_fee)?;
+        let fee = Amount::from_sat((probe.vsize() as u64) / 10 + 100).max(self.channel.params.presign_fee);
+        let tx = build(fee)?;
+        self.say(format!("contract {}: broadcasting {leaf_name} ({} B witness, {} vB)", self.live[idx].id, tx.input[0].witness.size(), tx.vsize()));
+        self.channel.mark_swept(disp.outpoint);
+        self.live[idx].dispute.as_mut().unwrap().responded = true;
+        self.channel.broadcast(&tx, leaf_name)?;
+        Ok(())
     }
 
     fn broadcast_dispute_tx(&mut self, l: &Live, disp: &DisputeLive, label: &str, extra: &[Vec<u8>]) -> Result<()> {

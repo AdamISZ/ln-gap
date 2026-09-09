@@ -15,7 +15,10 @@ crates/
   btc/        keys, taproot trees, sighash, tx building, witness, regtest wrapper
   lamport/    one-time bit commitments, Script gadgets, per-party key store
   channel/    channel state machine, commitments, revocation, close paths
-  contract/   Contract trait, contract-output taptree, pre-signed graph, disprove leaves
+  contract/   Contract trait, contract-output taptree, pre-signed graph, disprove leaves,
+              bisection claims (claim.rs: compression level; inner.rs: round level)
+  script32/   32-bit word gadgets and a SHA-256 round / schedule step in Script, with a
+              native mini-interpreter for debugging
   apps/       tictactoe, names (registry, anchor chain, bonded hub, sale)
   party/      user/hub behaviour: off-chain negotiation, watch loop, statements
   harness/    scenario runner (`scenarios` binary), single- and two-channel worlds
@@ -31,7 +34,9 @@ Requires `bitcoind` (v25+) on `PATH` (or `LNGAP_BITCOIND=/path/to/bitcoind`)
 and a Rust toolchain.
 
 ```
-cargo test                                          # everything: ~50 tests, ~1 min
+cargo test                                          # everything: ~60 tests, ~1.5 min
+cargo test -p lngap-harness --test p2_inner -- --nocapture   # bisection disputes with the
+                                                    #   two-level search (p1_claims: flat)
 cargo run -p lngap-harness --bin scenarios          # the demo: all 18 scenarios,
                                                     #   narrative log, writes docs/SCENARIOS.md
 cargo run -p lngap-harness --bin scenarios -- --keep T2   # one scenario, keep its
@@ -97,6 +102,7 @@ is a reaction of the party's own watch loop.
 | Bonded hub | N2, N3, N6 | bond claimed with the hub's receipt; hub reclaims only by publishing the attestation |
 | Sale | N4, N5, N7 | payment gated on an attestation; the buyer's leg reveals it, the seller copies it from the chain |
 | Audit | N8 | omission and equivocation reported off-chain (not enforced: needs SPV in script) |
+| Bisection claims | `p1_claims`, `p2_inner` tests | a 16-step SHA-256 chain disputed by bisection; two-level search ends in a one-round leaf (largest tx 12 kvB, whole dispute ~53 kvB) |
 
 Sizes: a tic-tac-toe Move is ~2.3 KB of witness; disproofs are 0.3–2 KB;
 the whole pre-signed graph from an empty board is 37 transactions per

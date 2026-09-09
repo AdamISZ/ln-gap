@@ -178,13 +178,21 @@ pub struct HashChain {
 
 impl HashChain {
     pub const NAME: &'static str = "hashchain";
+    pub const FLAT_NAME: &'static str = "hashchain-flat";
     pub const REFUND: u8 = 0;
     pub const PAID: u8 = 1;
-    /// 16 steps, branching 4 (two rounds), fixed start and block.
+    /// 16 steps, branching 4 (two rounds), fixed start and block; two-level
+    /// search (round-level terminal).
     pub fn standard() -> HashChain {
+        let mut h = HashChain::flat();
+        h.spec.inner = true;
+        h
+    }
+    /// The same chain with the phase-1 compression-level terminal leaf.
+    pub fn flat() -> HashChain {
         let start = [0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
         let block: [u8; 64] = core::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(3));
-        HashChain { spec: crate::claim::ClaimSpec { n_steps: 16, k: 4, start, blocks: vec![block; 16] } }
+        HashChain { spec: crate::claim::ClaimSpec { n_steps: 16, k: 4, start, blocks: vec![block; 16], inner: false } }
     }
     /// The honest end state.
     pub fn end_state(&self) -> [u32; 8] {
@@ -197,7 +205,7 @@ impl Contract for HashChain {
     type Move = bool;
 
     fn name(&self) -> &str {
-        Self::NAME
+        if self.spec.inner { Self::NAME } else { Self::FLAT_NAME }
     }
     fn outcomes(&self) -> Vec<Outcome> {
         vec![Outcome::new(Self::REFUND, "Refund", Payout::HubAll), Outcome::new(Self::PAID, "Paid", Payout::UserAll)]

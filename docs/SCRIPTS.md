@@ -104,6 +104,50 @@ Graph for M = 2: 7 pre-signed transactions per commitment version.
 `C'_1`: 26 leaves, 9.9 KB of script; `C'_2`: 28 leaves, 12.2 KB (control blocks 161–193 B).
 Graph from the empty board (M = 9): 37 pre-signed transactions per commitment version.
 
+## Bisection claims (`lngap-contract::claim`, `::inner`, `lngap-script32`)
+
+A claim is a chain of SHA-256 compressions the prover commits the end of
+with a 256-bit Winternitz signature in its Move (4-bit digits, 64 message +
+3 checksum digits; witness 1.4 KB, verifier 5 KB). Off `C'_d` a pre-signed
+chain lets the challenger bisect (D18):
+
+| Output | Leaf | Script | Witness after sigs | Timelock |
+|---|---|---|---|---|
+| `C'_d` | `dispute` | 2-of-2 | — | — |
+| `D_0`, `R_r'` | `p_round_r` | 2-of-2-verify, `k−1` × Winternitz verify+drop, `OP_1` | the `k−1` midstate signatures | timeout leaf: Q after Δ |
+| `R_r` | `q_round_r` | 2-of-2-verify, `log2 k` × `bit_decode OP_DROP`, `OP_1` | the index preimages | timeout: P after Δ |
+| `R_R'` | `p_sched` | 2-of-2-verify, 48 × 32-bit Winternitz verify+drop (10 digits each), `OP_1` — 35.7 KB | 48 signatures, 962 items | timeout: Q |
+| `S_r` | `p_inner_r` | 2-of-2-verify, 7 × Winternitz verify+drop, `OP_1` | 7 state signatures | timeout: Q |
+| `I_r` | `q_inner_r` | 2-of-2-verify, 3 × `bit_decode OP_DROP`, `OP_1` | 3 preimages | timeout: P |
+| `I_1` | `sched_<hash>` (×48 per block) | `<Q> OP_CHECKSIGVERIFY`, verify `W[i]` and its committed inputs (constants for `i−16 < 16`), park on the altstack, push tables, schedule step, "differs" check | `sig_Q`, input signatures, `W[i]` signature | — |
+| `T` | `round_<hash>` (×64 per block, plus source variants of rounds 0 and 63) | `<Q> OP_CHECKSIGVERIFY`, verify `W[r]`, `s_r`, (`cur` for r = 63), `s_{r+1}`; tables; one SHA-256 round (+ feed-forward add); "differs" check | `sig_Q` and the signatures in that order | — |
+| any | `timeout` | `<Δ> OP_CSV OP_DROP <X.payment> OP_CHECKSIG` | `sig_X` | CSV Δ |
+| `R_R'` (flat claims) | `step_<hash>` | `<Q> OP_CHECKSIGVERIFY`, two Winternitz midstates, `sha256_u4` compression (368.7 KB), mismatch check | `sig_Q`, next then cur signatures | — |
+
+Leaves are named by a hash of their script and deduplicated: paths whose
+isolated step has the same sources and block share a leaf.
+
+### 32-bit word gadgets (`lngap-script32`)
+
+Words are 8 nibbles, most significant deepest. Tables pushed by the leaf
+(608 one-byte constants): `xor[16a+b]`, `and[16a+b]` (256 entries each,
+entry 0 nearest the top) and for `s` in 1..3 `lo_s[x] = x >> s`,
+`hi_s[x] = (x << (4−s)) & 15`. A lookup is `<depth> OP_ADD OP_PICK` with the
+depth tracked at build time.
+
+| Gadget | Method | Script |
+|---|---|---|
+| `a + b mod 2^32` | nibble adds LS-first with a carry (`OP_GREATERTHANOREQUAL`, `OP_SUB`) | 1,130 B |
+| `a ^ b`, `a & b` | 8 table lookups | 1,167 / 1,159 B |
+| `!a` | `15 − x` per nibble | 1,017 B |
+| `rotr n`, `shr n` | nibble rotate by `n/4`, then per nibble `lo_s(x_j) + hi_s(x_{j−1})` | 1,129–1,141 B |
+| SHA-256 round (`K[i]` constant, `W[i]` on the stack) | Σ1, Ch, Σ0, Maj, two adds, shift | 6,128 B |
+| schedule step `W[i] = σ1(W[i−2]) + W[i−7] + σ0(W[i−15]) + W[i−16]` | | 3,252 B |
+| "differs" (n nibbles) | n × (`OP_ROLL OP_ROLL OP_EQUAL OP_TOALTSTACK`), drop tables, `OP_BOOLAND` chain, `OP_NOT` | ~1 KB for n = 64 |
+
+Every gadget is checked against its native counterpart on regtest and
+exhaustively in the crate's mini-interpreter (`script32::sim`).
+
 ## Names (`lngap-names`), statements as 32-bit Lamport slots
 
 A hub statement is a 32-bit Lamport key (label = what it is about) whose

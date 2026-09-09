@@ -101,6 +101,15 @@ impl ContractInstance {
                 let c = k.claim.as_ref().ok_or_else(|| anyhow!("depth {}: prover claim keys missing", i + 1))?;
                 ensure!(c.rounds.len() == rounds && c.rounds.iter().all(|r| r.len() as u32 == spec.k - 1), "depth {}: round keys", i + 1);
                 ensure!(ck.indices.len() == rounds && ck.indices.iter().all(|pk| pk.n_bits() == spec.index_bits()), "depth {}: index keys", i + 1);
+                if spec.inner {
+                    let ik = c.inner.as_ref().ok_or_else(|| anyhow!("depth {}: inner keys missing", i + 1))?;
+                    let ir = crate::inner::SEARCH.rounds() as usize;
+                    ensure!(ik.sched.len() as u32 == crate::inner::ROUNDS - 16, "depth {}: schedule keys", i + 1);
+                    ensure!(ik.states.len() == ir && ik.states.iter().all(|r| r.len() as u32 == crate::inner::INNER_K - 1), "depth {}: inner state keys", i + 1);
+                    ensure!(ck.inner_indices.len() == ir && ck.inner_indices.iter().all(|pk| pk.n_bits() == crate::inner::SEARCH.index_bits()), "depth {}: inner index keys", i + 1);
+                } else {
+                    ensure!(c.inner.is_none() && ck.inner_indices.is_empty(), "depth {}: inner keys on a flat claim", i + 1);
+                }
             }
         } else {
             ensure!(challenger_keys.is_empty() && keys.iter().all(|k| k.claim.is_none()), "claim keys on a program without a claim");
