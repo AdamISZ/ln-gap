@@ -17,6 +17,9 @@ use bitcoin::script::{Builder, PushBytesBuf, ScriptBuf};
 const SHA256_32: &[u8] = include_bytes!("../scripts/sha256_32.bin");
 const SHA256_64: &[u8] = include_bytes!("../scripts/sha256_64.bin");
 const SHA256_80: &[u8] = include_bytes!("../scripts/sha256_80.bin");
+const SHA256_U4_32: &[u8] = include_bytes!("../scripts/sha256_u4_32.bin");
+const SHA256_U4_64: &[u8] = include_bytes!("../scripts/sha256_u4_64.bin");
+const SHA256_U4_80: &[u8] = include_bytes!("../scripts/sha256_u4_80.bin");
 
 /// The SHA-256 script for an `n`-byte message (`n` ∈ {32, 64, 80}).
 pub fn sha256_script(n: usize) -> ScriptBuf {
@@ -75,4 +78,38 @@ fn append(b: Builder, s: &ScriptBuf) -> Builder {
     let mut v = b.into_script().into_bytes();
     v.extend_from_slice(s.as_bytes());
     Builder::from(v)
+}
+
+// ----- nibble-wise variant (`bitvm/src/hash/sha256_u4.rs`): about 35% smaller -----
+//
+// Convention: input = 2n elements, one per nibble, each a script number
+// 0..=15, in message order with the *last* nibble on top; output = 64 nibble
+// elements in the same layout (last nibble of the digest on top).
+
+pub fn sha256_u4_script(n: usize) -> ScriptBuf {
+    let bytes = match n {
+        32 => SHA256_U4_32,
+        64 => SHA256_U4_64,
+        80 => SHA256_U4_80,
+        _ => panic!("no embedded nibble-wise SHA-256 script for {n} bytes"),
+    };
+    ScriptBuf::from_bytes(bytes.to_vec())
+}
+
+fn nibbles(msg: &[u8]) -> Vec<u8> {
+    msg.iter().flat_map(|b| [b >> 4, b & 0xf]).collect()
+}
+
+/// Witness elements for `msg` in consumption order (last nibble first).
+pub fn message_witness_u4(msg: &[u8]) -> Vec<Vec<u8>> {
+    nibbles(msg).iter().rev().map(|n| byte_as_scriptnum(*n)).collect()
+}
+
+/// Append the nibble-wise script and a check that the digest equals `digest`.
+pub fn sha256_u4_equals(b: Builder, n: usize, digest: &[u8; 32]) -> Builder {
+    let mut b = append(b, &sha256_u4_script(n));
+    for nib in nibbles(digest).iter().rev() {
+        b = push_scriptnum(b, *nib).push_opcode(OP_EQUALVERIFY);
+    }
+    b.push_opcode(OP_PUSHNUM_1)
 }

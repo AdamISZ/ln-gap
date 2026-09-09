@@ -7,7 +7,7 @@ use lngap_btc::regtest::Regtest;
 use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::WitnessStack;
-use lngap_contract::script_hash::{message_witness, sha256_equals, sha256_script};
+use lngap_contract::script_hash::{message_witness, message_witness_u4, sha256_equals, sha256_script, sha256_u4_equals, sha256_u4_script};
 use sha2::{Digest, Sha256};
 
 #[test]
@@ -39,5 +39,39 @@ fn sha256_leaf_on_regtest() {
         let tx = spend(&msg);
         let h = rt.mine_with_check(&tx).unwrap_or_else(|e| panic!("sha256({n}) valid spend rejected: {e}"));
         eprintln!("sha256({n}) mined at {h}: weight {} WU, vsize {}", tx.weight(), tx.vsize());
+    }
+}
+
+/// The nibble-wise variant: does one compression fit a standard transaction?
+#[test]
+fn sha256_u4_leaf_on_regtest() {
+    let rt = Regtest::start().unwrap();
+    for n in [32usize, 80] {
+        let msg: Vec<u8> = (0..n as u32).map(|i| (i * 53 + 7) as u8).collect();
+        let digest: [u8; 32] = Sha256::digest(&msg).into();
+        let leaf = sha256_u4_equals(Builder::new(), n, &digest).into_script();
+        eprintln!("SIZE sha256_u4({n}) leaf: {} bytes (raw {} bytes)", leaf.len(), sha256_u4_script(n).len());
+        let tree = TapTree::new(vec![Leaf::new("h", leaf.clone(), Timelock::NONE)]).unwrap();
+        let sink = TapTree::new(vec![Leaf::new("x", Builder::new().push_int(1).into_script(), Timelock::NONE)]).unwrap().script_pubkey();
+        let spend = |m: &[u8]| {
+            let (op, _prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(2_000_000)).unwrap();
+            let mut tx = build_spend(op, &Timelock::NONE, vec![TxOut { value: Amount::from_sat(1_500_000), script_pubkey: sink.clone() }]);
+            let mut w = WitnessStack::new();
+            w.extend(message_witness_u4(m));
+            tx.input[0].witness = w.build(&leaf, &tree.control_block("h").unwrap());
+            tx
+        };
+        let tx = spend(&msg);
+        let standard = tx.weight().to_wu() <= 400_000;
+        match rt.test_accept(&tx) {
+            Ok(vs) => eprintln!("sha256_u4({n}) MEMPOOL-ACCEPTED: vsize {vs}, weight {} WU, within 400 kWU standard limit: {standard}", tx.weight()),
+            Err(e) => eprintln!("sha256_u4({n}) mempool rejected: {e}; weight {} WU, standard-size: {standard}", tx.weight()),
+        }
+        let mut wrong = msg.clone();
+        wrong[1] ^= 0x10;
+        let r = rt.mine_with_check(&spend(&wrong));
+        assert!(r.is_err(), "wrong message must fail");
+        let h = rt.mine_with_check(&tx).unwrap_or_else(|e| panic!("sha256_u4({n}) valid spend rejected: {e}"));
+        eprintln!("sha256_u4({n}) mined at {h}");
     }
 }

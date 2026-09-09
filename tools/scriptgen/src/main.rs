@@ -16,6 +16,8 @@ fn main() {
     }
     for n in [32u32, 64, 80] {
         let s = bitvm::hash::sha256_u4::sha256(n).compile();
+        let path = out.join(format!("sha256_u4_{n}.bin"));
+        std::fs::write(&path, s.as_bytes()).unwrap();
         println!("sha256_u4({n}) nibble-wise: {} bytes", s.len());
     }
     for n in [32usize, 64, 80] {
