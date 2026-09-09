@@ -8,6 +8,6 @@ pub mod claim;
 pub mod ledger;
 pub mod program;
 
-pub use claim::{AnchorClaim, HeaderChainClaim};
+pub use claim::{AnchorClaim, AnchorData, AnchorShape, HeaderChainClaim, HeaderShape};
 pub use ledger::Ledger;
 pub use program::Spv;

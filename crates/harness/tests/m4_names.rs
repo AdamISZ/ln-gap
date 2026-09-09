@@ -16,3 +16,4 @@ scenario_test!(n5, N5);
 scenario_test!(n6, N6);
 scenario_test!(n7, N7);
 scenario_test!(n8, N8);
+scenario_test!(n9, N9);

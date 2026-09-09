@@ -40,7 +40,7 @@ cargo test -p lngap-harness --test p2_inner -- --nocapture   # bisection dispute
                                                     #   two-level search (p1_claims: flat)
 cargo test -p lngap-harness --test p3_spv -- --nocapture     # SPV facts: headers, anchor,
                                                     #   Merkle and ledger paths; fork refutation
-cargo run -p lngap-harness --bin scenarios          # the demo: all 18 scenarios,
+cargo run -p lngap-harness --bin scenarios          # the demo: all 19 scenarios,
                                                     #   narrative log, writes docs/SCENARIOS.md
 cargo run -p lngap-harness --bin scenarios -- --keep T2   # one scenario, keep its
                                                     #   regtest datadir at ./regtest-data/T2/
@@ -102,9 +102,9 @@ is a reaction of the party's own watch loop.
 | Channel | M1 tests, T7, c6 | funding, 10 updates, cooperative close, unilateral close with delay, penalty sweep including a contract output |
 | Force-move | T2, T3, T8, T9, c2–c4 | Move chain up to depth 3, Settle after the deadline, Split after Δ / Δ+Δ' |
 | Fraud proofs | T4, T5, T6, T6b, c5 | one-transaction disproofs: occupied cell, wrong board, wrong status, wrong code |
-| Bonded hub | N2, N3, N6 | bond claimed with the hub's receipt; hub reclaims only by publishing the attestation |
-| Sale | N4, N5, N7 | payment gated on an attestation; the buyer's leg reveals it, the seller copies it from the chain |
-| Audit | N8 | omission and equivocation reported off-chain (not enforced: needs SPV in script) |
+| Bonded hub | N2, N3, N6 | bond claimed with the hub's receipt; the hub reclaims only by proving inclusion on-chain (a 128-step bisection claim) |
+| Sale | N4, N5, N7 | payment gated on an inclusion proof; both legs use the same public proof, no attestation |
+| Omission, fake chain | N8, N9 | a bluffed inclusion proof is disproved at the ledger-root check; a proof on a private fork is refuted by the heavier chain |
 | Bisection claims | `p1_claims`, `p2_inner` tests | a 16-step SHA-256 chain disputed by bisection; two-level search ends in a one-round leaf (largest tx 12 kvB, whole dispute ~53 kvB) |
 | SPV facts | `p3_spv` tests | a ledger entry anchored in a block of a valid regtest header chain, as a 128-step claim; a header that does not link or lacks proof of work, a wrong Merkle or ledger sibling are each disproved by one small leaf; a private fork is refuted by the heavier chain |
 

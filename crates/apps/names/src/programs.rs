@@ -1,59 +1,106 @@
-//! The two contract programs of the names demo.
+//! The contract programs of the names demo, on SPV facts.
 //!
-//! * `nreg:{params}` — bonded registration (N-REG). The hub locks a bond.
-//!   The user may claim "receipted, unattested" from `d_receipt` on by
-//!   revealing the hub's receipt; the hub's only answer is to reveal the
-//!   attestation (`disprove_attested`), which then becomes public.
-//! * `attestpay:{params}` — a payment gated on an attestation. The locker's
-//!   money goes to the prover if the prover reveals the hub's attestation
-//!   before the deadline, else back to the locker.
+//! * `nreg:{params}` — bonded registration. The hub locks a bond. From
+//!   `d_receipt` the user may claim "receipted, not anchored" by revealing
+//!   the hub's receipt (depth 1). The hub's only answer is an inclusion
+//!   proof: a bisection claim that the entry is in the ledger anchored at
+//!   the promised height in the chain from the checkpoint (depth 2). The
+//!   user may refute that chain with a heavier one (depth 3).
+//! * `anchorpay:{params}` — a payment gated on an inclusion proof by the
+//!   prover (depth 1), refutable by a heavier chain (depth 2).
+//!
+//! Proof data (headers, the anchor transaction, siblings) is served
+//! off-chain; the harness models this with a shared [`ServedData`] store
+//! both parties read.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{ensure, Result};
+use lngap_contract::claim::{ClaimData, ClaimSpec};
 use lngap_contract::prelude::*;
 use lngap_contract::{Program, ProgramRegistry};
 use lngap_lamport::PublicKey;
+use lngap_spv::AnchorShape;
 use serde::{Deserialize, Serialize};
+
+/// Proof data by slot: `"{slot}/incl"` for the inclusion proof, `"{slot}/refute"` for a heavier chain.
+#[derive(Clone, Default)]
+pub struct ServedData(Arc<Mutex<HashMap<String, ClaimData>>>);
+
+impl std::fmt::Debug for ServedData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ServedData({} slots)", self.0.lock().unwrap().len())
+    }
+}
+
+impl ServedData {
+    pub fn put(&self, key: &str, data: ClaimData) {
+        self.0.lock().unwrap().insert(key.to_string(), data);
+    }
+    pub fn get(&self, key: &str) -> Option<ClaimData> {
+        self.0.lock().unwrap().get(key).cloned()
+    }
+    pub fn has(&self, key: &str) -> bool {
+        self.0.lock().unwrap().contains_key(key)
+    }
+}
+
+fn all_to(r: Role) -> Payout {
+    match r {
+        Role::User => Payout::UserAll,
+        Role::Hub => Payout::HubAll,
+    }
+}
+
+// ----- nreg -----
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NRegParams {
     pub req_id: u32,
     pub receipt_pk: PublicKey,
-    pub attest_label: String,
-    pub attest_pk: PublicKey,
-    pub attest_value: u32,
-    /// The hub promised inclusion by this height; claims are allowed from it.
+    /// Claims are allowed from this height (the promised anchor height plus a grace).
     pub d_receipt: u32,
+    pub shape: AnchorShape,
+    pub slot: String,
 }
 
 #[derive(Debug)]
 pub struct NReg {
     pub params: NRegParams,
     name: String,
+    store: ServedData,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NRegState {
+    Init,
+    /// The user claimed on the receipt.
+    Claimed,
+    /// The hub proved inclusion.
+    Refuted,
+    /// The user refuted the hub's chain.
+    Reinstated,
 }
 
 impl NReg {
     pub const PREFIX: &'static str = "nreg";
     pub const BOND_TO_HUB: u8 = 0;
     pub const BOND_TO_USER: u8 = 1;
-    pub fn new(params: NRegParams) -> NReg {
+    pub fn new(params: NRegParams, store: ServedData) -> NReg {
         let name = format!("{}:{}", Self::PREFIX, serde_json::to_string(&params).expect("serializable"));
-        NReg { params, name }
+        NReg { params, name, store }
     }
-    pub fn from_str(params: &str) -> Result<NReg> {
-        Ok(NReg::new(serde_json::from_str(params)?))
+    pub fn from_str(params: &str, store: ServedData) -> Result<NReg> {
+        Ok(NReg::new(serde_json::from_str(params)?, store))
     }
     pub fn receipt_extra(&self) -> Extra {
         Extra { label: crate::statements::receipt_label(self.params.req_id), pk: self.params.receipt_pk.clone(), value: crate::statements::receipt_value(self.params.req_id) }
     }
-    pub fn attest_extra(&self) -> Extra {
-        Extra { label: self.params.attest_label.clone(), pk: self.params.attest_pk.clone(), value: self.params.attest_value }
-    }
 }
 
 impl Contract for NReg {
-    type State = bool; // claimed
+    type State = NRegState;
     type Move = bool;
 
     fn name(&self) -> &str {
@@ -62,36 +109,57 @@ impl Contract for NReg {
     fn outcomes(&self) -> Vec<Outcome> {
         vec![Outcome::new(Self::BOND_TO_HUB, "BondToHub", Payout::HubAll), Outcome::new(Self::BOND_TO_USER, "BondToUser", Payout::UserAll)]
     }
-    fn initial(&self) -> bool {
-        false
+    fn initial(&self) -> NRegState {
+        NRegState::Init
     }
-    fn turn(&self, s: &bool) -> Option<Role> {
-        (!s).then_some(Role::User)
-    }
-    fn transition(&self, s: &bool, m: &bool, mover: Role) -> Result<bool, Invalid> {
-        if *s || mover != Role::User || !*m {
-            return Err(Invalid("only the user may claim, once".into()));
+    fn turn(&self, s: &NRegState) -> Option<Role> {
+        match s {
+            NRegState::Init => Some(Role::User),
+            NRegState::Claimed => Some(Role::Hub),
+            NRegState::Refuted => Some(Role::User),
+            NRegState::Reinstated => None,
         }
-        Ok(true)
     }
-    fn resolution(&self, s: &bool) -> Outcome {
-        Contract::outcomes(self).swap_remove(usize::from(*s))
+    fn transition(&self, s: &NRegState, m: &bool, mover: Role) -> Result<NRegState, Invalid> {
+        match (s, mover, m) {
+            (NRegState::Init, Role::User, true) => Ok(NRegState::Claimed),
+            (NRegState::Claimed, Role::Hub, true) => Ok(NRegState::Refuted),
+            (NRegState::Refuted, Role::User, true) => Ok(NRegState::Reinstated),
+            _ => Err(Invalid("not this party's move".into())),
+        }
     }
-    fn max_depth_from(&self, s: &bool) -> u32 {
-        u32::from(!s)
+    fn resolution(&self, s: &NRegState) -> Outcome {
+        let o = Contract::outcomes(self);
+        match s {
+            NRegState::Init | NRegState::Refuted => o[Self::BOND_TO_HUB as usize].clone(),
+            NRegState::Claimed | NRegState::Reinstated => o[Self::BOND_TO_USER as usize].clone(),
+        }
+    }
+    fn max_depth_from(&self, s: &NRegState) -> u32 {
+        match s {
+            NRegState::Init => 3,
+            NRegState::Claimed => 2,
+            NRegState::Refuted => 1,
+            NRegState::Reinstated => 0,
+        }
     }
     fn n_state_bits(&self) -> usize {
-        1
+        2
     }
     fn n_move_bits(&self) -> usize {
         1
     }
-    fn state_bits(&self, s: &bool) -> Vec<bool> {
-        vec![*s]
+    fn state_bits(&self, s: &NRegState) -> Vec<bool> {
+        uint_to_bits(*s as u32, 2)
     }
-    fn state_from_bits(&self, b: &[bool]) -> Result<bool> {
-        ensure!(b.len() == 1);
-        Ok(b[0])
+    fn state_from_bits(&self, b: &[bool]) -> Result<NRegState> {
+        ensure!(b.len() == 2);
+        Ok(match bits_to_uint(b) {
+            0 => NRegState::Init,
+            1 => NRegState::Claimed,
+            2 => NRegState::Refuted,
+            _ => NRegState::Reinstated,
+        })
     }
     fn move_bits(&self, m: &bool) -> Vec<bool> {
         vec![*m]
@@ -100,105 +168,142 @@ impl Contract for NReg {
         ensure!(b.len() == 1);
         Ok(b[0])
     }
-    fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras {
-        debug_assert!(depth == 1 && prover == Role::User);
-        MoveExtras { cltv: Some(self.params.d_receipt), expects: vec![self.receipt_extra()] }
+    fn move_extras(&self, depth: u32, _prover: Role) -> MoveExtras {
+        if depth == 1 {
+            MoveExtras { cltv: Some(self.params.d_receipt), expects: vec![self.receipt_extra()] }
+        } else {
+            MoveExtras::default()
+        }
+    }
+    fn claim(&self, depth: u32) -> Option<ClaimSpec> {
+        match depth {
+            2 => Some(self.params.shape.spec()),
+            3 => Some(self.params.shape.refutation().spec()),
+            _ => None,
+        }
+    }
+    fn claim_data(&self, depth: u32) -> ClaimData {
+        match depth {
+            2 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
+            3 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
+            _ => vec![],
+        }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
+        let want_state = i64::from(ctx.depth); // Claimed = 1, Refuted = 2, Reinstated = 3
+        let want_code = i64::from(if ctx.depth == 2 { Self::BOND_TO_HUB } else { Self::BOND_TO_USER });
         vec![
-            // the hub did attest: revealing the attestation takes the bond back
-            LeafBuilder::new(ctx).need(self.attest_extra()).finish_needs_only("attested"),
-            LeafBuilder::new(ctx).new_uint(0..1).op(OP_NOT).finish("state_mismatch", |c| !c.new[0]),
-            LeafBuilder::new(ctx).code_uint().int(i64::from(Self::BOND_TO_USER)).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| c.code != Self::BOND_TO_USER),
+            LeafBuilder::new(ctx).new_uint(0..2).int(want_state).op(OP_NUMNOTEQUAL).finish("state_mismatch", move |c| bits_to_uint(&c.new) != want_state as u32),
+            LeafBuilder::new(ctx).code_uint().int(want_code).op(OP_NUMNOTEQUAL).finish("code_mismatch", move |c| i64::from(c.code) != want_code),
         ]
     }
-    fn describe_state(&self, s: &bool) -> String {
-        if *s { "claimed (receipted, unattested)".into() } else { "unclaimed".into() }
+    fn describe_state(&self, s: &NRegState) -> String {
+        match s {
+            NRegState::Init => "unclaimed".into(),
+            NRegState::Claimed => "claimed (receipted, not anchored)".into(),
+            NRegState::Refuted => "hub proved inclusion".into(),
+            NRegState::Reinstated => "user refuted the hub's chain".into(),
+        }
     }
     fn describe_move(&self, _m: &bool) -> String {
-        format!("claim receipt {} unattested", self.params.req_id)
+        format!("claim receipt {} unanchored / prove inclusion / refute the chain", self.params.req_id)
     }
 }
 
+// ----- anchorpay -----
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttestPayParams {
+pub struct AnchorPayParams {
     pub prover: Role,
-    pub attest_label: String,
-    pub attest_pk: PublicKey,
-    pub attest_value: u32,
+    pub shape: AnchorShape,
+    pub slot: String,
 }
 
 #[derive(Debug)]
-pub struct AttestPay {
-    pub params: AttestPayParams,
+pub struct AnchorPay {
+    pub params: AnchorPayParams,
     name: String,
+    store: ServedData,
 }
 
-impl AttestPay {
-    pub const PREFIX: &'static str = "attestpay";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PayState {
+    Init,
+    Paid,
+    Refuted,
+}
+
+impl AnchorPay {
+    pub const PREFIX: &'static str = "anchorpay";
     pub const REFUND: u8 = 0;
     pub const PAID: u8 = 1;
-    pub fn new(params: AttestPayParams) -> AttestPay {
+    pub fn new(params: AnchorPayParams, store: ServedData) -> AnchorPay {
         let name = format!("{}:{}", Self::PREFIX, serde_json::to_string(&params).expect("serializable"));
-        AttestPay { params, name }
+        AnchorPay { params, name, store }
     }
-    pub fn from_str(params: &str) -> Result<AttestPay> {
-        Ok(AttestPay::new(serde_json::from_str(params)?))
-    }
-    pub fn attest_extra(&self) -> Extra {
-        Extra { label: self.params.attest_label.clone(), pk: self.params.attest_pk.clone(), value: self.params.attest_value }
-    }
-    fn all_to(r: Role) -> Payout {
-        match r {
-            Role::User => Payout::UserAll,
-            Role::Hub => Payout::HubAll,
-        }
+    pub fn from_str(params: &str, store: ServedData) -> Result<AnchorPay> {
+        Ok(AnchorPay::new(serde_json::from_str(params)?, store))
     }
 }
 
-impl Contract for AttestPay {
-    type State = bool; // attested
+impl Contract for AnchorPay {
+    type State = PayState;
     type Move = bool;
 
     fn name(&self) -> &str {
         &self.name
     }
     fn outcomes(&self) -> Vec<Outcome> {
-        vec![
-            Outcome::new(Self::REFUND, "Refund", Self::all_to(self.params.prover.other())),
-            Outcome::new(Self::PAID, "Paid", Self::all_to(self.params.prover)),
-        ]
+        vec![Outcome::new(Self::REFUND, "Refund", all_to(self.params.prover.other())), Outcome::new(Self::PAID, "Paid", all_to(self.params.prover))]
     }
-    fn initial(&self) -> bool {
-        false
+    fn initial(&self) -> PayState {
+        PayState::Init
     }
-    fn turn(&self, s: &bool) -> Option<Role> {
-        (!s).then_some(self.params.prover)
-    }
-    fn transition(&self, s: &bool, m: &bool, mover: Role) -> Result<bool, Invalid> {
-        if *s || mover != self.params.prover || !*m {
-            return Err(Invalid("only the prover may present the attestation, once".into()));
+    fn turn(&self, s: &PayState) -> Option<Role> {
+        match s {
+            PayState::Init => Some(self.params.prover),
+            PayState::Paid => Some(self.params.prover.other()),
+            PayState::Refuted => None,
         }
-        Ok(true)
     }
-    fn resolution(&self, s: &bool) -> Outcome {
-        Contract::outcomes(self).swap_remove(usize::from(*s))
+    fn transition(&self, s: &PayState, m: &bool, mover: Role) -> Result<PayState, Invalid> {
+        match (s, m) {
+            (PayState::Init, true) if mover == self.params.prover => Ok(PayState::Paid),
+            (PayState::Paid, true) if mover != self.params.prover => Ok(PayState::Refuted),
+            _ => Err(Invalid("not this party's move".into())),
+        }
     }
-    fn max_depth_from(&self, s: &bool) -> u32 {
-        u32::from(!s)
+    fn resolution(&self, s: &PayState) -> Outcome {
+        let o = Contract::outcomes(self);
+        match s {
+            PayState::Paid => o[Self::PAID as usize].clone(),
+            _ => o[Self::REFUND as usize].clone(),
+        }
+    }
+    fn max_depth_from(&self, s: &PayState) -> u32 {
+        match s {
+            PayState::Init => 2,
+            PayState::Paid => 1,
+            PayState::Refuted => 0,
+        }
     }
     fn n_state_bits(&self) -> usize {
-        1
+        2
     }
     fn n_move_bits(&self) -> usize {
         1
     }
-    fn state_bits(&self, s: &bool) -> Vec<bool> {
-        vec![*s]
+    fn state_bits(&self, s: &PayState) -> Vec<bool> {
+        uint_to_bits(*s as u32, 2)
     }
-    fn state_from_bits(&self, b: &[bool]) -> Result<bool> {
-        ensure!(b.len() == 1);
-        Ok(b[0])
+    fn state_from_bits(&self, b: &[bool]) -> Result<PayState> {
+        ensure!(b.len() == 2);
+        Ok(match bits_to_uint(b) {
+            0 => PayState::Init,
+            1 => PayState::Paid,
+            2 => PayState::Refuted,
+            x => anyhow::bail!("bad state {x}"),
+        })
     }
     fn move_bits(&self, m: &bool) -> Vec<bool> {
         vec![*m]
@@ -207,29 +312,42 @@ impl Contract for AttestPay {
         ensure!(b.len() == 1);
         Ok(b[0])
     }
-    fn move_extras(&self, _depth: u32, _prover: Role) -> MoveExtras {
-        MoveExtras { cltv: None, expects: vec![self.attest_extra()] }
+    fn claim(&self, depth: u32) -> Option<ClaimSpec> {
+        match depth {
+            1 => Some(self.params.shape.spec()),
+            2 => Some(self.params.shape.refutation().spec()),
+            _ => None,
+        }
     }
-    /// D6: nothing about a valid attestation can be disproved; only the
-    /// generic consistency checks remain.
+    fn claim_data(&self, depth: u32) -> ClaimData {
+        match depth {
+            1 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
+            2 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
+            _ => vec![],
+        }
+    }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
+        let want_state = i64::from(ctx.depth); // Paid = 1, Refuted = 2
+        let want_code = i64::from(if ctx.depth == 1 { Self::PAID } else { Self::REFUND });
         vec![
-            LeafBuilder::new(ctx).new_uint(0..1).op(OP_NOT).finish("state_mismatch", |c| !c.new[0]),
-            LeafBuilder::new(ctx).code_uint().int(i64::from(Self::PAID)).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| c.code != Self::PAID),
+            LeafBuilder::new(ctx).new_uint(0..2).int(want_state).op(OP_NUMNOTEQUAL).finish("state_mismatch", move |c| bits_to_uint(&c.new) != want_state as u32),
+            LeafBuilder::new(ctx).code_uint().int(want_code).op(OP_NUMNOTEQUAL).finish("code_mismatch", move |c| i64::from(c.code) != want_code),
         ]
     }
-    fn describe_state(&self, s: &bool) -> String {
-        if *s { "attested: paid".into() } else { "pending".into() }
+    fn describe_state(&self, s: &PayState) -> String {
+        format!("{s:?}")
     }
     fn describe_move(&self, _m: &bool) -> String {
-        format!("present {}", self.params.attest_label)
+        "prove the entry is anchored / refute the chain".into()
     }
 }
 
-/// Registry with both factories.
-pub fn registry_programs() -> ProgramRegistry {
+/// Registry with both factories reading proof data from `store`.
+pub fn registry_programs(store: ServedData) -> ProgramRegistry {
     let mut r = ProgramRegistry::new();
-    r.register_factory(NReg::PREFIX, |p| Ok(Arc::new(NReg::from_str(p)?) as Arc<dyn Program>));
-    r.register_factory(AttestPay::PREFIX, |p| Ok(Arc::new(AttestPay::from_str(p)?) as Arc<dyn Program>));
+    let s1 = store.clone();
+    r.register_factory(NReg::PREFIX, move |p| Ok(Arc::new(NReg::from_str(p, s1.clone())?) as Arc<dyn Program>));
+    let s2 = store;
+    r.register_factory(AnchorPay::PREFIX, move |p| Ok(Arc::new(AnchorPay::from_str(p, s2.clone())?) as Arc<dyn Program>));
     r
 }

@@ -161,11 +161,27 @@ every predicate must hold and the end state must match; a segment with a
 failed predicate counts as wrong. A prover serving different data than it
 commits on-chain is not caught (see the plan's phase 2b limitations).
 
+## D20. Registry facts are inclusion proofs; receipts promise a height
+
+The names registry keeps no attestations. A receipt promises the request
+in the anchor confirming at a specific height and carries the shape of the
+inclusion proof the hub will owe (checkpoint block, header count,
+anchor-chain tip, entry), so the bond contract can pre-sign the proof's
+dispute graph at open time. The hub's answer to a claim is the proof
+itself (a Move at depth 2 carrying a 128-step bisection claim), refutable
+by a heavier chain at depth 3. Ledger entries are content-only 64-byte
+records keyed by their hash; salts and signatures are served alongside.
+Proof data is public (the harness serves it to both parties); a hub that
+withholds it fails its own proofs, but a user who must prove (leg 2 of a
+sale) depends on the ledger being public. Bonds and payments carrying such
+claims are 40k sat because the pre-signed dispute chain reserves ~27k sat
+of fees per depth (D8, D18).
+
 ## TODO
 
-- **N8 / anchor verification.** Equivocation and omission are reported by
-  the off-chain auditor only; enforcing them needs SPV in the dispute path
-  (plan §10).
+- **N8 / anchor verification.** On branch `spv-dispute` omission and a
+  corrupt root are enforced on-chain (D20); on `main` they are reported by
+  the off-chain auditor only.
 - **T9 / liveness rule.** Scenario T9 documents that an honest user who ignores
   a hub force-close during their own turn forfeits the stake (Settle pays R(s)
   = hub wins). Agreed as the PoC reading on 2026-09-06; revisit whether the

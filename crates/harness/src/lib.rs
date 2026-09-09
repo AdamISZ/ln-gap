@@ -223,8 +223,20 @@ impl Harness {
     pub fn assert_signing_rule(&self) {
         for s in &self.seen {
             let r = s.role.as_str();
-            let single = r.starts_with("disprove_") || r.starts_with("revoke_sweep") || r.starts_with("claim_to_");
-            let dual = r.starts_with("commitment_") || r == "settle" || r.starts_with("move_") || r.starts_with("split_") || r == "coop_close";
+            // disproofs, sweeps and the bisection leaves the challenger spends alone
+            let single = r.starts_with("disprove_")
+                || r.starts_with("revoke_sweep")
+                || r.starts_with("claim_to_")
+                || r == "dispute_timeout"
+                || ["step_", "sched_", "block_", "round_", "cpred_", "ccopy_", "ckeep_", "simple_", "re_cur_", "re_next_"].iter().any(|p| r.starts_with(p));
+            // pre-signed by both: commitments, moves, splits, and every stage of a dispute chain
+            let dual = r.starts_with("commitment_")
+                || r == "settle"
+                || r.starts_with("move_")
+                || r.starts_with("split_")
+                || r == "coop_close"
+                || r.ends_with("/dispute")
+                || ["p_round_", "q_round_", "p_re_", "c_re_", "p_sched", "p_inner_", "q_inner_"].iter().any(|p| r.starts_with(p));
             assert!(single || dual || r == "funding" || r == "anchor", "unexpected tx role {r}");
         }
     }

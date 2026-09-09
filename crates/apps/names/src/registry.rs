@@ -1,4 +1,12 @@
-//! Registry rules, event log, Merkle root, resolution.
+//! Registry rules, events and their ledger entries, the sparse-Merkle
+//! ledger, resolution.
+//!
+//! An event's *entry* is a canonical 64-byte content record (tag, name,
+//! key, validity); its *key* is the first 32 bits of SHA-256(entry); the
+//! ledger is the sparse Merkle tree of `lngap_spv::ledger` over
+//! `key → SHA-256(entry)`. Salts and transfer signatures are served with
+//! the event but are not part of the entry: the hub anchoring an event is
+//! its statement that it checked them, and an auditor can catch it lying.
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::{Keypair, XOnlyPublicKey};
@@ -33,6 +41,47 @@ impl Event {
             Event::Reveal { name, .. } | Event::Transfer { name, .. } => Some(name),
         }
     }
+    /// The 64-byte ledger entry: `tag ‖ payload`, zero padded.
+    /// commit: `1 ‖ c(32)`; reveal: `2 ‖ name(16) ‖ owner(32)`;
+    /// transfer: `3 ‖ name(16) ‖ new_owner(32) ‖ valid_until(4 BE)`.
+    pub fn entry(&self) -> [u8; 64] {
+        let mut e = [0u8; 64];
+        match self {
+            Event::Commit { c } => {
+                e[0] = 1;
+                e[1..33].copy_from_slice(c);
+            }
+            Event::Reveal { name, owner, .. } => {
+                e[0] = 2;
+                e[1..1 + name.len()].copy_from_slice(name.as_bytes());
+                e[17..49].copy_from_slice(&owner.serialize());
+            }
+            Event::Transfer { name, new_owner, valid_until, .. } => {
+                e[0] = 3;
+                e[1..1 + name.len()].copy_from_slice(name.as_bytes());
+                e[17..49].copy_from_slice(&new_owner.serialize());
+                e[49..53].copy_from_slice(&valid_until.to_be_bytes());
+            }
+        }
+        e
+    }
+    /// The ledger key: the first 32 bits of SHA-256(entry).
+    pub fn key(&self) -> u32 {
+        entry_key(&self.entry())
+    }
+    /// The transfer entry Bob can name before Alice signs it.
+    pub fn transfer_unsigned(name: &str, new_owner: XOnlyPublicKey, valid_until: u32) -> [u8; 64] {
+        let mut e = [0u8; 64];
+        e[0] = 3;
+        e[1..1 + name.len()].copy_from_slice(name.as_bytes());
+        e[17..49].copy_from_slice(&new_owner.serialize());
+        e[49..53].copy_from_slice(&valid_until.to_be_bytes());
+        e
+    }
+}
+
+pub fn entry_key(entry: &[u8; 64]) -> u32 {
+    u32::from_be_bytes(sha256::Hash::hash(entry).to_byte_array()[..4].try_into().unwrap())
 }
 
 pub fn short(k: &XOnlyPublicKey) -> String {
@@ -76,43 +125,31 @@ pub struct Anchored {
     pub height: u32,
 }
 
-/// The published ledger: anchored events in anchor order.
+/// The published ledger: anchored events in anchor order (served with
+/// salts and signatures), and the sparse tree over their entries.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ledger {
     pub events: Vec<Anchored>,
 }
 
-pub fn leaf_hash(a: &Anchored) -> Hash32 {
-    let bytes = serde_json::to_vec(a).expect("serializable");
-    sha256::Hash::hash(&bytes).to_byte_array()
-}
-
-/// Merkle root over `leaves` (duplicate the last on odd levels); empty → zeros.
-pub fn merkle_root(mut level: Vec<Hash32>) -> Hash32 {
-    if level.is_empty() {
-        return [0u8; 32];
-    }
-    while level.len() > 1 {
-        if level.len() % 2 == 1 {
-            level.push(*level.last().unwrap());
-        }
-        level = level
-            .chunks(2)
-            .map(|p| {
-                let mut e = sha256::Hash::engine();
-                use bitcoin::hashes::HashEngine;
-                e.input(&p[0]);
-                e.input(&p[1]);
-                sha256::Hash::from_engine(e).to_byte_array()
-            })
-            .collect();
-    }
-    level[0]
-}
-
 impl Ledger {
+    /// The sparse Merkle tree over the entries.
+    pub fn tree(&self) -> lngap_spv::Ledger {
+        let mut t = lngap_spv::Ledger::default();
+        for a in &self.events {
+            t.insert_entry(a.event.key(), a.event.entry());
+        }
+        t
+    }
     pub fn root(&self) -> Hash32 {
-        merkle_root(self.events.iter().map(leaf_hash).collect())
+        self.tree().root()
+    }
+    /// The inclusion (or non-inclusion) path of an entry key.
+    pub fn path(&self, key: u32) -> lngap_spv::ledger::Path {
+        self.tree().path(key)
+    }
+    pub fn contains(&self, event: &Event) -> bool {
+        self.events.iter().any(|a| a.event.entry() == event.entry())
     }
 
     /// Ledger as of (including) anchors at `height`.
@@ -168,22 +205,26 @@ mod tests {
         assert_eq!(l.resolve("alice"), None, "commit alone");
         l.events.push(Anchored { event: Event::Reveal { name: "alice".into(), owner: ka, salt }, height: 105 });
         assert_eq!(l.resolve("alice"), Some(ka));
-        // a later commit by b does not win
         let salt2 = [8u8; 32];
         l.events.push(Anchored { event: Event::Commit { c: commit_hash("alice", &kb, &salt2) }, height: 106 });
         l.events.push(Anchored { event: Event::Reveal { name: "alice".into(), owner: kb, salt: salt2 }, height: 107 });
         assert_eq!(l.resolve("alice"), Some(ka));
-        // transfer signed by a, anchored in time
         let t = sign_transfer(&a, "alice", &kb, 120);
         let mut late = l.clone();
         late.events.push(Anchored { event: t.clone(), height: 121 });
         assert_eq!(late.resolve("alice"), Some(ka), "late anchor ignored (D4)");
-        l.events.push(Anchored { event: t, height: 110 });
+        l.events.push(Anchored { event: t.clone(), height: 110 });
         assert_eq!(l.resolve("alice"), Some(kb));
-        // transfer signed by the wrong key
         let bad = sign_transfer(&a, "alice", &ka, 130);
         l.events.push(Anchored { event: bad, height: 111 });
         assert_eq!(l.resolve("alice"), Some(kb));
+        // entries and the tree
         assert_ne!(l.root(), Ledger::default().root());
+        assert_eq!(t.entry(), Event::transfer_unsigned("alice", kb, 120));
+        let p = l.path(t.key());
+        assert_eq!(p.root(), l.root());
+        assert_eq!(p.leaf, lngap_spv::ledger::leaf_hash(&t.entry()));
+        let missing = l.path(Event::Commit { c: [9u8; 32] }.key());
+        assert_eq!(missing.leaf, lngap_spv::ledger::EMPTY_LEAF);
     }
 }

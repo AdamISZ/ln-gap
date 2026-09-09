@@ -160,43 +160,38 @@ depth tracked at build time.
 Every gadget is checked against its native counterpart on regtest and
 exhaustively in the crate's mini-interpreter (`script32::sim`).
 
-## Names (`lngap-names`), statements as 32-bit Lamport slots
+## Names (`lngap-names`), receipts as 32-bit Lamport slots, facts as inclusion proofs
 
-A hub statement is a 32-bit Lamport key (label = what it is about) whose
-preimages for a fixed 32-bit value (id of what it says) the hub hands out or
-reveals on-chain. Leaves check them with `expect_uint` (32 × 23 B = 736 B,
-witness 32 × 21 B = 672 B).
+A hub receipt is a 32-bit Lamport key (label `receipt/<req_id>`) whose
+preimages for the request id the hub hands out; the user's claim reveals it
+(`expect_uint`: 736 B script, 672 B witness). Everything else about the
+registry is a bisection claim of the phase-2b shape (D20).
 
-| Statement | Label | Value |
+### `nreg:{params}` — bonded registration (hub locks the bond; depths 1–3)
+
+| Depth | Prover | Leaf | Script |
+|---|---|---|---|
+| 1 | user | `move_1` (claim "not anchored") | `<h+2> OP_CLTV OP_DROP [CSV tsd] 2-of-2-verify, reveal(move 1b, state 2b, code 2b), expect_uint(receipt key, req_id), OP_1` |
+| 2 | hub | `move_2` (inclusion proof) | `2-of-2-verify, reveals, Winternitz end state (24 words: 6 KB witness, 21 KB verifier), OP_1`; `C'_2` carries the `dispute` leaf and the pre-signed dispute chain |
+| 3 | user | `move_3` (heavier chain) | as `move_2` with the refutation claim's end state |
+| any | `disprove_state_mismatch`, `disprove_code_mismatch` | the generic consistency checks (expected state = depth, code by depth) |
+| any | `split_BondToUser` / `split_BondToHub` | CSV Δ(+Δ′) |
+| `C` | `settle` | CLTV deadline: bond back to the hub |
+
+### `anchorpay:{params}` — payment gated on an inclusion proof (depths 1–2)
+
+| Depth | Prover | Leaf |
 |---|---|---|
-| receipt | `receipt/<req_id>` | `req_id` |
-| attestation | `attest/<name>/<owner-prefix>` | 32 bits of `SHA256("lngap-names-attest" ‖ name ‖ owner)` |
-
-### `nreg:{params}` — bonded registration (hub locks the bond; user is prover; depth 1)
-
-| Leaf | Script | Timelock |
-|---|---|---|
-| `move_1` (user's claim) | `<d_receipt> OP_CLTV OP_DROP [CSV tsd] 2-of-2-verify, reveal(move 1b, state 1b, code 2b), expect_uint(receipt key, req_id), OP_1` | CLTV `d_receipt` (D3) |
-| `disprove_attested` | `<hub.payment> OP_CHECKSIGVERIFY expect_uint(attest key, attest id) OP_1` — witness: `sig_hub`, the 32 attestation preimages | — |
-| `disprove_state_mismatch` | new state ≠ claimed | — |
-| `disprove_code_mismatch` | code ≠ BondToUser | — |
-| `split_BondToUser` | CSV Δ+Δ' (favours the prover) | CSV 12 |
-| `split_BondToHub` | CSV Δ | CSV 6 |
-| `settle` (on `C`) | CLTV `d_receipt + 20`, CSV tsd: bond back to the hub | |
-
-### `attestpay:{params}` — payment gated on an attestation (depth 1)
-
-| Leaf | Script |
-|---|---|
-| `move_1` (prover presents) | `[CSV tsd] 2-of-2-verify, reveals, expect_uint(attest key, attest id), OP_1` |
-| `disprove_state_mismatch`, `disprove_code_mismatch` | generic consistency only (D6) |
-| `split_Paid` / `split_Refund` | CSV Δ+Δ' / Δ |
-| `settle` | CLTV `h_sale`: refund the locker |
+| 1 | the prover named in the params | `move_1` with the inclusion claim's end state |
+| 2 | the other party | `move_2` with the heavier-chain claim's end state |
+| | | `split_Paid` / `split_Refund`; `settle` at `h_sale`: refund |
 
 ### Anchor chain
 
-Anchor output = P2TR whose output key is the hub's anchor key tweaked (BIP-341
-tap tweak) with the registry Merkle root. Spent key-path with the tweaked
-key; one input, one output, 1000 sat fee. The auditor recomputes the root of
-the published ledger as of each anchor's height and checks the tweak and that
-each anchor spends the previous one.
+Anchor = a fixed-layout transaction (`lngap_spv::chain::anchor_tx`): one
+input spending the previous anchor's change output by key path; outputs
+`OP_RETURN <69 zero bytes> <root> OP_0` and a P2TR change output; 208 bytes
+with the root at byte 128, so the claim hashes it as four 64-byte blocks
+and copies the root out of the third. The auditor recomputes the root of
+the published ledger as of each anchor's height and checks the layout and
+that each anchor spends the previous one.

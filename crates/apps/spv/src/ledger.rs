@@ -71,6 +71,10 @@ impl Ledger {
         self.entries.insert(k, entry_bytes(name, owner));
         k
     }
+    /// Insert an arbitrary 64-byte entry under `key`.
+    pub fn insert_entry(&mut self, key: u32, entry: [u8; 64]) {
+        self.entries.insert(key, entry);
+    }
     /// The empty-subtree hashes by level (0 = leaf).
     fn empties() -> Vec<[u8; 32]> {
         let mut v = vec![EMPTY_LEAF];

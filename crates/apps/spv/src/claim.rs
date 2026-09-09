@@ -8,6 +8,7 @@
 //! committed values, so a claim is valid iff every predicate holds.
 
 use lngap_contract::claim::{state_nibbles, words_from_bytes, ClaimData, ClaimSpec, Copy, Init, Pred, Src, Step};
+use serde::{Deserialize, Serialize};
 
 use crate::chain::{outpoint_bytes, MerklePath, RawHeader, ANCHOR_ROOT_OFFSET, ANCHOR_TX_LEN};
 use crate::ledger::Path;
@@ -63,9 +64,9 @@ fn node_block(right: bool) -> [Src; 16] {
     })
 }
 
-/// The steps and data verifying one header whose predecessor's digest is in `D`.
+/// The steps verifying one header whose predecessor's digest is in `D`.
 /// Afterwards `D` = the header's digest and `A` = its Merkle root.
-fn header_steps(h: &RawHeader, nbits: u32, target_le: [u8; 32], steps: &mut Vec<Step>, data: &mut ClaimData) {
+fn header_steps(nbits: u32, target_le: [u8; 32], steps: &mut Vec<Step>) {
     let c1 = Step::compress("hdr_c1", Init::Iv, data_words(16))
         .with_preds(vec![Pred::EqNibbles { a: NB + 8, b: D, n: 64 }])
         .with_copies(vec![Copy { src: NB + 72, dst: A, n: 56 }]);
@@ -75,6 +76,10 @@ fn header_steps(h: &RawHeader, nbits: u32, target_le: [u8; 32], steps: &mut Vec<
     let c3 = Step::compress("hdr_c3", Init::Iv, hash_of_d());
     let target = Step::check("target", vec![Pred::LeTarget { target: target_le }]);
     steps.extend([c1, c2, c3, target]);
+}
+
+/// A header's data: its first 64 bytes, then the last 16.
+fn header_data(h: &RawHeader, data: &mut ClaimData) {
     data.push(words(&h.0[..64]));
     data.push(words(&h.0[64..80]));
 }
@@ -95,6 +100,35 @@ fn start_state(checkpoint: &[u8; 32]) -> Vec<u32> {
     s
 }
 
+/// The constants of a header-chain claim, fixed when a contract opens.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeaderShape {
+    pub checkpoint: [u8; 32],
+    pub nbits: u32,
+    pub n_headers: usize,
+}
+
+impl HeaderShape {
+    pub fn spec(&self) -> ClaimSpec {
+        let mut steps = Vec::new();
+        let target = RawHeader::target_le(self.nbits);
+        for _ in 0..self.n_headers {
+            header_steps(self.nbits, target, &mut steps);
+        }
+        pad_to_power(&mut steps, 2);
+        ClaimSpec { n_words: N_WORDS, start: start_state(&self.checkpoint), steps, k: 2, inner: true }
+    }
+    /// The data for `headers` (one per header step group).
+    pub fn data(&self, headers: &[RawHeader]) -> ClaimData {
+        assert_eq!(headers.len(), self.n_headers);
+        let mut data = Vec::new();
+        for h in headers {
+            header_data(h, &mut data);
+        }
+        data
+    }
+}
+
 /// "These headers form a valid chain from the checkpoint at fixed difficulty."
 #[derive(Clone, Debug)]
 pub struct HeaderChainClaim {
@@ -104,40 +138,63 @@ pub struct HeaderChainClaim {
 }
 
 impl HeaderChainClaim {
+    pub fn shape(&self) -> HeaderShape {
+        HeaderShape { checkpoint: self.checkpoint, nbits: self.nbits, n_headers: self.headers.len() }
+    }
     pub fn build(&self) -> (ClaimSpec, ClaimData) {
-        let mut steps = Vec::new();
-        let mut data = Vec::new();
-        let target = RawHeader::target_le(self.nbits);
-        for h in &self.headers {
-            header_steps(h, self.nbits, target, &mut steps, &mut data);
-        }
-        pad_to_power(&mut steps, 2);
-        (ClaimSpec { n_words: N_WORDS, start: start_state(&self.checkpoint), steps, k: 2, inner: true }, data)
+        let sh = self.shape();
+        (sh.spec(), sh.data(&self.headers))
     }
 }
 
-/// "The entry is in the ledger whose root the anchor transaction (spending
-/// the agreed previous anchor) carries, and that transaction is in the last
-/// of these headers, a valid chain from the checkpoint."
-#[derive(Clone, Debug)]
-pub struct AnchorClaim {
-    pub chain: HeaderChainClaim,
+/// The constants of an anchored-entry claim, fixed when a contract opens:
+/// the chain window, the previous anchor the anchor transaction must
+/// spend, the entry, its ledger key (the path's sides), and the Merkle
+/// path's sides (the anchor transaction's position in its block).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnchorShape {
+    pub chain: HeaderShape,
     pub prev_anchor: bitcoin::OutPoint,
-    /// The anchor transaction's legacy serialization ([`ANCHOR_TX_LEN`] bytes).
-    pub anchor_tx: Vec<u8>,
-    pub merkle: MerklePath,
+    #[serde(with = "serde_bytes64")]
     pub entry: [u8; 64],
-    pub ledger: Path,
+    pub key: u32,
+    pub merkle_sides: Vec<bool>,
 }
 
-impl AnchorClaim {
-    pub fn build(&self) -> (ClaimSpec, ClaimData) {
-        assert_eq!(self.anchor_tx.len(), ANCHOR_TX_LEN);
+mod serde_bytes64 {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    pub fn serialize<S: Serializer>(v: &[u8; 64], s: S) -> Result<S::Ok, S::Error> {
+        hex::encode(v).serialize(s)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 64], D::Error> {
+        let h = String::deserialize(d)?;
+        let b = hex::decode(h).map_err(serde::de::Error::custom)?;
+        b.try_into().map_err(|_| serde::de::Error::custom("64 bytes"))
+    }
+}
+
+/// The prover's data for an anchored-entry claim.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnchorData {
+    pub headers: Vec<RawHeader>,
+    /// The anchor transaction's legacy serialization ([`ANCHOR_TX_LEN`] bytes).
+    pub anchor_tx: Vec<u8>,
+    pub merkle_siblings: Vec<[u8; 32]>,
+    pub ledger_siblings: Vec<[u8; 32]>,
+}
+
+impl AnchorShape {
+    pub fn side(&self, level: usize) -> bool {
+        (self.key >> level) & 1 == 1
+    }
+    /// "The entry is in the ledger whose root the anchor transaction
+    /// (spending the previous anchor) carries, and that transaction is in
+    /// the last of the chain's headers."
+    pub fn spec(&self) -> ClaimSpec {
         let mut steps = Vec::new();
-        let mut data = Vec::new();
         let target = RawHeader::target_le(self.chain.nbits);
-        for h in &self.chain.headers {
-            header_steps(h, self.chain.nbits, target, &mut steps, &mut data);
+        for _ in 0..self.chain.n_headers {
+            header_steps(self.chain.nbits, target, &mut steps);
         }
         // the anchor transaction: SHA-256d of 208 bytes; outpoint check on chunk 1, root copy from chunk 3
         let a1 = Step::compress("anchor_c1", Init::Iv, data_words(16)).with_preds(vec![Pred::EqConst { off: NB + 10, nibbles: nibbles(&outpoint_bytes(&self.prev_anchor)) }]);
@@ -146,29 +203,72 @@ impl AnchorClaim {
         let a4 = Step::compress("anchor_c4", Init::D, data_padded(4, 8 * ANCHOR_TX_LEN as u32));
         let a5 = Step::compress("anchor_c5", Init::Iv, hash_of_d());
         steps.extend([a1, a2, a3, a4, a5]);
-        for chunk in [0..64, 64..128, 128..192, 192..208] {
-            data.push(words(&self.anchor_tx[chunk]));
-        }
         // Merkle path to the block's root (SHA-256d per node), then compare with A
-        for (s, right) in self.merkle.siblings.iter().zip(&self.merkle.sides) {
+        for right in &self.merkle_sides {
             steps.push(Step::compress("merkle_c1", Init::Iv, node_block(*right)));
             steps.push(Step::compress("merkle_c2", Init::D, pad_512()));
             steps.push(Step::compress("merkle_c3", Init::Iv, hash_of_d()));
-            data.push(words(s));
         }
         steps.push(Step::check("merkle_root", vec![Pred::EqNibbles { a: D, b: A, n: 64 }]));
         // the entry's leaf hash (constant), the ledger path (single SHA-256 per node), compare with R
         let ew: [Src; 16] = core::array::from_fn(|j| Src::Const(words(&self.entry)[j]));
         steps.push(Step::compress("entry_c1", Init::Iv, ew));
         steps.push(Step::compress("entry_c2", Init::D, pad_512()));
-        for (j, s) in self.ledger.siblings.iter().enumerate() {
-            steps.push(Step::compress("ledger_c1", Init::Iv, node_block(self.ledger.side(j))));
+        for j in 0..crate::ledger::DEPTH {
+            steps.push(Step::compress("ledger_c1", Init::Iv, node_block(self.side(j))));
             steps.push(Step::compress("ledger_c2", Init::D, pad_512()));
-            data.push(words(s));
         }
         steps.push(Step::check("ledger_root", vec![Pred::EqNibbles { a: D, b: R, n: 64 }]));
         pad_to_power(&mut steps, 2);
-        (ClaimSpec { n_words: N_WORDS, start: start_state(&self.chain.checkpoint), steps, k: 2, inner: true }, data)
+        ClaimSpec { n_words: N_WORDS, start: start_state(&self.chain.checkpoint), steps, k: 2, inner: true }
+    }
+    pub fn data(&self, d: &AnchorData) -> ClaimData {
+        assert_eq!(d.headers.len(), self.chain.n_headers);
+        assert_eq!(d.anchor_tx.len(), ANCHOR_TX_LEN);
+        assert_eq!(d.merkle_siblings.len(), self.merkle_sides.len());
+        assert_eq!(d.ledger_siblings.len(), crate::ledger::DEPTH);
+        let mut data = Vec::new();
+        for h in &d.headers {
+            header_data(h, &mut data);
+        }
+        for chunk in [0..64, 64..128, 128..192, 192..208] {
+            data.push(words(&d.anchor_tx[chunk]));
+        }
+        for s in &d.merkle_siblings {
+            data.push(words(s));
+        }
+        for s in &d.ledger_siblings {
+            data.push(words(s));
+        }
+        data
+    }
+    /// The heavier-chain refutation of this claim: one header longer from the same checkpoint.
+    pub fn refutation(&self) -> HeaderShape {
+        HeaderShape { checkpoint: self.chain.checkpoint, nbits: self.chain.nbits, n_headers: self.chain.n_headers + 1 }
+    }
+}
+
+/// A complete anchored-entry claim (shape and data together).
+#[derive(Clone, Debug)]
+pub struct AnchorClaim {
+    pub chain: HeaderChainClaim,
+    pub prev_anchor: bitcoin::OutPoint,
+    pub anchor_tx: Vec<u8>,
+    pub merkle: MerklePath,
+    pub entry: [u8; 64],
+    pub ledger: Path,
+}
+
+impl AnchorClaim {
+    pub fn shape(&self) -> AnchorShape {
+        AnchorShape { chain: self.chain.shape(), prev_anchor: self.prev_anchor, entry: self.entry, key: self.ledger.key, merkle_sides: self.merkle.sides.clone() }
+    }
+    pub fn data(&self) -> AnchorData {
+        AnchorData { headers: self.chain.headers.clone(), anchor_tx: self.anchor_tx.clone(), merkle_siblings: self.merkle.siblings.clone(), ledger_siblings: self.ledger.siblings.clone() }
+    }
+    pub fn build(&self) -> (ClaimSpec, ClaimData) {
+        let sh = self.shape();
+        (sh.spec(), sh.data(&self.data()))
     }
 }
 

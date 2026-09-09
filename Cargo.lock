@@ -406,6 +406,7 @@ dependencies = [
  "lngap-contract",
  "lngap-lamport",
  "lngap-party",
+ "lngap-spv",
  "serde",
  "serde_json",
  "tracing",
