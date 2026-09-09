@@ -1,0 +1,13 @@
+[package]
+name = "lngap-script32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-btc = { path = "../btc" }
+bitcoin.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+rand.workspace = true

@@ -426,6 +426,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-script32"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "rand",
+]
+
+[[package]]
 name = "lngap-tictactoe"
 version = "0.1.0"
 dependencies = [
