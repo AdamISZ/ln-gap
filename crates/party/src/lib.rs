@@ -4,6 +4,7 @@
 //! on-chain reaction to commitments, Moves, deadlines and challenge windows.
 //! The same code runs for both roles.
 
+pub mod dispute;
 pub mod draft;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,12 +25,14 @@ use lngap_channel::{ChannelParams, ChannelState, PartyKeys, PartyPubKeys, Role};
 use lngap_contract::instance::key_label;
 use lngap_contract::leaves::move_witness_args;
 use lngap_contract::onchain::{check_claim, decode_claim, parse_move_witness, MoveReveals};
-use lngap_contract::{Claim, ContractInstance, DepthKeys, Extra, ProgramRegistry, CODE_BITS};
+use lngap_contract::{Claim, ContractInstance, Extra, ProgramRegistry, CODE_BITS};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::{uint_to_bits, PublicKey, Reveal, PREIMAGE_LEN};
 use tracing::{info, warn};
 
-use draft::{apply_change, downcast, fill_my_keys, merge_keys, same_state, Change, StateSpec};
+use dispute::{parse_p_round, parse_q_round, terminal_witness, DisputeLive, Stage};
+use draft::{apply_change, downcast, fill_my_keys, merge_keys, same_state, Change, MyKeys, StateSpec};
+use lngap_channel::sweep::{build_sweep, SweepInput};
 
 /// Messages between parties: channel messages plus the contract-change
 /// negotiation that precedes a channel update, plus statements.
@@ -40,8 +43,8 @@ pub enum PartyMsg {
     /// proposer's Lamport keys filled in; for a Move, the reveals of any
     /// extra statements the Move leaf requires.
     Draft { spec: StateSpec, change: Change, extra_reveals: Vec<(String, Reveal)> },
-    /// Responder -> proposer: the responder's keys for its prover depths.
-    DraftKeys { seq: u64, keys: Vec<(u32, u32, DepthKeys)> },
+    /// Responder -> proposer: the responder's keys (prover and challenger halves).
+    DraftKeys { seq: u64, keys: MyKeys },
     /// Responder -> proposer: the draft is refused.
     Reject { seq: u64, reason: String },
     /// A Lamport-signed statement (receipt, attestation) handed over.
@@ -64,11 +67,20 @@ pub struct Faults {
     pub passive_onchain: bool,
     /// Alter the claim committed in my next on-chain Move.
     pub cheat_move: Option<Arc<dyn Fn(&Claim) -> Claim + Send + Sync>>,
+    /// Alter the bisection claim's end state committed in my on-chain Move.
+    pub cheat_claim: Option<Arc<dyn Fn(&[u32; 8]) -> [u32; 8] + Send + Sync>>,
+    /// In dispute rounds, commit these midstates instead of the honest ones
+    /// (index → state); a lying prover's "computation".
+    pub cheat_midstates: Option<Arc<dyn Fn(u32, &[u32; 8]) -> [u32; 8] + Send + Sync>>,
+    /// Dispute an honest claim (a griefing challenger).
+    pub dispute_anyway: bool,
+    /// Stop responding in dispute rounds.
+    pub silent_in_rounds: bool,
 }
 
 impl std::fmt::Debug for Faults {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Faults(stop_from_seq={:?}, passive_onchain={}, cheat={})", self.stop_from_seq, self.passive_onchain, self.cheat_move.is_some())
+        write!(f, "Faults(stop_from_seq={:?}, passive_onchain={}, cheat={}, cheat_claim={}, dispute_anyway={}, silent_in_rounds={})", self.stop_from_seq, self.passive_onchain, self.cheat_move.is_some(), self.cheat_claim.is_some(), self.dispute_anyway, self.silent_in_rounds)
     }
 }
 
@@ -110,6 +122,7 @@ struct Live {
     prior_state_reveal: Option<Reveal>,
     last_state_reveal: Option<Reveal>,
     resolved: bool,
+    dispute: Option<DisputeLive>,
 }
 
 /// A statement key this party may need to learn preimages for.
@@ -504,7 +517,7 @@ impl Party {
         Ok(vec![self.env(PartyMsg::DraftKeys { seq, keys })])
     }
 
-    fn on_draft_keys(&mut self, seq: u64, keys: Vec<(u32, u32, DepthKeys)>) -> Result<Vec<PEnvelope>> {
+    fn on_draft_keys(&mut self, seq: u64, keys: MyKeys) -> Result<Vec<PEnvelope>> {
         let mut spec = self.pending_draft.take().ok_or_else(|| anyhow!("DraftKeys without a pending draft"))?;
         ensure!(spec.seq == seq, "DraftKeys for {seq} but draft is {}", spec.seq);
         merge_keys(&mut spec, self.role.other(), keys)?;
@@ -595,6 +608,7 @@ impl Party {
                     prior_state_reveal: None,
                     last_state_reveal: None,
                     resolved: false,
+                    dispute: None,
                 });
             }
         }
@@ -616,6 +630,9 @@ impl Party {
     }
 
     fn on_output_spent(&mut self, outpoint: OutPoint, tx: Transaction, height: u32) -> Result<()> {
+        if let Some(idx) = self.live.iter().position(|l| l.dispute.as_ref().is_some_and(|d| d.outpoint == outpoint && d.stage != Stage::Resolved)) {
+            return self.on_dispute_output_spent(idx, tx, height);
+        }
         let Some(idx) = self.live.iter().position(|l| l.outpoint == outpoint && !l.resolved) else { return Ok(()) };
         let vin = tx.input.iter().position(|i| i.previous_output == outpoint).expect("spends it");
         let leaf = self.live[idx].tree.identify_leaf(&tx.input[vin].witness).map(|l| l.name.clone());
@@ -626,6 +643,7 @@ impl Party {
                 let d: u32 = name[5..].parse()?;
                 self.on_move_confirmed(idx, d, &tx, height)
             }
+            Some("dispute") => self.on_dispute_started(idx, &tx, height),
             Some(name) => {
                 self.live[idx].resolved = true;
                 self.say(format!("contract {id} resolved by {name} ({txid})"));
@@ -644,7 +662,8 @@ impl Party {
         let keys = inst.depth_keys(d).clone();
         let extras = inst.move_extras(d).expects;
         let extra_bits: Vec<usize> = extras.iter().map(|e| e.pk.n_bits()).collect();
-        let reveals = parse_move_witness(&tx.input[0].witness, inst.program.n_move_bits(), inst.program.n_state_bits(), &extra_bits)?;
+        let claim_params = inst.claim_keys(d).map(|c| c.end.params);
+        let reveals = parse_move_witness(&tx.input[0].witness, inst.program.n_move_bits(), inst.program.n_state_bits(), &extra_bits, claim_params)?;
         for (e, r) in extras.iter().zip(&reveals.extras) {
             self.learn_reveal(&e.label, r.clone())?;
         }
@@ -675,6 +694,39 @@ impl Party {
             inst.program.describe_move_bits(&claim.mv),
             inst.program.describe_state_bits(&claim.new)
         ));
+        // a bisection claim: the end state the prover committed
+        if let (Some(spec), Some(end_sig)) = (inst.claim_spec(), reveals.claim_end.clone()) {
+            let ckeys = inst.claim_keys(d).expect("claim keys");
+            let msg = ckeys.end.verify(&end_sig)?;
+            let mut end = [0u32; 8];
+            for (i, w) in end.iter_mut().enumerate() {
+                *w = u32::from_be_bytes(msg[4 * i..4 * i + 4].try_into().unwrap());
+            }
+            let honest = *spec.states().last().unwrap();
+            let ok = end == honest;
+            self.say(format!("contract {id}: claimed end state {}.. is {}", hex::encode(&msg[..4]), if ok { "correct" } else { "WRONG" }));
+            let l = &mut self.live[idx];
+            l.dispute = Some(DisputeLive {
+                depth: d,
+                prover: keys.prover,
+                spec: spec.clone(),
+                stage: Stage::Resolved, // becomes WaitP(1) when the dispute tx confirms
+                known: [(spec.n_steps, (end, end_sig))].into_iter().collect(),
+                path: vec![],
+                outpoint: l.outpoint,
+                prevout: l.prevout.clone(),
+                tree: l.tree.clone(),
+                confirmed_at: height,
+                trees: vec![],
+                my_states: spec.states(),
+                responded: false,
+            });
+            if keys.prover != self.role && (!ok || self.faults.dispute_anyway) {
+                self.say(format!("contract {id}: disputing the claim"));
+                let l = self.live[idx].clone();
+                return self.broadcast_graph(&l, &format!("d{d}/dispute"), &[]);
+            }
+        }
         if keys.prover == self.role {
             return Ok(());
         }
@@ -762,7 +814,14 @@ impl Party {
             }
         }
         for idx in 0..self.live.len() {
-            if self.live[idx].resolved || self.channel.is_swept(&self.live[idx].outpoint) {
+            if self.live[idx].resolved {
+                continue;
+            }
+            if self.live[idx].dispute.as_ref().is_some_and(|d| d.stage != Stage::Resolved) {
+                self.dispute_tick(idx)?;
+                continue;
+            }
+            if self.channel.is_swept(&self.live[idx].outpoint) {
                 continue;
             }
             self.tick_live(idx)?;
@@ -860,10 +919,22 @@ impl Party {
         let mv_r = self.keystore.reveal_bits(&key_label(l.id, ks, d, "move"), &claim.mv)?;
         let st_r = self.keystore.reveal_bits(&key_label(l.id, ks, d, "state"), &claim.new)?;
         let code_r = self.keystore.reveal_bits(&key_label(l.id, ks, d, "code"), &uint_to_bits(u32::from(claim.code), CODE_BITS))?;
+        // the claim's end state (signed with the Winternitz key), before borrowing the record
+        let end_sig = match inst.claim_spec() {
+            Some(spec) => {
+                let mut end = *spec.states().last().unwrap();
+                if let Some(cheat) = &self.faults.cheat_claim {
+                    end = cheat(&end);
+                    self.say(format!("contract {}: CHEATING: claiming a false end state", l.id));
+                }
+                Some(self.keystore.sign_wots(&lngap_contract::claim::end_label(l.id, ks, d), &lngap_contract::script_hash::state_bytes(&end))?)
+            }
+            None => None,
+        };
         let key = GraphKey { version: l.version, contract_id: l.id, label: format!("move_{d}") };
         let rec = self.channel.record(l.seq).ok_or_else(|| anyhow!("no record"))?;
         let ptx = rec.graph.get(&key).ok_or_else(|| anyhow!("no graph tx {key}"))?;
-        let tx = ptx.finalize(&move_witness_args(&mv_r, &st_r, &code_r, &extras))?;
+        let tx = ptx.finalize(&move_witness_args(&mv_r, &st_r, &code_r, &extras, end_sig.as_ref()))?;
         self.pop_move(l.id);
         self.channel.mark_swept(l.outpoint);
         self.say(format!("contract {}: broadcasting move_{d}: {} -> state {}, outcome code {}", l.id, inst.program.describe_move_bits(&claim.mv), inst.program.describe_state_bits(&claim.new), claim.code));
@@ -915,4 +986,206 @@ pub fn run_bus(a: &mut Party, b: &mut Party, initial: Vec<PEnvelope>) -> Result<
         queue.extend(target.handle(env)?);
     }
     Ok(())
+}
+
+// ----- bisection disputes -----
+
+impl Party {
+    /// The `dispute` transaction confirmed: the chain's first output waits for the prover's round 1.
+    fn on_dispute_started(&mut self, idx: usize, tx: &Transaction, height: u32) -> Result<()> {
+        let l = self.live[idx].clone();
+        let inst = self.instance(&l);
+        let d = l.depth;
+        let ctx = self.channel.commit_ctx(l.seq, l.version)?;
+        let trees = inst.dispute_trees(&ctx, d)?;
+        let disp = self.live[idx].dispute.as_mut().ok_or_else(|| anyhow!("dispute without a claim"))?;
+        disp.stage = Stage::WaitP(1);
+        disp.outpoint = OutPoint { txid: tx.compute_txid(), vout: 0 };
+        disp.prevout = tx.output[0].clone();
+        disp.tree = trees[0].clone();
+        disp.trees = trees;
+        disp.confirmed_at = height;
+        disp.responded = false;
+        let op = disp.outpoint;
+        self.channel.mark_swept(l.outpoint);
+        self.channel.watch(op);
+        self.say(format!("contract {}: dispute opened at depth {d}; waiting for the prover's round 1", l.id));
+        self.dispute_act(idx)
+    }
+
+    fn on_dispute_output_spent(&mut self, idx: usize, tx: Transaction, height: u32) -> Result<()> {
+        let l = self.live[idx].clone();
+        let inst = self.instance(&l);
+        let disp = l.dispute.clone().expect("dispute");
+        let leaf = disp.tree.identify_leaf(&tx.input[0].witness).map(|x| x.name.clone()).unwrap_or_default();
+        let id = l.id;
+        let next_stage;
+        match leaf.as_str() {
+            n if n.starts_with("p_round_") => {
+                let r: u32 = n[8..].parse()?;
+                let ckeys = inst.claim_keys(disp.depth).expect("claim keys");
+                let commits = parse_p_round(&tx, ckeys, &disp.spec, &disp.path, r)?;
+                let dd = self.live[idx].dispute.as_mut().unwrap();
+                for (i, st, sig) in commits {
+                    dd.known.insert(i, (st, sig));
+                }
+                next_stage = Stage::WaitQ(r);
+                self.say(format!("contract {id}: prover's round {r} commitments confirmed"));
+            }
+            n if n.starts_with("q_round_") => {
+                let r: u32 = n[8..].parse()?;
+                let ck = inst.challenger_keys(disp.depth).expect("challenger keys");
+                let j = parse_q_round(&tx, ck, r)?;
+                let dd = self.live[idx].dispute.as_mut().unwrap();
+                dd.path.push(j);
+                next_stage = if r < disp.spec.rounds() { Stage::WaitP(r + 1) } else { Stage::Terminal };
+                let (lo, len) = disp.spec.segment(&self.live[idx].dispute.as_ref().unwrap().path);
+                self.say(format!("contract {id}: challenger picked segment {j} in round {r}: steps {lo}..{}", lo + len));
+            }
+            "timeout" => {
+                self.live[idx].dispute.as_mut().unwrap().stage = Stage::Resolved;
+                self.live[idx].resolved = true;
+                self.say(format!("contract {id}: dispute resolved by timeout ({})", tx.compute_txid()));
+                return Ok(());
+            }
+            n if n.starts_with("step_") => {
+                self.live[idx].dispute.as_mut().unwrap().stage = Stage::Resolved;
+                self.live[idx].resolved = true;
+                self.say(format!("contract {id}: step disproved by {n} ({})", tx.compute_txid()));
+                return Ok(());
+            }
+            other => {
+                self.say(format!("contract {id}: dispute output spent by unknown leaf {other:?}"));
+                return Ok(());
+            }
+        }
+        let dd = self.live[idx].dispute.as_mut().unwrap();
+        dd.stage = next_stage;
+        dd.outpoint = OutPoint { txid: tx.compute_txid(), vout: 0 };
+        dd.prevout = tx.output[0].clone();
+        dd.tree = dd.trees[dd.tree_index()].clone();
+        dd.confirmed_at = height;
+        dd.responded = false;
+        let op = dd.outpoint;
+        self.channel.watch(op);
+        self.dispute_act(idx)
+    }
+
+    /// Respond if it is my turn in the dispute (no timelock on responses).
+    fn dispute_act(&mut self, idx: usize) -> Result<()> {
+        let l = self.live[idx].clone();
+        let Some(disp) = l.dispute.clone() else { return Ok(()) };
+        if disp.responded || disp.waiting_for() != Some(self.role) || self.channel.is_swept(&disp.outpoint) {
+            return Ok(());
+        }
+        if self.faults.silent_in_rounds {
+            self.say(format!("contract {}: FAULT: staying silent in the dispute", l.id));
+            return Ok(());
+        }
+        let inst = self.instance(&l);
+        let id = l.id;
+        match disp.stage {
+            Stage::WaitP(r) => {
+                // my round r: commit the k-1 midstates of the current segment
+                let points = disp.spec.round_points(&disp.path);
+                let mut sigs = Vec::new();
+                for (t, i) in points.iter().enumerate() {
+                    let mut st = disp.my_states[*i as usize];
+                    if let Some(cheat) = &self.faults.cheat_midstates {
+                        st = cheat(*i, &st);
+                    }
+                    let label = lngap_contract::claim::round_label(id, inst.keys_seq, disp.depth, r, t as u32);
+                    sigs.push(self.keystore.sign_wots(&label, &lngap_contract::script_hash::state_bytes(&st))?);
+                }
+                self.say(format!("contract {id}: answering dispute round {r} with midstates at steps {points:?}"));
+                let extra = lngap_contract::claim::p_round_witness(&sigs);
+                self.live[idx].dispute.as_mut().unwrap().responded = true;
+                self.broadcast_dispute_tx(&l, &disp, &format!("p_round_{r}"), &extra)
+            }
+            Stage::WaitQ(r) => {
+                let j = disp.choose_index();
+                let label = lngap_contract::claim::index_label(id, inst.keys_seq, disp.depth, r);
+                let reveal = self.keystore.reveal_uint(&label, j)?;
+                self.say(format!("contract {id}: round {r}: first bad segment is {j}"));
+                self.live[idx].dispute.as_mut().unwrap().responded = true;
+                self.broadcast_dispute_tx(&l, &disp, &format!("q_round_{r}"), &lngap_contract::claim::q_round_witness(&reveal))
+            }
+            Stage::Terminal => {
+                // recompute the isolated step natively; if it really is wrong, disprove it
+                let (cur_src, _, step) = lngap_contract::claim::step_sources(&disp.spec, &disp.path);
+                let cur_state = match &cur_src {
+                    lngap_contract::claim::StateSource::Const(s) => *s,
+                    _ => disp.known.get(&step).map(|k| k.0).ok_or_else(|| anyhow!("no state for step {step}"))?,
+                };
+                let claimed_next = disp.known.get(&(step + 1)).map(|k| k.0).ok_or_else(|| anyhow!("no state for step {}", step + 1))?;
+                let mut expect = cur_state;
+                sha2::compress256(&mut expect, &[disp.spec.blocks[step as usize].into()]);
+                if expect == claimed_next {
+                    self.say(format!("contract {id}: isolated step {step} is correct; nothing to disprove (the prover will time me out)"));
+                    self.live[idx].dispute.as_mut().unwrap().responded = true;
+                    return Ok(());
+                }
+                let args = terminal_witness(&disp)?;
+                let ctx = self.channel.commit_ctx(l.seq, l.version)?;
+                let (leaf_name, _) = lngap_contract::claim::terminal_leaf(&ctx, disp.prover, inst.claim_keys(disp.depth).expect("keys"), &disp.spec, &disp.path);
+                let leaf = disp.tree.leaf(&leaf_name)?.clone();
+                // a ~95 kvB transaction: pay by size (the node's min relay fee is 0.1 sat/vB on Core ≥ 30)
+                let build = |fee: Amount| -> Result<Transaction> {
+                    let mut tx = build_spend(disp.outpoint, &Timelock::NONE, vec![TxOut { value: disp.prevout.value - fee, script_pubkey: self.channel.my_payout_spk() }]);
+                    let sig = sign_tapscript(&self.channel.keys.payment, &tx, 0, std::slice::from_ref(&disp.prevout), &leaf.script)?;
+                    let mut w = WitnessStack::new();
+                    w.push(sig.as_ref().to_vec()).extend(args.clone());
+                    tx.input[0].witness = w.build(&leaf.script, &disp.tree.control_block(&leaf_name)?);
+                    Ok(tx)
+                };
+                let probe = build(self.channel.params.presign_fee)?;
+                let fee = Amount::from_sat((probe.vsize() as u64) / 10 + 100).max(self.channel.params.presign_fee);
+                let tx = build(fee)?;
+                self.say(format!("contract {id}: step {step} is wrong; broadcasting {leaf_name} ({} B witness)", tx.input[0].witness.size()));
+                self.channel.mark_swept(disp.outpoint);
+                self.live[idx].dispute.as_mut().unwrap().responded = true;
+                self.channel.broadcast(&tx, &leaf_name)?;
+                Ok(())
+            }
+            Stage::Resolved => Ok(()),
+        }
+    }
+
+    fn broadcast_dispute_tx(&mut self, l: &Live, disp: &DisputeLive, label: &str, extra: &[Vec<u8>]) -> Result<()> {
+        let key = GraphKey { version: l.version, contract_id: l.id, label: format!("d{}/{label}", disp.depth) };
+        let rec = self.channel.record(l.seq).ok_or_else(|| anyhow!("no record"))?;
+        let ptx = rec.graph.get(&key).ok_or_else(|| anyhow!("no graph tx {key}"))?;
+        let tx = ptx.finalize(extra)?;
+        self.channel.mark_swept(disp.outpoint);
+        self.channel.broadcast(&tx, label)?;
+        Ok(())
+    }
+
+    /// Time out a counterparty that has not responded within Δ.
+    fn dispute_tick(&mut self, idx: usize) -> Result<()> {
+        let l = self.live[idx].clone();
+        let Some(disp) = l.dispute.clone() else { return Ok(()) };
+        if disp.stage == Stage::Resolved || self.channel.is_swept(&disp.outpoint) {
+            return Ok(());
+        }
+        // my own pending response first
+        self.dispute_act(idx)?;
+        let Some(who) = disp.waiting_for() else { return Ok(()) };
+        if who == self.role {
+            return Ok(());
+        }
+        let n = self.channel.params.delta;
+        if self.height + 1 < disp.confirmed_at + u32::from(n) {
+            return Ok(());
+        }
+        if self.channel.is_swept(&disp.outpoint) {
+            return Ok(());
+        }
+        let input = SweepInput { outpoint: disp.outpoint, prevout: disp.prevout.clone(), tree: &disp.tree, leaf: "timeout", before_sig: vec![] };
+        let tx = build_sweep(&[input], self.channel.my_payout_spk(), self.channel.params.presign_fee, &self.channel.keys.payment, bitcoin::absolute::LockTime::ZERO)?;
+        self.say(format!("contract {}: {who} did not respond within Δ; sweeping the dispute output ({} sat)", l.id, tx.output[0].value));
+        self.channel.mark_swept(disp.outpoint);
+        self.channel.broadcast(&tx, "dispute_timeout")?;
+        Ok(())
+    }
 }

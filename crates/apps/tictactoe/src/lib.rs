@@ -367,7 +367,7 @@ mod sizes {
         let params = ChannelParams::regtest(Amount::from_sat(200_000));
         let ctx = CommitCtx { params: &params, keys: &pubs, broadcaster: Role::User, seq: 1, rev_hash: [0u8; 20] };
         let keys: Vec<_> = (0..9).map(|d| depth_secrets(if d % 2 == 0 { Role::User } else { Role::Hub }, 10 + d as u8, &*prog).1).collect();
-        let inst = ContractInstance::new(1, prog.clone(), Amount::from_sat(20_000), prog.initial_bits(), 300, 1, keys).unwrap();
+        let inst = ContractInstance::new(1, prog.clone(), Amount::from_sat(20_000), prog.initial_bits(), 300, 1, keys, vec![]).unwrap();
         let t0 = inst.tree(&ctx).unwrap();
         for (n, s, cb) in t0.sizes() {
             println!("SIZE C: {n}: script {s} B, control block {cb} B");

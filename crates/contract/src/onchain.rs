@@ -17,12 +17,15 @@ pub struct MoveReveals {
     pub code: Reveal,
     /// Extras, in the order the contract's `move_extras` lists them.
     pub extras: Vec<Reveal>,
+    /// The claim's end-state signature, if the program has a claim.
+    pub claim_end: Option<lngap_lamport::winternitz::WotsSig>,
 }
 
-pub fn parse_move_witness(w: &Witness, n_move: usize, n_state: usize, extra_bits: &[usize]) -> Result<MoveReveals> {
+pub fn parse_move_witness(w: &Witness, n_move: usize, n_state: usize, extra_bits: &[usize], claim_end: Option<lngap_lamport::winternitz::WotsParams>) -> Result<MoveReveals> {
     let args = witness_args_consumption_order(w);
     let n_extra: usize = extra_bits.iter().sum();
-    let expected = 2 + n_move + n_state + CODE_BITS + n_extra;
+    let n_end = claim_end.map(|p| 2 * p.total_digits() as usize).unwrap_or(0);
+    let expected = 2 + n_move + n_state + CODE_BITS + n_extra + n_end;
     ensure!(args.len() == expected, "move witness has {} args, expected {expected}", args.len());
     let mut at = 2;
     let mut take = |n: usize| -> Result<Reveal> {
@@ -37,7 +40,11 @@ pub fn parse_move_witness(w: &Witness, n_move: usize, n_state: usize, extra_bits
     for &n in extra_bits {
         extras.push(take(n)?);
     }
-    Ok(MoveReveals { mv, state, code, extras })
+    let claim_end = match claim_end {
+        Some(p) => Some(lngap_lamport::winternitz::WotsSig::from_consumption_order(p, &args[at..])?),
+        None => None,
+    };
+    Ok(MoveReveals { mv, state, code, extras, claim_end })
 }
 
 /// Decode reveals against the prover's keys into a [`Claim`].

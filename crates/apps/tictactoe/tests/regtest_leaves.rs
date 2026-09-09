@@ -43,7 +43,7 @@ fn tictactoe_disprove_leaves_match_native_checks() {
     let (_, k5) = depth_secrets(Role::User, 70, &*prog);
     keys.push(k4);
     keys.push(k5);
-    let inst = ContractInstance::new(1, prog.clone(), Amount::from_sat(20_000), bits(&s6), 300, 5, keys).unwrap();
+    let inst = ContractInstance::new(1, prog.clone(), Amount::from_sat(20_000), bits(&s6), 300, 5, keys, vec![]).unwrap();
 
     // depth 1: user plays 6 (honest), and various frauds
     let after6 = board([1, 2, 0, 0, 1, 0, 1, 0, 2], Role::Hub, 0);

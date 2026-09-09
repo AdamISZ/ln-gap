@@ -13,3 +13,5 @@ bitcoin.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 serde.workspace = true
+sha2 = { version = "0.10", features = ["compress"] }
+hex.workspace = true

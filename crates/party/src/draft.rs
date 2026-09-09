@@ -6,8 +6,9 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, ensure, Result};
 use bitcoin::Amount;
 use lngap_channel::{ChannelState, ContractOutput, Role};
+use lngap_contract::claim::{end_label, index_label, round_label};
 use lngap_contract::instance::key_label;
-use lngap_contract::{ContractInstance, DepthKeys, InstanceSpec, ProgramRegistry, CODE_BITS};
+use lngap_contract::{ChallengerKeys, ClaimKeys, ContractInstance, DepthKeys, InstanceSpec, ProgramRegistry, CODE_BITS};
 use lngap_lamport::keystore::KeyStore;
 use serde::{Deserialize, Serialize};
 
@@ -60,6 +61,7 @@ impl StateSpec {
             && self.contracts.iter().zip(&o.contracts).all(|(a, b)| {
                 a.id == b.id && a.program == b.program && a.value == b.value && a.state == b.state
                     && a.deadline == b.deadline && a.keys_seq == b.keys_seq && a.keys.len() == b.keys.len()
+                    && a.challenger_keys.len() == b.challenger_keys.len()
             })
     }
     pub fn into_state(self, programs: &ProgramRegistry) -> Result<ChannelState> {
@@ -106,6 +108,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             }
             let state = p.initial_bits();
             let m = p.max_depth_from_bits(&state)?;
+            let has_claim = p.claim().is_some();
             spec.contracts.push(InstanceSpec {
                 id: *id,
                 program: program.clone(),
@@ -114,6 +117,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
                 deadline: *deadline,
                 keys_seq: seq,
                 keys: vec![None; m as usize],
+                challenger_keys: if has_claim { vec![None; m as usize] } else { vec![] },
             });
         }
         Change::Move { id, mv, deadline } => {
@@ -126,6 +130,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             c.deadline = *deadline;
             c.keys_seq = seq;
             c.keys = vec![None; m as usize];
+            c.challenger_keys = if p.claim().is_some() { vec![None; m as usize] } else { vec![] };
         }
         Change::Resolve { id } | Change::Cancel { id } => {
             let pos = spec.contracts.iter().position(|c| c.id == *id).ok_or_else(|| anyhow!("no contract {id}"))?;
@@ -143,25 +148,53 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
     Ok(spec)
 }
 
-/// Fill in `me`'s keys for every depth where `me` is the prover and the
-/// slot is empty. Returns what was filled (to send to the counterparty).
-pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs: &ProgramRegistry) -> Result<Vec<(u32, u32, DepthKeys)>> {
-    let mut filled = Vec::new();
+/// Keys one party contributes to a draft: its prover keys per depth, and
+/// its challenger (dispute index) keys per depth for programs with a claim.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MyKeys {
+    pub prover: Vec<(u32, u32, DepthKeys)>,
+    pub challenger: Vec<(u32, u32, ChallengerKeys)>,
+}
+
+/// Fill in `me`'s keys for every depth and empty slot. Returns what was
+/// filled (to send to the counterparty).
+pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs: &ProgramRegistry) -> Result<MyKeys> {
+    let mut filled = MyKeys::default();
     for c in &mut spec.contracts {
         let p = programs.resolve(&c.program)?;
+        let claim = p.claim();
         let mut prover = p.turn_bits(&c.state)?;
-        for (i, slot) in c.keys.iter_mut().enumerate() {
+        for i in 0..c.keys.len() {
             let d = i as u32 + 1;
             let pr = prover.ok_or_else(|| anyhow!("depth {d} beyond terminal"))?;
-            if pr == me && slot.is_none() {
+            if pr == me && c.keys[i].is_none() {
+                let claim_keys = match &claim {
+                    Some(spec) => Some(ClaimKeys {
+                        end: ks.generate_wots(&end_label(c.id, c.keys_seq, d), 32)?,
+                        rounds: (1..=spec.rounds())
+                            .map(|r| (0..spec.k - 1).map(|t| ks.generate_wots(&round_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
+                            .collect::<Result<Vec<_>>>()?,
+                    }),
+                    None => None,
+                };
                 let k = DepthKeys {
                     prover: me,
                     mv: ks.generate(&key_label(c.id, c.keys_seq, d, "move"), p.n_move_bits())?,
                     state: ks.generate(&key_label(c.id, c.keys_seq, d, "state"), p.n_state_bits())?,
                     code: ks.generate(&key_label(c.id, c.keys_seq, d, "code"), CODE_BITS)?,
+                    claim: claim_keys,
                 };
-                filled.push((c.id, d, k.clone()));
-                *slot = Some(k);
+                filled.prover.push((c.id, d, k.clone()));
+                c.keys[i] = Some(k);
+            }
+            if let Some(spec) = &claim {
+                if pr != me && c.challenger_keys[i].is_none() {
+                    let ck = ChallengerKeys {
+                        indices: (1..=spec.rounds()).map(|r| ks.generate(&index_label(c.id, c.keys_seq, d, r), spec.index_bits())).collect::<Result<Vec<_>>>()?,
+                    };
+                    filled.challenger.push((c.id, d, ck.clone()));
+                    c.challenger_keys[i] = Some(ck);
+                }
             }
             prover = Some(pr.other());
         }
@@ -171,13 +204,21 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
 
 /// Merge the counterparty's keys into the spec, checking they land in
 /// slots that belong to the counterparty.
-pub fn merge_keys(spec: &mut StateSpec, from: Role, keys: Vec<(u32, u32, DepthKeys)>) -> Result<()> {
-    for (id, d, k) in keys {
+pub fn merge_keys(spec: &mut StateSpec, from: Role, keys: MyKeys) -> Result<()> {
+    for (id, d, k) in keys.prover {
         let c = spec.contracts.iter_mut().find(|c| c.id == id).ok_or_else(|| anyhow!("keys for unknown contract {id}"))?;
         ensure!(k.prover == from, "{from} sent keys claiming prover {}", k.prover);
         let slot = c.keys.get_mut(d as usize - 1).ok_or_else(|| anyhow!("keys for depth {d} out of range"))?;
         ensure!(slot.is_none(), "keys for contract {id} depth {d} already present");
         *slot = Some(k);
+    }
+    for (id, d, ck) in keys.challenger {
+        let c = spec.contracts.iter_mut().find(|c| c.id == id).ok_or_else(|| anyhow!("keys for unknown contract {id}"))?;
+        let prover_here = c.keys.get(d as usize - 1).and_then(|k| k.as_ref().map(|k| k.prover));
+        ensure!(prover_here != Some(from), "{from} sent challenger keys for a depth where it is the prover");
+        let slot = c.challenger_keys.get_mut(d as usize - 1).ok_or_else(|| anyhow!("challenger keys for depth {d} out of range"))?;
+        ensure!(slot.is_none(), "challenger keys for contract {id} depth {d} already present");
+        *slot = Some(ck);
     }
     if !spec.contracts.iter().all(InstanceSpec::complete) {
         bail!("state spec still has empty key slots after merge");

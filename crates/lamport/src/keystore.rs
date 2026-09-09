@@ -19,11 +19,12 @@ struct Entry {
 pub struct KeyStore {
     seed: Seed,
     keys: HashMap<String, Entry>,
+    wots: HashMap<String, WotsEntry>,
 }
 
 impl KeyStore {
     pub fn new(seed: Seed) -> KeyStore {
-        KeyStore { seed, keys: HashMap::new() }
+        KeyStore { seed, keys: HashMap::new(), wots: HashMap::new() }
     }
 
     /// Generate (or return the existing) key for `label`. Labels must encode
@@ -83,5 +84,53 @@ mod tests {
         assert!(ks.reveal_uint("c1/d1/move", 3).is_ok());
         assert!(ks.reveal_uint("c1/d1/move", 4).is_err());
         assert!(ks.generate("c1/d1/move", 5).is_err());
+    }
+}
+
+// ----- Winternitz keys (256-bit values) in the same store -----
+
+use crate::winternitz::{WotsParams, WotsPublic, WotsSecret, WotsSig};
+
+#[derive(Debug)]
+struct WotsEntry {
+    sk: WotsSecret,
+    signed: Option<Vec<u8>>,
+}
+
+impl KeyStore {
+    fn wots_map(&mut self) -> &mut HashMap<String, WotsEntry> {
+        &mut self.wots
+    }
+
+    /// Generate (or return) the Winternitz key for `label` over `n_bytes`.
+    pub fn generate_wots(&mut self, label: &str, n_bytes: u32) -> Result<WotsPublic> {
+        let params = WotsParams::for_bytes(n_bytes);
+        if let Some(e) = self.wots.get(label) {
+            if e.sk.params != params {
+                bail!("wots label {label} already used with other params");
+            }
+            return Ok(e.sk.public());
+        }
+        let sk = WotsSecret::from_entropy(params, self.seed.derive_bytes(&format!("wots/{label}")));
+        let pk = sk.public();
+        self.wots_map().insert(label.to_string(), WotsEntry { sk, signed: None });
+        Ok(pk)
+    }
+
+    pub fn wots_public(&self, label: &str) -> Result<WotsPublic> {
+        Ok(self.wots.get(label).ok_or_else(|| anyhow!("no wots key {label}"))?.sk.public())
+    }
+
+    /// Sign `msg` under `label`; refuses a second signature of a different message.
+    pub fn sign_wots(&mut self, label: &str, msg: &[u8]) -> Result<WotsSig> {
+        let e = self.wots.get_mut(label).ok_or_else(|| anyhow!("no wots key {label}"))?;
+        if let Some(prev) = &e.signed {
+            if prev != msg {
+                bail!("wots key {label} already signed a different message; refusing to equivocate");
+            }
+        }
+        let sig = e.sk.sign(msg)?;
+        e.signed = Some(msg.to_vec());
+        Ok(sig)
     }
 }

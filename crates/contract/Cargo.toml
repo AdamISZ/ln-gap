@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+sha2 = { version = "0.10", features = ["compress"] }
 lngap-btc = { path = "../btc" }
 lngap-lamport = { path = "../lamport" }
 lngap-channel = { path = "../channel" }

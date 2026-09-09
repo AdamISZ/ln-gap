@@ -31,6 +31,8 @@ pub struct SeenTx {
     pub txid: Txid,
     pub role: String,
     pub by: Option<Role>,
+    pub vsize: usize,
+    pub weight: u64,
 }
 
 pub struct Harness {
@@ -99,7 +101,7 @@ impl Harness {
         user.set_height(h);
         hub.set_height(h);
         info!(%funding_txid, funding_height, "channel funded");
-        let seen = vec![SeenTx { height: funding_height, txid: funding_txid, role: "funding".into(), by: None }];
+        let seen = vec![SeenTx { height: funding_height, txid: funding_txid, role: "funding".into(), by: None, vsize: ftx.vsize(), weight: ftx.weight().to_wu() }];
         Ok(Harness { rt, user, hub, funding_txid, funding_height, seen, external_roles: Default::default() })
     }
 
@@ -184,8 +186,8 @@ impl Harness {
                 None if self.external_roles.contains_key(&txid) => (self.external_roles[&txid].clone(), None),
                 None => continue,
             };
-            info!(height, %txid, role, ?by, "confirmed");
-            self.seen.push(SeenTx { height, txid, role, by });
+            info!(height, %txid, role, ?by, vsize = tx.vsize(), "confirmed");
+            self.seen.push(SeenTx { height, txid, role, by, vsize: tx.vsize(), weight: tx.weight().to_wu() });
         }
     }
 
@@ -207,7 +209,7 @@ impl Harness {
         let mut lines: Vec<String> = Vec::new();
         lines.push("--- on-chain ---".into());
         for s in &self.seen {
-            lines.push(format!("block {}: {} {} ({})", s.height, s.role, s.txid, s.by.map(|r| r.name()).unwrap_or("harness")));
+            lines.push(format!("block {}: {} {} ({}) {} vB / {} WU", s.height, s.role, s.txid, s.by.map(|r| r.name()).unwrap_or("harness"), s.vsize, s.weight));
         }
         lines.push("--- user ---".into());
         lines.extend(self.user.narrative().iter().cloned());

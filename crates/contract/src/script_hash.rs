@@ -65,7 +65,7 @@ pub fn digest_stack_order(digest: &[u8; 32]) -> Vec<u8> {
     digest.to_vec()
 }
 
-fn push_scriptnum(b: Builder, byte: u8) -> Builder {
+pub fn push_scriptnum(b: Builder, byte: u8) -> Builder {
     match byte {
         0 => b.push_opcode(OP_PUSHBYTES_0),
         1..=16 => b.push_int(i64::from(byte)),
@@ -75,6 +75,10 @@ fn push_scriptnum(b: Builder, byte: u8) -> Builder {
 
 /// Concatenate raw script bytes (the embedded scripts are already valid
 /// instruction streams, so byte-appending is safe).
+pub fn append_script(b: Builder, s: &ScriptBuf) -> Builder {
+    append(b, s)
+}
+
 fn append(b: Builder, s: &ScriptBuf) -> Builder {
     let mut v = b.into_script().into_bytes();
     v.extend_from_slice(s.as_bytes());
@@ -97,7 +101,7 @@ pub fn sha256_u4_script(n: usize) -> ScriptBuf {
     ScriptBuf::from_bytes(bytes.to_vec())
 }
 
-fn nibbles(msg: &[u8]) -> Vec<u8> {
+pub fn nibbles(msg: &[u8]) -> Vec<u8> {
     msg.iter().flat_map(|b| [b >> 4, b & 0xf]).collect()
 }
 

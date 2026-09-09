@@ -11,6 +11,7 @@ use lngap_channel::{ChannelParams, CommitCtx, ContractOutput, PresignedTx, Role}
 use lngap_lamport::PublicKey;
 use serde::{Deserialize, Serialize};
 
+use crate::claim::{dispute_graph, dispute_leaf, ChallengerKeys, ClaimKeys, ClaimSpec};
 use crate::leaves::{move_leaf, settle_leaf, split_leaf, LeafCtx, PriorState};
 use crate::{MoveExtras, Outcome, Program, CODE_BITS};
 
@@ -21,6 +22,8 @@ pub struct DepthKeys {
     pub mv: PublicKey,
     pub state: PublicKey,
     pub code: PublicKey,
+    /// Present iff the program has a claim.
+    pub claim: Option<ClaimKeys>,
 }
 
 /// Label under which a party generates/reveals a Lamport key.
@@ -41,16 +44,20 @@ pub struct InstanceSpec {
     pub keys_seq: u64,
     /// Index `d - 1`; `None` until that depth's prover supplied keys.
     pub keys: Vec<Option<DepthKeys>>,
+    /// Index `d - 1`; the challenger's dispute keys, only for programs with a claim.
+    #[serde(default)]
+    pub challenger_keys: Vec<Option<ChallengerKeys>>,
 }
 
 impl InstanceSpec {
     pub fn complete(&self) -> bool {
-        self.keys.iter().all(Option::is_some)
+        self.keys.iter().all(Option::is_some) && self.challenger_keys.iter().all(Option::is_some)
     }
     pub fn into_instance(self, program: Arc<dyn Program>) -> Result<ContractInstance> {
         ensure!(program.name() == self.program, "program mismatch");
         let keys = self.keys.into_iter().enumerate().map(|(i, k)| k.ok_or_else(|| anyhow!("missing keys for depth {}", i + 1))).collect::<Result<Vec<_>>>()?;
-        ContractInstance::new(self.id, program, self.value, self.state, self.deadline, self.keys_seq, keys)
+        let ck = self.challenger_keys.into_iter().enumerate().map(|(i, k)| k.ok_or_else(|| anyhow!("missing challenger keys for depth {}", i + 1))).collect::<Result<Vec<_>>>()?;
+        ContractInstance::new(self.id, program, self.value, self.state, self.deadline, self.keys_seq, keys, ck)
     }
 }
 
@@ -68,20 +75,36 @@ pub struct ContractInstance {
     pub keys_seq: u64,
     /// Index `d - 1`.
     pub keys: Vec<DepthKeys>,
+    /// Index `d - 1`; empty unless the program has a claim.
+    pub challenger_keys: Vec<ChallengerKeys>,
 }
 
 impl PartialEq for ContractInstance {
     fn eq(&self, o: &Self) -> bool {
         self.id == o.id && self.program.name() == o.program.name() && self.value == o.value
             && self.state == o.state && self.deadline == o.deadline && self.keys_seq == o.keys_seq && self.keys == o.keys
+            && self.challenger_keys == o.challenger_keys
     }
 }
 
 impl ContractInstance {
-    pub fn new(id: u32, program: Arc<dyn Program>, value: Amount, state: Vec<bool>, deadline: u32, keys_seq: u64, keys: Vec<DepthKeys>) -> Result<ContractInstance> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(id: u32, program: Arc<dyn Program>, value: Amount, state: Vec<bool>, deadline: u32, keys_seq: u64, keys: Vec<DepthKeys>, challenger_keys: Vec<ChallengerKeys>) -> Result<ContractInstance> {
         ensure!(state.len() == program.n_state_bits(), "state has {} bits, program wants {}", state.len(), program.n_state_bits());
         let m = program.max_depth_from_bits(&state)? as usize;
         ensure!(keys.len() == m, "{} depth keys but M = {m}", keys.len());
+        let claim = program.claim();
+        if let Some(spec) = &claim {
+            ensure!(challenger_keys.len() == m, "{} challenger key sets but M = {m}", challenger_keys.len());
+            let rounds = spec.rounds() as usize;
+            for (i, (k, ck)) in keys.iter().zip(&challenger_keys).enumerate() {
+                let c = k.claim.as_ref().ok_or_else(|| anyhow!("depth {}: prover claim keys missing", i + 1))?;
+                ensure!(c.rounds.len() == rounds && c.rounds.iter().all(|r| r.len() as u32 == spec.k - 1), "depth {}: round keys", i + 1);
+                ensure!(ck.indices.len() == rounds && ck.indices.iter().all(|pk| pk.n_bits() == spec.index_bits()), "depth {}: index keys", i + 1);
+            }
+        } else {
+            ensure!(challenger_keys.is_empty() && keys.iter().all(|k| k.claim.is_none()), "claim keys on a program without a claim");
+        }
         let mut prover = program.turn_bits(&state)?;
         for (i, k) in keys.iter().enumerate() {
             let p = prover.ok_or_else(|| anyhow!("keys for depth {} but the contract is terminal", i + 1))?;
@@ -91,7 +114,22 @@ impl ContractInstance {
             ensure!(k.code.n_bits() == CODE_BITS, "depth {}: code key size", i + 1);
             prover = Some(p.other());
         }
-        Ok(ContractInstance { id, program, value, state, deadline, keys_seq, keys })
+        Ok(ContractInstance { id, program, value, state, deadline, keys_seq, keys, challenger_keys })
+    }
+
+    pub fn claim_spec(&self) -> Option<ClaimSpec> {
+        self.program.claim()
+    }
+    pub fn claim_keys(&self, depth: u32) -> Option<&ClaimKeys> {
+        self.keys[depth as usize - 1].claim.as_ref()
+    }
+    pub fn challenger_keys(&self, depth: u32) -> Option<&ChallengerKeys> {
+        self.challenger_keys.get(depth as usize - 1)
+    }
+    /// The trees of the dispute chain at `depth`: `D_0, R_1, R_1', …, R_R'`.
+    pub fn dispute_trees(&self, ctx: &CommitCtx, depth: u32) -> Result<Vec<TapTree>> {
+        let spec = self.claim_spec().ok_or_else(|| anyhow!("no claim"))?;
+        crate::claim::dispute_trees(ctx, self.prover_at(depth), self.claim_keys(depth).unwrap(), self.challenger_keys(depth).unwrap(), &spec)
     }
 
     pub fn spec(&self) -> InstanceSpec {
@@ -103,6 +141,7 @@ impl ContractInstance {
             deadline: self.deadline,
             keys_seq: self.keys_seq,
             keys: self.keys.iter().cloned().map(Some).collect(),
+            challenger_keys: self.challenger_keys.iter().cloned().map(Some).collect(),
         }
     }
 
@@ -165,7 +204,10 @@ impl ContractInstance {
         if depth < self.max_depth() {
             let nk = self.depth_keys(depth + 1);
             let ex = self.program.move_extras(depth + 1, nk.prover);
-            leaves.push(move_leaf(ctx, depth + 1, nk.prover, &nk.mv, &nk.state, &nk.code, &ex));
+            leaves.push(move_leaf(ctx, depth + 1, nk.prover, &nk.mv, &nk.state, &nk.code, &ex, nk.claim.as_ref().map(|c| &c.end)));
+        }
+        if self.claim_spec().is_some() {
+            leaves.push(dispute_leaf(ctx));
         }
         for o in self.program.outcomes() {
             leaves.push(split_leaf(ctx, &o, self.window(ctx.params, depth, &o), &lctx.code));
@@ -218,7 +260,7 @@ impl ContractOutput for ContractInstance {
         if self.max_depth() >= 1 {
             let k = self.depth_keys(1);
             let ex = self.program.move_extras(1, k.prover);
-            leaves.push(move_leaf(ctx, 1, k.prover, &k.mv, &k.state, &k.code, &ex));
+            leaves.push(move_leaf(ctx, 1, k.prover, &k.mv, &k.state, &k.code, &ex, k.claim.as_ref().map(|c| &c.end)));
         }
         TapTree::new(leaves)
     }
@@ -248,6 +290,13 @@ impl ContractOutput for ContractInstance {
                 let leaf = format!("split_{}", o.name);
                 let split_tx = build_spend(c_d, &tree_d.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, v_d - fee));
                 out.push(PresignedTx::new(format!("split_{d}_{}", o.name), split_tx, vec![c_d_prevout.clone()], &tree_d, &leaf, format!("split at depth {d}: {}", o.name))?);
+            }
+            if let Some(spec) = self.claim_spec() {
+                let chain = dispute_graph(ctx, self.prover_at(d), self.claim_keys(d).unwrap(), self.challenger_keys(d).unwrap(), &spec, &tree_d, c_d, &c_d_prevout)?;
+                for mut p in chain {
+                    p.label = format!("d{d}/{}", p.label);
+                    out.push(p);
+                }
             }
             parent_op = c_d;
             parent_prevout = c_d_prevout;

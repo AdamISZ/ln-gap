@@ -244,7 +244,7 @@ fn reveal_verify(mut b: Builder, pk: &PublicKey) -> Builder {
 /// is the commitment's broadcaster and this is depth 1, and `CLTV` if the
 /// contract says the move is only allowed from some height.
 /// Witness: `sig_U, sig_H, move reveal, new-state reveal, code reveal, extras...`.
-pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new: &PublicKey, code: &PublicKey, extras: &MoveExtras) -> Leaf {
+pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new: &PublicKey, code: &PublicKey, extras: &MoveExtras, claim_end: Option<&lngap_lamport::winternitz::WotsPublic>) -> Leaf {
     let delayed = depth == 1 && prover == ctx.broadcaster;
     let mut b = Builder::new();
     let mut tl = Timelock::NONE;
@@ -263,16 +263,26 @@ pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new:
     for e in &extras.expects {
         b = b.expect_uint(&e.pk, e.value);
     }
+    if let Some(end) = claim_end {
+        use lngap_lamport::winternitz::WotsExt;
+        b = b.wots_verify(end);
+        for _ in 0..end.params.message_digits / 2 {
+            b = b.push_opcode(OP_2DROP);
+        }
+    }
     Leaf::new(format!("move_{depth}"), b.push_opcode(OP_PUSHNUM_1).into_script(), tl)
 }
 
 /// Move witness args after the two signatures.
-pub fn move_witness_args(mv: &Reveal, new: &Reveal, code: &Reveal, extras: &[Reveal]) -> Vec<Vec<u8>> {
+pub fn move_witness_args(mv: &Reveal, new: &Reveal, code: &Reveal, extras: &[Reveal], claim_end: Option<&lngap_lamport::winternitz::WotsSig>) -> Vec<Vec<u8>> {
     let mut v = mv.consumption_order();
     v.extend(new.consumption_order());
     v.extend(code.consumption_order());
     for e in extras {
         v.extend(e.consumption_order());
+    }
+    if let Some(sig) = claim_end {
+        v.extend(sig.consumption_order());
     }
     v
 }

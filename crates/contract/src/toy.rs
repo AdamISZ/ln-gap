@@ -165,3 +165,94 @@ impl Contract for CoinFlip {
         format!("user={} hub={}", f(s.user), f(s.hub))
     }
 }
+
+
+/// `HashChain`: the phase-1 claim toy. The user (prover) claims
+/// `s_n = compress^n(start, block)` for constants of the contract and locks
+/// the outcome on it: an accepted claim pays the user, a disproved or
+/// abandoned one pays the hub.
+#[derive(Debug)]
+pub struct HashChain {
+    pub spec: crate::claim::ClaimSpec,
+}
+
+impl HashChain {
+    pub const NAME: &'static str = "hashchain";
+    pub const REFUND: u8 = 0;
+    pub const PAID: u8 = 1;
+    /// 16 steps, branching 4 (two rounds), fixed start and block.
+    pub fn standard() -> HashChain {
+        let start = [0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+        let block: [u8; 64] = core::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(3));
+        HashChain { spec: crate::claim::ClaimSpec { n_steps: 16, k: 4, start, blocks: vec![block; 16] } }
+    }
+    /// The honest end state.
+    pub fn end_state(&self) -> [u32; 8] {
+        *self.spec.states().last().unwrap()
+    }
+}
+
+impl Contract for HashChain {
+    type State = bool; // claimed
+    type Move = bool;
+
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+    fn outcomes(&self) -> Vec<Outcome> {
+        vec![Outcome::new(Self::REFUND, "Refund", Payout::HubAll), Outcome::new(Self::PAID, "Paid", Payout::UserAll)]
+    }
+    fn initial(&self) -> bool {
+        false
+    }
+    fn turn(&self, s: &bool) -> Option<Role> {
+        (!s).then_some(Role::User)
+    }
+    fn transition(&self, s: &bool, m: &bool, mover: Role) -> Result<bool, Invalid> {
+        if *s || mover != Role::User || !*m {
+            return Err(Invalid("only the user may claim, once".into()));
+        }
+        Ok(true)
+    }
+    fn resolution(&self, s: &bool) -> Outcome {
+        Contract::outcomes(self).swap_remove(usize::from(*s))
+    }
+    fn max_depth_from(&self, s: &bool) -> u32 {
+        u32::from(!s)
+    }
+    fn n_state_bits(&self) -> usize {
+        1
+    }
+    fn n_move_bits(&self) -> usize {
+        1
+    }
+    fn state_bits(&self, s: &bool) -> Vec<bool> {
+        vec![*s]
+    }
+    fn state_from_bits(&self, b: &[bool]) -> Result<bool> {
+        ensure!(b.len() == 1);
+        Ok(b[0])
+    }
+    fn move_bits(&self, m: &bool) -> Vec<bool> {
+        vec![*m]
+    }
+    fn move_from_bits(&self, b: &[bool]) -> Result<bool> {
+        ensure!(b.len() == 1);
+        Ok(b[0])
+    }
+    fn claim(&self) -> Option<crate::claim::ClaimSpec> {
+        Some(self.spec.clone())
+    }
+    fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
+        vec![
+            LeafBuilder::new(ctx).new_uint(0..1).op(OP_NOT).finish("state_mismatch", |c| !c.new[0]),
+            LeafBuilder::new(ctx).code_uint().int(i64::from(Self::PAID)).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| c.code != Self::PAID),
+        ]
+    }
+    fn describe_state(&self, s: &bool) -> String {
+        if *s { "claimed".into() } else { "unclaimed".into() }
+    }
+    fn describe_move(&self, _m: &bool) -> String {
+        "claim the chain's end state".into()
+    }
+}

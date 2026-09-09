@@ -7,6 +7,7 @@
 //! turn commits its move with Lamport preimages and the counterparty may
 //! disprove any inconsistency in one transaction.
 
+pub mod claim;
 pub mod instance;
 pub mod leaves;
 pub mod onchain;
@@ -20,6 +21,7 @@ use bitcoin::Amount;
 use lngap_channel::Role;
 use serde::{Deserialize, Serialize};
 
+pub use claim::{ChallengerKeys, ClaimKeys, ClaimSpec};
 pub use instance::{ContractInstance, DepthKeys, InstanceSpec};
 pub use leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx, PriorState};
 pub use registry::ProgramRegistry;
@@ -127,6 +129,11 @@ pub trait Contract: Send + Sync + Debug + 'static {
         MoveExtras::default()
     }
 
+    /// A bisection-verified claim the prover's Move commits (see `claim`).
+    fn claim(&self) -> Option<claim::ClaimSpec> {
+        None
+    }
+
     fn describe_state(&self, s: &Self::State) -> String {
         format!("{s:?}")
     }
@@ -148,6 +155,7 @@ pub trait Program: Send + Sync + Debug {
     fn max_depth_from_bits(&self, s: &[bool]) -> Result<u32>;
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec>;
     fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras;
+    fn claim(&self) -> Option<claim::ClaimSpec>;
     fn describe_state_bits(&self, s: &[bool]) -> String;
     fn describe_move_bits(&self, m: &[bool]) -> String;
 
@@ -195,6 +203,9 @@ impl<C: Contract> Program for C {
     }
     fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras {
         Contract::move_extras(self, depth, prover)
+    }
+    fn claim(&self) -> Option<claim::ClaimSpec> {
+        Contract::claim(self)
     }
     fn describe_state_bits(&self, s: &[bool]) -> String {
         match self.state_from_bits(s) {
