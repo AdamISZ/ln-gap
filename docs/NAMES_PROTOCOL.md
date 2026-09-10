@@ -225,6 +225,25 @@ move, and the on-chain path of 3.5 follows.
 
 ## 4. `anchorpay`: the sale
 
+Bob buys `alice` from Alice for `PRICE`. They have no channel with each
+other, so the payment is routed through the hub, the way a Lightning
+payment is routed with HTLCs, but with a different settlement condition:
+
+- **Leg 1** (Bob's channel): Bob locks `PRICE`; it goes to the hub iff the
+  transfer entry `3 ‖ alice ‖ K_B ‖ valid_until` is anchored.
+- **Leg 2** (Alice's channel): the hub locks `PRICE`; it goes to Alice iff
+  the same entry is anchored.
+- **Transfer bond** (Alice's channel): an `nreg` on the hub's promise to
+  anchor that transfer, so a hub that never anchors pays.
+
+Both legs hang on one public fact, so they settle together: Bob −PRICE,
+hub flat, Alice +PRICE, registry `alice → K_B`. Where an HTLC's condition
+is a revealed preimage, here it is "the entry is in an anchored root", so
+each leg carries the inclusion proof as its claim: the hub proves in leg 1,
+Alice in leg 2. Neither leg depends on the other channel; the atomicity is
+that the fact is the same in both, and the intermediary cannot complete
+one half without the other half becoming provable by its counterparty.
+
 Program name: `anchorpay:{json of AnchorPayParams}` with `prover`,
 `shape`, `slot`. States: `Init → Paid` (prover's move, the inclusion
 claim) `→ Refuted` (the other side's heavier-chain claim). `R(Paid)` pays
@@ -248,11 +267,12 @@ and Alice proposes `Move` in leg 2 (the hub accepts); both legs are then
 terminal and are resolved (`Resolve { id }`) into the balances; the bond is
 folded. No transaction on-chain.
 
-Hub refuses to pay Alice (N7): Bob is dark, so the hub force-closes Bob's
-channel and broadcasts `move_1` with its proof, then `split_1_Paid`. In
-Alice's channel the hub rejects her leg-2 move; she force-closes and
-broadcasts `move_1` with *the same* proof, built from the public data, then
-`split_1_Paid`. The transfer bond settles back to the hub at its deadline
+Hub collects leg 1 but refuses to settle leg 2 (N7): Bob is dark, so the
+hub force-closes Bob's channel and broadcasts `move_1` with its proof, then
+`split_1_Paid`, taking Bob's `PRICE`. In Alice's channel the hub rejects
+her leg-2 move; she force-closes and broadcasts `move_1` with *the same*
+proof, built from the public data, then `split_1_Paid`, taking the hub's
+`PRICE`. The intermediary cannot keep the payment. The transfer bond settles back to the hub at its deadline
 (the entry was anchored).
 
 Hub stops anchoring after the promise (N6): leg 1 and leg 2 hit `h_sale`
