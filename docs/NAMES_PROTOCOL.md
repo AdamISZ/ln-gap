@@ -62,6 +62,17 @@ Promise {
 }
 ```
 
+`merkle_sides` belongs to the proof that the anchor transaction is *in*
+the last header's block: its txid is hashed up the block's Merkle tree with
+sibling hashes (prover data) until the root equals the header's Merkle
+root field. The siblings can be data; the sides cannot, since "node ‖
+sibling" versus "sibling ‖ node" is the structure of the hashing step and
+is fixed when the contract opens. So the hub must know where its anchor
+will sit in its block when it promises, as a hub with its own miner does
+(the harness mines the anchor alone with the coinbase). Making the sides
+prover-selected needs the same conditional gadget as an "at or before h"
+promise.
+
 A promise is not signed and carries no secret. It becomes binding when the
 user opens a bond naming its terms and the hub co-signs that channel state:
 from then on the hub either proves inclusion of exactly that shape or pays.
