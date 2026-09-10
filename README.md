@@ -26,6 +26,7 @@ crates/
 docs/
   SCRIPTS.md      every leaf, witness layout, sizes
   SCENARIOS.md    every scenario with expected and observed outcomes
+  NAMES_PROTOCOL.md  the names contracts end to end: messages, keys, on-chain paths
   DECISIONS.md    design decisions taken beyond the plan, and open TODOs
 ```
 

@@ -109,7 +109,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             }
             let state = p.initial_bits();
             let m = p.max_depth_from_bits(&state)?;
-            let has_claim = (1..=m).any(|d| p.claim(d).is_some());
+            let has_claim = (1..=m).any(|d| p.claim(&state, d).is_some());
             spec.contracts.push(InstanceSpec {
                 id: *id,
                 program: program.clone(),
@@ -131,7 +131,7 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             c.deadline = *deadline;
             c.keys_seq = seq;
             c.keys = vec![None; m as usize];
-            c.challenger_keys = if (1..=m).any(|d| p.claim(d).is_some()) { vec![None; m as usize] } else { vec![] };
+            c.challenger_keys = if (1..=m).any(|d| p.claim(&c.state, d).is_some()) { vec![None; m as usize] } else { vec![] };
         }
         Change::Resolve { id } | Change::Cancel { id } => {
             let pos = spec.contracts.iter().position(|c| c.id == *id).ok_or_else(|| anyhow!("no contract {id}"))?;
@@ -163,12 +163,12 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
     let mut filled = MyKeys::default();
     for c in &mut spec.contracts {
         let p = programs.resolve(&c.program)?;
-        let has_claim = (1..=c.keys.len() as u32).any(|d| p.claim(d).is_some());
+        let has_claim = (1..=c.keys.len() as u32).any(|d| p.claim(&c.state, d).is_some());
         let mut prover = p.turn_bits(&c.state)?;
         for i in 0..c.keys.len() {
             let d = i as u32 + 1;
             let pr = prover.ok_or_else(|| anyhow!("depth {d} beyond terminal"))?;
-            let claim = p.claim(d);
+            let claim = p.claim(&c.state, d);
             if pr == me && c.keys[i].is_none() {
                 let claim_keys = match &claim {
                     Some(spec) => {

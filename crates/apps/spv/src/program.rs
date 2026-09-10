@@ -94,26 +94,26 @@ impl Contract for Spv {
         ensure!(b.len() == 1);
         Ok(b[0])
     }
-    fn claim(&self, depth: u32) -> Option<ClaimSpec> {
-        match depth {
-            1 => Some(self.hub.0.clone()),
-            2 => Some(self.user.0.clone()),
+    fn claim(&self, from: &[bool], depth: u32) -> Option<ClaimSpec> {
+        // the state the depth-th move counted from `from` leaves from
+        match bits_to_uint(from) + depth - 1 {
+            0 => Some(self.hub.0.clone()),
+            1 => Some(self.user.0.clone()),
             _ => None,
         }
     }
-    fn claim_data(&self, depth: u32) -> ClaimData {
-        match depth {
-            1 => self.hub.1.clone(),
-            2 => self.user.1.clone(),
+    fn claim_data(&self, from: &[bool], depth: u32) -> ClaimData {
+        match bits_to_uint(from) + depth - 1 {
+            0 => self.hub.1.clone(),
+            1 => self.user.1.clone(),
             _ => vec![],
         }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
-        // depth 1: new state must be HubClaimed (1) with code HubWins; depth 2: UserRefuted (2) with code UserWins
-        let (want_state, want_code) = if ctx.depth == 1 { (1i64, i64::from(Self::HUB_WINS)) } else { (2, i64::from(Self::USER_WINS)) };
+        // every move advances the state by one; the code is UserWins iff the new state is UserRefuted (2)
         vec![
-            LeafBuilder::new(ctx).new_uint(0..2).int(want_state).op(OP_NUMNOTEQUAL).finish("state_mismatch", move |c| bits_to_uint(&c.new) != want_state as u32),
-            LeafBuilder::new(ctx).code_uint().int(want_code).op(OP_NUMNOTEQUAL).finish("code_mismatch", move |c| i64::from(c.code) != want_code),
+            LeafBuilder::new(ctx).prior_uint(0..2).new_uint(0..2).op(OP_SWAP).int(1).op(OP_ADD).op(OP_NUMNOTEQUAL).finish("state_mismatch", |c| bits_to_uint(&c.new) != bits_to_uint(&c.prior) + 1),
+            LeafBuilder::new(ctx).new_uint(0..2).code_uint().op(OP_SWAP).int(2).op(OP_NUMEQUAL).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| u32::from(c.code) != u32::from(bits_to_uint(&c.new) == 2)),
         ]
     }
     fn describe_state(&self, s: &SpvState) -> String {

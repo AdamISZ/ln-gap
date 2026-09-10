@@ -187,6 +187,20 @@ receipt whose tip is not the chain's. The second is a rule of use, not a
 script: an anchor nobody ever proved against could otherwise fork the chain
 for later users.
 
+## D21. Claims are state-relative and checked off-chain before acceptance
+
+A program's claim is indexed by the state a move leaves *from*, not by the
+depth counted from the contract's initial state: an off-chain accepted
+move re-instantiates the contract at its new state, where the next move is
+depth 1 again. The generic `state_mismatch` and `code_mismatch` leaves of
+the linear programs (`nreg`, `anchorpay`, `spv`) are likewise written
+against the prior state (`new == prior + 1`) rather than a depth constant.
+Before answering a `Move` draft whose move carries a claim, a party
+recomputes the claim on the served data and rejects the draft if a
+predicate fails; the mover then force-closes and the claim's committed end
+state can be disputed on-chain. Without both, a hub could have moved a bond
+from Claimed to Refuted off-chain with no proof at all.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

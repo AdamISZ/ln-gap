@@ -302,3 +302,27 @@ fn anchor_with_two_spendable_outputs_is_disproved() {
     assert_eq!(h.balance(Role::User), sat(50_000 - K) + output_of(&h, |r| r == d));
     println!("{}", h.narrative());
 }
+
+/// The user stays cooperative: the hub proposes its (invalid) proof
+/// off-chain, the user's party recomputes the claim on the served data and
+/// rejects the draft, the hub force-closes to enforce its move, and the
+/// proof is disproved on-chain.
+#[test]
+fn invalid_proof_is_rejected_off_chain_then_disproved() {
+    let w = World::new(3, false);
+    let mut claim = w.hub_claim.clone();
+    claim.chain.headers[1].0[4] ^= 1;
+    let hub = claim.build();
+    let prog = Arc::new(Spv { hub, user: w.real_chain.build() }) as Arc<dyn Program>;
+    let mut h = Harness::with_regtest(w.rt.clone(), "p3-offchain", ProgramRegistry::new().with(prog)).unwrap();
+    h.hub.queue_moves(1, vec![vec![true]]);
+    let msgs = h.hub.open_contract(1, Spv::NAME, [STAKE, STAKE]).unwrap();
+    h.bus(msgs).unwrap();
+    h.step_until(400, |h| disproof(h).is_some()).unwrap();
+    h.steps(2).unwrap();
+    assert!(h.user.narrative().iter().any(|l| l.contains("does not hold on the served data")), "rejected off-chain: {:?}", h.user.narrative());
+    assert!(h.hub.narrative().iter().any(|l| l.contains("force-closing")));
+    let d = disproof(&h).unwrap();
+    assert!(d.starts_with("cpred_hdr_c1"), "{d}");
+    println!("{}", h.narrative());
+}

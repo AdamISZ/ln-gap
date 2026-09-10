@@ -520,6 +520,15 @@ impl Party {
                 learned.push((e.label.clone(), r.clone()));
             }
         }
+        // a Move into a depth that carries a claim: recompute the claim from the
+        // served data; an invalid claim is refused here and must go on-chain,
+        // where its committed end state can be disputed
+        if let Change::Move { id, .. } = &change {
+            let inst = downcast(self.channel.current_state().contract(*id).ok_or_else(|| anyhow!("no contract {id}"))?).clone();
+            if let Some(spec) = inst.claim_spec(1) {
+                ensure!(spec.valid(&inst.claim_data(1)), "the move's claim does not hold on the served data");
+            }
+        }
         // application policy
         let has = |l: &str| self.has_reveal(l);
         let cctx = ChangeCtx { height: self.height, change: &change, current: self.channel.current_state(), has: &has };
@@ -1036,7 +1045,7 @@ impl Party {
     /// it will commit).
     fn claim_data(&self, inst: &ContractInstance, depth: u32) -> lngap_contract::ClaimData {
         let spec = inst.claim_spec(depth).expect("claim");
-        let mut data = inst.program.claim_data(depth);
+        let mut data = inst.claim_data(depth);
         if inst.prover_at(depth) == self.role {
             if let Some(cheat) = &self.faults.cheat_load {
                 for (k, step) in spec.data_steps().iter().enumerate() {

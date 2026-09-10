@@ -254,8 +254,8 @@ impl Contract for HashChain {
         ensure!(b.len() == 1);
         Ok(b[0])
     }
-    fn claim(&self, depth: u32) -> Option<crate::claim::ClaimSpec> {
-        (depth == 1).then(|| self.spec.clone())
+    fn claim(&self, from: &[bool], depth: u32) -> Option<crate::claim::ClaimSpec> {
+        (from == [false] && depth == 1).then(|| self.spec.clone())
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
         vec![

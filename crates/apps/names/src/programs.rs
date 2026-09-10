@@ -175,26 +175,27 @@ impl Contract for NReg {
             MoveExtras::default()
         }
     }
-    fn claim(&self, depth: u32) -> Option<ClaimSpec> {
-        match depth {
-            2 => Some(self.params.shape.spec()),
-            3 => Some(self.params.shape.refutation().spec()),
+    /// Claims are state-relative: the move *from* Claimed is the hub's proof,
+    /// the move from Refuted the user's refutation, whatever the on-chain depth.
+    fn claim(&self, from: &[bool], depth: u32) -> Option<ClaimSpec> {
+        match bits_to_uint(from) + depth - 1 {
+            1 => Some(self.params.shape.spec()),
+            2 => Some(self.params.shape.refutation().spec()),
             _ => None,
         }
     }
-    fn claim_data(&self, depth: u32) -> ClaimData {
-        match depth {
-            2 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
-            3 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
+    fn claim_data(&self, from: &[bool], depth: u32) -> ClaimData {
+        match bits_to_uint(from) + depth - 1 {
+            1 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
+            2 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
             _ => vec![],
         }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
-        let want_state = i64::from(ctx.depth); // Claimed = 1, Refuted = 2, Reinstated = 3
-        let want_code = i64::from(if ctx.depth == 2 { Self::BOND_TO_HUB } else { Self::BOND_TO_USER });
+        // every move advances the state by one; the code is BondToHub iff the new state is Refuted (2)
         vec![
-            LeafBuilder::new(ctx).new_uint(0..2).int(want_state).op(OP_NUMNOTEQUAL).finish("state_mismatch", move |c| bits_to_uint(&c.new) != want_state as u32),
-            LeafBuilder::new(ctx).code_uint().int(want_code).op(OP_NUMNOTEQUAL).finish("code_mismatch", move |c| i64::from(c.code) != want_code),
+            LeafBuilder::new(ctx).prior_uint(0..2).new_uint(0..2).op(OP_SWAP).int(1).op(OP_ADD).op(OP_NUMNOTEQUAL).finish("state_mismatch", |c| bits_to_uint(&c.new) != bits_to_uint(&c.prior) + 1),
+            LeafBuilder::new(ctx).new_uint(0..2).code_uint().op(OP_SWAP).int(2).op(OP_NUMNOTEQUAL).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| u32::from(c.code) != u32::from(bits_to_uint(&c.new) != 2)),
         ]
     }
     fn describe_state(&self, s: &NRegState) -> String {
@@ -312,26 +313,25 @@ impl Contract for AnchorPay {
         ensure!(b.len() == 1);
         Ok(b[0])
     }
-    fn claim(&self, depth: u32) -> Option<ClaimSpec> {
-        match depth {
-            1 => Some(self.params.shape.spec()),
-            2 => Some(self.params.shape.refutation().spec()),
+    fn claim(&self, from: &[bool], depth: u32) -> Option<ClaimSpec> {
+        match bits_to_uint(from) + depth - 1 {
+            0 => Some(self.params.shape.spec()),
+            1 => Some(self.params.shape.refutation().spec()),
             _ => None,
         }
     }
-    fn claim_data(&self, depth: u32) -> ClaimData {
-        match depth {
-            1 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
-            2 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
+    fn claim_data(&self, from: &[bool], depth: u32) -> ClaimData {
+        match bits_to_uint(from) + depth - 1 {
+            0 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
+            1 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
             _ => vec![],
         }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
-        let want_state = i64::from(ctx.depth); // Paid = 1, Refuted = 2
-        let want_code = i64::from(if ctx.depth == 1 { Self::PAID } else { Self::REFUND });
+        // every move advances the state by one; the code is Paid iff the new state is Paid (1)
         vec![
-            LeafBuilder::new(ctx).new_uint(0..2).int(want_state).op(OP_NUMNOTEQUAL).finish("state_mismatch", move |c| bits_to_uint(&c.new) != want_state as u32),
-            LeafBuilder::new(ctx).code_uint().int(want_code).op(OP_NUMNOTEQUAL).finish("code_mismatch", move |c| i64::from(c.code) != want_code),
+            LeafBuilder::new(ctx).prior_uint(0..2).new_uint(0..2).op(OP_SWAP).int(1).op(OP_ADD).op(OP_NUMNOTEQUAL).finish("state_mismatch", |c| bits_to_uint(&c.new) != bits_to_uint(&c.prior) + 1),
+            LeafBuilder::new(ctx).new_uint(0..2).code_uint().op(OP_SWAP).int(1).op(OP_NUMEQUAL).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| u32::from(c.code) != u32::from(bits_to_uint(&c.new) == 1)),
         ]
     }
     fn describe_state(&self, s: &PayState) -> String {

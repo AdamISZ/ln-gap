@@ -94,12 +94,12 @@ impl ContractInstance {
         let m = program.max_depth_from_bits(&state)? as usize;
         ensure!(keys.len() == m, "{} depth keys but M = {m}", keys.len());
         let m = keys.len();
-        let has_claim = (1..=m as u32).any(|d| program.claim(d).is_some());
+        let has_claim = (1..=m as u32).any(|d| program.claim(&state, d).is_some());
         if has_claim {
             ensure!(challenger_keys.len() == m, "{} challenger key sets but M = {m}", challenger_keys.len());
             for (i, (k, ck)) in keys.iter().zip(&challenger_keys).enumerate() {
                 let d = i as u32 + 1;
-                let Some(spec) = program.claim(d) else {
+                let Some(spec) = program.claim(&state, d) else {
                     ensure!(k.claim.is_none() && ck.indices.is_empty(), "depth {d}: claim keys without a claim");
                     continue;
                 };
@@ -136,12 +136,17 @@ impl ContractInstance {
         Ok(ContractInstance { id, program, value, state, deadline, keys_seq, keys, challenger_keys })
     }
 
+    /// The claim the `depth`-th move from this instance's state commits.
     pub fn claim_spec(&self, depth: u32) -> Option<ClaimSpec> {
-        self.program.claim(depth)
+        self.program.claim(&self.state, depth)
+    }
+    /// The served data for that claim.
+    pub fn claim_data(&self, depth: u32) -> crate::claim::ClaimData {
+        self.program.claim_data(&self.state, depth)
     }
     /// Does any depth carry a claim?
     pub fn has_claim(&self) -> bool {
-        (1..=self.max_depth()).any(|d| self.program.claim(d).is_some())
+        (1..=self.max_depth()).any(|d| self.claim_spec(d).is_some())
     }
     pub fn claim_keys(&self, depth: u32) -> Option<&ClaimKeys> {
         self.keys[depth as usize - 1].claim.as_ref()
