@@ -1,6 +1,7 @@
 //! Two channels (Alice–hub, Bob–hub), one registry operator, one clock.
-//! The world mines (anchors in their own blocks, as a hub with a miner
-//! would), delivers blocks to every party and to the registry, serves the
+//! The world mines (anchors in their own blocks: PoC determinism, since
+//! the promise names a height and a block position that no broadcasting
+//! hub could choose), delivers blocks to every party and to the registry, serves the
 //! registry's proof data to everyone (the public ledger), and performs the
 //! users' *application* steps (send the reveal once the commit is
 //! anchored). It never tells a party what to broadcast.

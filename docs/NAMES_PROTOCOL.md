@@ -75,10 +75,13 @@ block, the ledger path — is re-established inside the claim. The siblings
 can be data; the sides cannot, since "node ‖ sibling" versus "sibling ‖
 node" is the structure of the hashing step and is fixed when the contract
 opens. So the hub must know where its anchor
-will sit in its block when it promises, as a hub with its own miner does
-(the harness mines the anchor alone with the coinbase). Making the sides
-prover-selected needs the same conditional gadget as an "at or before h"
-promise.
+will sit in its block when it promises. No real hub can: a hub broadcasts
+a transaction and waits, and neither the confirmation height nor the
+block position is its to choose. The harness makes both promises come
+true by mining the anchor itself in an otherwise empty block, which is a
+PoC stand-in and nothing more. Making the height a window and the sides
+prover-selected is the largest remaining gap between this registry and a
+deployable one; see the plan's deferred items.
 
 A promise is not signed and carries no secret. It becomes binding when the
 user opens a bond naming its terms and the hub co-signs that channel state:
@@ -152,7 +155,7 @@ per depth for this; that is why `BOND = 40k`.
 ### 3.2 The honest path
 
 ```
-height h-1  registry builds the anchor; the world mines it at h (a hub with a miner)
+height h-1  registry builds the anchor; the world mines it at h (PoC determinism: a real hub cannot promise a height)
 height h    registry: anchor confirmed; the world serves the proof data under slot/incl
             Alice's node: the anchor spends prev_anchor, its root includes her entry → "anchored"
 Alice → hub : Draft { change: Cancel { id } }     fold the bond: R(Init) = bond back to the hub
