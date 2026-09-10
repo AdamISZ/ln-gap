@@ -1,7 +1,9 @@
 //! Plan §8.2 N1–N8 on the bonded name registry, under the SPV model
-//! (SPV_DISPUTE.md phases 3–4): no attestations; every fact about the
-//! registry is an inclusion proof verified by bisection, and a hub proving
-//! on a private fork is refuted by the heavier chain.
+//! (SPV_DISPUTE.md phases 3–4): no attestations or receipts; the hub
+//! promises an anchor height and a proof shape, the bond is written against
+//! them, every fact about the registry is an inclusion proof verified by
+//! bisection, and a hub proving on a private fork is refuted by the heavier
+//! chain.
 
 use anyhow::Result;
 use bitcoin::Amount;
@@ -64,7 +66,7 @@ fn register_cooperatively(w: &mut NamesWorld) -> Result<()> {
 
 pub const N1: Scenario = Scenario {
     id: "N1",
-    title: "Alice registers `alice` through the hub; hub receipts, anchors commit and reveal; cooperative",
+    title: "Alice registers `alice` through the hub; hub promises, anchors commit and reveal; cooperative",
     expected: "1 anchor tx per request batch; no contract tx on-chain; both bonds folded back once the public ledger shows the entries; registry shows alice -> K_A",
     run: || {
         let mut w = NamesWorld::new("N1")?;
@@ -80,8 +82,8 @@ pub const N1: Scenario = Scenario {
 
 pub const N2: Scenario = Scenario {
     id: "N2",
-    title: "Hub receipts but never anchors, and stops signing; Alice claims on-chain after d_receipt",
-    expected: "N-REG: commitment, move_1 (claim revealing the receipt), no answer from the hub, split_1_BondToUser; Alice +40k",
+    title: "Hub promises but never anchors, and stops signing; Alice claims on-chain after the promised height",
+    expected: "N-REG: commitment, move_1 (the claim, CLTV at the promised height + grace), no answer from the hub, split_1_BondToUser; Alice +40k",
     run: || {
         let mut w = NamesWorld::new("N2")?;
         w.hub.lock().unwrap().faults.no_anchor = true;
@@ -93,10 +95,10 @@ pub const N2: Scenario = Scenario {
         assert!(roles.iter().any(|r| r == "move_1"), "{roles:?}");
         assert!(roles.iter().any(|r| r == "split_1_BondToUser"), "{roles:?}");
         let m1 = w.alice.seen.iter().find(|s| s.role == "move_1").unwrap().height;
-        assert!(m1 > r.promised_height + GRACE, "claim only after d_receipt (CLTV)");
+        assert!(m1 > r.height + GRACE, "claim only after the promised height (CLTV)");
         assert_eq!(w.alice.balance(Role::User), sat(100_000 - K - K + BOND.to_sat() - 2 * K));
         assert_eq!(w.alice.balance(Role::Hub), sat(60_000 - K));
-        assert!(!w.audit()?.is_empty(), "auditor reports the broken receipt promise");
+        assert!(!w.audit()?.is_empty(), "auditor reports the broken promise");
         assert_cross_cutting(&w.alice);
         Ok(report(&w, &N2))
     },
@@ -104,14 +106,14 @@ pub const N2: Scenario = Scenario {
 
 pub const N3: Scenario = Scenario {
     id: "N3",
-    title: "Hub receipts and anchors, but Alice falsely claims `not anchored` on-chain",
+    title: "Hub promises and anchors, but Alice falsely claims `not anchored` on-chain",
     expected: "hub refuses the claim off-chain, Alice force-closes and claims (move_1), the hub answers with its inclusion proof (move_2), Alice finds nothing to dispute, split_2_BondToHub; the hub keeps the bond",
     run: || {
         let mut w = NamesWorld::new("N3")?;
         let r = w.register()?;
         w.registering = false; // no reveal in this scenario: one bond
-        let d = r.promised_height + GRACE;
-        // Alice's cheating policy: claim from d_receipt no matter what, never fold the bond
+        let d = r.height + GRACE;
+        // Alice's cheating policy: claim from the promised height no matter what, never fold the bond
         w.alice.user.set_move_policy(ID_BOND, Box::new(move |ctx: &MoveCtx| (ctx.height >= d && lngap_lamport::bits_to_uint(ctx.state) == 0).then(|| vec![true])));
         w.alice.user.set_cancel_policy(ID_BOND, Box::new(|_| false));
         w.step_until(120, |w| party_txs(&w.alice).iter().any(|r| r.starts_with("split_")))?;
@@ -169,7 +171,7 @@ pub const N5: Scenario = Scenario {
 
 pub const N6: Scenario = Scenario {
     id: "N6",
-    title: "Sale; Alice signs, hub receipts the transfer, then refuses to anchor",
+    title: "Sale; Alice signs, hub promises the transfer, then refuses to anchor",
     expected: "Bob refunded at h_sale; the hub's leg-2 payment refunded; Alice claims the transfer bond off-chain (the hub cannot answer) and takes it at the deadline; Alice keeps the name",
     run: || {
         let mut w = NamesWorld::new("N6")?;
@@ -229,7 +231,7 @@ pub const N7: Scenario = Scenario {
 
 pub const N8: Scenario = Scenario {
     id: "N8",
-    title: "Omission: the hub receipts the reveal, leaves it out of the anchor, and tries a fabricated inclusion proof",
+    title: "Omission: the hub promises the reveal, leaves it out of the anchor, and tries a fabricated inclusion proof",
     expected: "Alice claims the reveal bond; the hub's proof is rejected off-chain, goes on-chain (move_2) and is disproved by bisection at the ledger-root check; bond to Alice; the auditor reports the omission too",
     run: || {
         let mut w = NamesWorld::new("N8")?;
@@ -243,7 +245,7 @@ pub const N8: Scenario = Scenario {
         assert!(roles.iter().any(|r| r == "move_2") && roles.iter().any(|r| r == "d2/dispute"), "{roles:?}");
         assert_eq!(w.resolve("alice"), None, "no reveal anchored, no owner");
         let findings = w.audit()?;
-        assert!(findings.iter().any(|f| f.contains("receipt 2")), "{findings:?}");
+        assert!(findings.iter().any(|f| f.contains("promise 2")), "{findings:?}");
         // Alice's channel closed: the reveal bond's disproof paid her; the commit bond was folded earlier
         let out = output_of(&w.alice, &d);
         assert!(out > sat(BOND.to_sat() - 30 * K) && out < BOND, "the bond minus the dispute's fees: {out}");

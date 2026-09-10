@@ -164,7 +164,7 @@ pub fn anchor_root(tx: &Transaction) -> Result<[u8; 32]> {
 /// Walk an anchor chain from `genesis`: every transaction must have the
 /// anchor shape and spend the previous anchor's output 1. Returns the tip
 /// (the outpoint the next anchor must spend) and the roots in order. This is
-/// the check a user runs before trusting a receipt's `prev_anchor`.
+/// the check a user runs before trusting a promise's `prev_anchor`.
 pub fn verify_anchor_chain(genesis: OutPoint, anchors: &[Transaction]) -> Result<(OutPoint, Vec<[u8; 32]>)> {
     let mut tip = genesis;
     let mut roots = Vec::new();

@@ -13,7 +13,7 @@ the users' application steps).
 - **Alice** (user, owner of `alice`) and **Bob** (user, buyer) each have a
   Lightning-style channel with the **hub**. Every contract lives in one
   channel as a contract output of both parties' commitment transactions.
-- The **registry** is the hub's off-chain service: it receipts requests,
+- The **registry** is the hub's off-chain service: it answers requests with promises,
   batches them into an anchor every `interval` blocks, and serves the
   ledger. In the harness it is one object the world drives; a hub daemon
   would host it.
@@ -25,12 +25,12 @@ Three layers of messages exist. Between channel parties:
 
 | layer | messages | purpose |
 |---|---|---|
-| application | `Statement { label, reveal }` | hand over a Lamport-signed hub statement (a receipt) |
+| application | `Statement { label, reveal }` | hand over a Lamport-signed hub statement (unused by these contracts; kept for value-carrying statements) |
 | draft | `Draft { spec, change, extra_reveals }` → `DraftKeys { seq, keys }` or `Reject { seq, reason }` | agree a state change and exchange the Lamport/Winternitz keys the new state's leaves need |
 | channel | `Propose { state }`, `CommitSigs { seq, commit_sig, graph_sigs }`, `RevokeAndAck { seq, secret, next_rev_hash }` | sign the new commitment transactions and every pre-signed graph transaction; revoke the old state |
 
 Between a user and the registry (off-channel, in the harness a function
-call): *request → receipt*, and *serve* (ledger entries with their siblings,
+call): *request → promise*, and *serve* (ledger entries with their siblings,
 the anchor transaction, headers).
 
 ## 2. Data the contracts name
@@ -46,14 +46,13 @@ anchor's output 1, outputs `OP_RETURN <69 zero bytes> <root> OP_0` and a
 P2TR change; 208 bytes with the root at byte 128. One spendable output, so
 the chain of anchors is a single line.
 
-**Receipt.** The hub's answer to a request at height `now`:
+**Promise.** The hub's answer to a request at height `now`: the terms it
+will be bonded to.
 
 ```
-Receipt {
+Promise {
   req_id,
-  pk,                    // Lamport key of the statement slot "receipt/<req_id>": 32 (h0, h1) hash pairs
-  reveal,                // the hub's signature of the value req_id under it: 32 preimages, one per bit
-  promised_height h,     // the hub's next scheduled anchor: max(last + interval, now + 2)
+  height h,              // the hub's next scheduled anchor: max(last + interval, now + 2)
   shape: AnchorShape {   // the inclusion proof the hub will owe
     chain: { checkpoint: digest of block `now`, nbits, n_headers: h - now },
     prev_anchor,         // the anchor-chain tip the anchor must spend
@@ -63,19 +62,13 @@ Receipt {
 }
 ```
 
-`pk` is baked into the user's `move_1` leaf (`expect_uint(pk, req_id)`);
-`reveal` is what the user spends that leaf with, off-chain in the draft's
-`extra_reveals` and on-chain as the last 32 witness elements. Only the hub
-knows the preimages, which is what makes the receipt unforgeable.
-
-Note that in this flow the on-chain check is redundant: the user requests
-first and proposes the bond second, and the hub's channel signature on a
-state containing the bond (with `req_id` and the proof shape baked in) is
-already its acceptance of the request. The Lamport slot is inherited from
-the statement machinery (D14) where values carry information; a receipt's
-value is its own label. It would only earn its place for a bond opened
-before the request, or a receipt shown outside the channel. Candidate for
-removal (see D14).
+A promise is not signed and carries no secret. It becomes binding when the
+user opens a bond naming its terms and the hub co-signs that channel state:
+from then on the hub either proves inclusion of exactly that shape or pays.
+(An earlier design also had the hub Lamport-sign a *receipt* that the
+user's claim leaf checked; with the request preceding the bond, the hub's
+signature on the bond already says everything the receipt did, so it was
+removed — D22.)
 
 The shape is a set of constants. From it both parties build the same
 128-step `ClaimSpec` (per header: three compressions with link and nBits
@@ -85,19 +78,21 @@ root copied into a register; the block Merkle path; the entry's leaf hash
 and the 32-level ledger path; then `D == R`). The *data* for that program
 (header bytes, the anchor's bytes, siblings) is served later.
 
-**Before accepting a receipt** the user walks the anchor chain from the
-agreed genesis through every anchor its node can see (confirmed, plus a
-broadcast one) with `verify_anchor_chain`, and refuses the receipt unless
-`prev_anchor` is that walk's tip.
+**Before opening a bond on a promise** the user walks the anchor chain from
+the agreed genesis through every anchor its node can see (confirmed, plus a
+broadcast one) with `verify_anchor_chain`, and refuses the promise unless
+`prev_anchor` is that walk's tip. For a reveal it also checks the promised
+height falls inside the commit's window (`h ≤ h_commit + N`), since a later
+anchor would not count.
 
 ## 3. `nreg`: bonded registration
 
-Program name: `nreg:{json of NRegParams}` with `req_id`, `receipt_pk`,
-`d_receipt = h + 2`, `shape`, `slot` (where the served data is found).
+Program name: `nreg:{json of NRegParams}` with `req_id`, `claim_from =
+h + 2`, `shape`, `slot` (where the served data is found).
 State machine (2 bits) and who moves:
 
 ```
-Init ──user: "receipted, not anchored"──▶ Claimed ──hub: inclusion proof──▶ Refuted ──user: heavier chain──▶ Reinstated
+Init ──user: "not anchored by the promised height"──▶ Claimed ──hub: inclusion proof──▶ Refuted ──user: heavier chain──▶ Reinstated
 R(Init) = bond to hub       R(Claimed) = bond to user       R(Refuted) = bond to hub       R(Reinstated) = bond to user
 ```
 
@@ -109,11 +104,11 @@ BondToHub : BondToUser)`) catch a Move that claims otherwise.
 
 ```
 Alice → registry : request (Commit { c })                       at height now
-registry → Alice : Receipt { req_id, reveal, h, shape }
+registry → Alice : Promise { req_id, h, shape }
 Alice            : verify_anchor_chain(genesis .. ) tip == shape.prev_anchor
 Alice → hub      : Draft { change: Open { id, program: "nreg:{..}", stakes: [0, BOND], deadline },
                            spec: the new channel state with Alice's keys for depths 1..3 filled }
-hub              : policy: the receipt was issued, the shape matches the receipt, stakes are [0, ≤ BOND]
+hub              : policy: the promise was made, the shape and claim_from match it, stakes are [0, ≤ BOND]
 hub → Alice      : DraftKeys { seq, keys: hub's keys for depths 1..3 }
 Alice → hub      : Propose { state }, CommitSigs { .. }        (signatures on the hub's commitment
                                                                 and on every graph tx of both versions)
@@ -152,13 +147,13 @@ same pattern once her commit is anchored, with its own bond.
 ### 3.3 The hub never anchors (N2)
 
 ```
-height h+2  Alice → hub : Draft { change: Move { id, mv: [true], deadline } , extra_reveals: [("receipt/<r>", reveal)] }
+height h+2  Alice → hub : Draft { change: Move { id, mv: [true], deadline } }
             hub: policy: no proof data for the slot → accepts (a cooperative hub folds later at the deadline);
                  a hub that has stopped signing answers nothing
             Alice: counterparty stalled → force-close
 on-chain    commitment_k (Alice's version)
             move_1 : CLTV h+2, CSV to_self_delay (Alice broadcast), 2-of-2, Alice's Lamport reveals
-                     (move, state = Claimed, code = BondToUser), the receipt's 32 preimages
+                     (move, state = Claimed, code = BondToUser)
             hub    : has no proof; nothing to broadcast
             split_1_BondToUser after Δ + Δ' (the outcome favours the prover)
 ```
@@ -220,10 +215,10 @@ order is:
 ```
 Bob → Alice   : offer (off-protocol)
 Alice         : sign Transfer { alice → K_B, valid_until h_sale }
-Alice → registry : request; registry → Alice : Receipt (shape names the transfer entry)
+Alice → registry : request; registry → Alice : Promise (shape names the transfer entry)
 Bob  → hub (Bob's channel)   : Open leg 1  anchorpay { prover: Hub  }, stakes [PRICE, 0], deadline h_sale
 hub  → Alice (Alice's channel): Open leg 2  anchorpay { prover: User }, stakes [0, PRICE], deadline h_sale
-Alice → hub (Alice's channel) : Open the transfer bond: nreg on the transfer receipt
+Alice → hub (Alice's channel) : Open the transfer bond: nreg on the transfer's promise
 ```
 
 Cooperative (N4): the anchor confirms at `h`; the world serves the data;
@@ -239,7 +234,7 @@ broadcasts `move_1` with *the same* proof, built from the public data, then
 `split_1_Paid`. The transfer bond settles back to the hub at its deadline
 (the entry was anchored).
 
-Hub stops anchoring after the receipt (N6): leg 1 and leg 2 hit `h_sale`
+Hub stops anchoring after the promise (N6): leg 1 and leg 2 hit `h_sale`
 and are cancelled (`Cancel { id }`: `R(Init)` refunds Bob and the hub);
 Alice's claim on the transfer bond is accepted off-chain, and at the bond's
 deadline `Cancel` pays `R(Claimed)` = bond to Alice.
@@ -248,9 +243,9 @@ deadline `Cancel` pays `R(Claimed)` = bond to Alice.
 
 | moment | check | on failure |
 |---|---|---|
-| receiving a receipt | `verify_anchor_chain` from genesis; tip == `prev_anchor` | refuse the receipt, open no bond |
-| answering an `Open` draft (hub) | receipt issued, shape matches, stakes within the bond | `Reject` |
-| answering a `Move` draft | transition valid; the move's statements (receipt) decode to the right value; if the move carries a claim, `spec.valid(served data)`; application policy | `Reject` (the mover may force-close) |
+| receiving a promise | `verify_anchor_chain` from genesis; tip == `prev_anchor`; a reveal's height within the commit's window | refuse the promise, open no bond |
+| answering an `Open` draft (hub) | promise made, shape and `claim_from` match it, stakes within the bond | `Reject` |
+| answering a `Move` draft | transition valid; if the move carries a claim, `spec.valid(served data)`; application policy | `Reject` (the mover may force-close) |
 | seeing the counterparty's `move_d` on-chain | decode reveals; `transition`; generic leaves; if it carries a claim, recompute it on the served data | `disprove_*`, or `dispute` and the rounds |
 | each dispute stage | it is my turn: answer from the committed values / pick the first wrong segment / disprove the isolated step | after Δ: `timeout` sweep by the other party |
 | a counterparty that stops answering drafts | `stall_blocks` without progress | force-close |
@@ -259,7 +254,6 @@ deadline `Cancel` pays `R(Claimed)` = bond to Alice.
 
 | item | value |
 |---|---|
-| receipt statement | 32 Lamport bits; 736 B script, 672 B witness in `move_1` |
 | a Move carrying a claim (24-word end state) | ~5 kvB |
 | the inclusion claim | 128 steps, 7 level-1 rounds; `p_round` 4.9 kvB, `q_round` 0.2 kvB |
 | N8's full dispute | 23 transactions; the disproof leaf `simple_ledger_root` ~10 kvB |

@@ -1,6 +1,6 @@
 //! Programs by name. A name is either an exact registered program or
 //! `prefix:params` handled by a factory, so parameterised programs (a bond
-//! for one receipt, a payment gated on one attestation) can be named on the
+//! for one request, a payment gated on one proof) can be named on the
 //! wire and rebuilt identically by both parties.
 
 use std::collections::HashMap;

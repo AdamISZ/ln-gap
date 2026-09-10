@@ -17,10 +17,9 @@ use lngap_btc::regtest::Regtest;
 use lngap_channel::Role;
 use lngap_lamport::bits_to_uint;
 use lngap_names::anchor::verify_anchor_chain;
-use lngap_names::hub::{NamesHub, Receipt};
+use lngap_names::hub::{NamesHub, Promise};
 use lngap_names::programs::{AnchorPayParams, NRegParams};
-use lngap_names::registry::Event;
-use lngap_names::statements::receipt_label;
+use lngap_names::registry::{Event, N};
 use lngap_names::user::NamesUser;
 use lngap_names::{registry_programs, AnchorPay, NReg, ServedData};
 use lngap_party::draft::{downcast, Change};
@@ -61,14 +60,14 @@ pub struct NamesWorld {
     pub store: ServedData,
     /// Slots whose entry the public ledger shows anchored.
     anchored: Arc<Mutex<HashSet<String>>>,
-    pub receipts: HashMap<u32, Receipt>,
+    pub promises: HashMap<u32, Promise>,
     pub genesis: OutPoint,
     pub genesis_height: u32,
     /// An anchor the hub built, to be mined in the next block.
     pending_anchor: Option<Transaction>,
     /// Scenario fault: the hub mines its anchors on a private fork.
     pub fork: bool,
-    /// Slots anchored on the fork, with the receipt height (for the refutation data).
+    /// Slots anchored on the fork, with the request height (for the refutation data).
     forked: Vec<(String, u32, usize)>,
     reveal_sent: bool,
     pub registering: bool,
@@ -99,7 +98,7 @@ impl NamesWorld {
             bob_user,
             store,
             anchored: Arc::new(Mutex::new(HashSet::new())),
-            receipts: HashMap::new(),
+            promises: HashMap::new(),
             genesis: op,
             genesis_height,
             pending_anchor: None,
@@ -153,8 +152,8 @@ impl NamesWorld {
         Ok(RawHeader::from_header(&self.rt.rpc.get_block_header(&hash)?))
     }
 
-    /// The hub's change policy on both channels: bonds only for receipts it
-    /// issued; refuse a "receipted, not anchored" claim when it can prove
+    /// The hub's change policy on both channels: bonds only for promises it
+    /// made, on their terms; refuse a "not anchored" claim when it can prove
     /// inclusion (it will do so on-chain instead); always agree to fold.
     /// `veto` adds scenario-specific refusals on top.
     pub fn set_hub_policy(&mut self, who: Who, veto: Option<Box<dyn Fn(&ChangeCtx) -> Result<()> + Send + Sync>>) {
@@ -169,8 +168,8 @@ impl NamesWorld {
                     if let Some(p) = program.strip_prefix("nreg:") {
                         let params: NRegParams = serde_json::from_str(p)?;
                         let h = hub.lock().unwrap();
-                        let r = h.receipts.get(&params.req_id).ok_or_else(|| anyhow!("no receipt {} was issued", params.req_id))?;
-                        ensure!(r.shape == params.shape, "bond terms do not match the receipt");
+                        let r = h.promises.get(&params.req_id).ok_or_else(|| anyhow!("no promise {} was made", params.req_id))?;
+                        ensure!(r.shape == params.shape && r.height + GRACE == params.claim_from, "bond terms do not match the promise");
                         ensure!(stakes[Role::Hub.idx()] <= BOND && stakes[Role::User.idx()] == Amount::ZERO, "bond terms");
                         Ok(())
                     } else if program.starts_with("anchorpay:") {
@@ -206,41 +205,42 @@ impl NamesWorld {
 
     // ----- registry interactions (user application steps) -----
 
-    /// The user's check before trusting a receipt: walk the anchor chain from
-    /// genesis through every anchor it can see (confirmed, and the one in the
-    /// mempool if any); the receipt's `prev_anchor` must be that chain's tip.
-    fn user_checks_tip(&self, prev_anchor: OutPoint) -> Result<()> {
+    /// The user's checks before opening a bond on a promise: the anchor chain
+    /// walked from genesis through every anchor the user can see (confirmed,
+    /// and the one in the mempool if any) must end at the promise's tip; and
+    /// a reveal's promised height must fall inside the commit's window.
+    fn user_checks_promise(&self, p: &Promise, window_from: Option<u32>) -> Result<()> {
         let mut txs: Vec<Transaction> = self.anchor_txs()?.into_iter().map(|a| a.1).collect();
-        if let Some(p) = &self.pending_anchor {
-            txs.push(p.clone());
+        if let Some(pa) = &self.pending_anchor {
+            txs.push(pa.clone());
         }
         let (tip, _) = verify_anchor_chain(self.genesis, &txs)?;
-        ensure!(tip == prev_anchor, "the receipt names tip {prev_anchor} but the anchor chain's tip is {tip}");
+        ensure!(tip == p.shape.prev_anchor, "the promise names tip {} but the anchor chain's tip is {tip}", p.shape.prev_anchor);
+        if let Some(h1) = window_from {
+            ensure!(p.height <= h1 + N, "the promised height {} is outside the reveal window ({h1} + {N})", p.height);
+        }
         Ok(())
     }
 
-    fn hub_receipt(&mut self, who: Who, event: Event) -> Result<Receipt> {
+    /// Request → promise. The user checks the promise before building a bond on it.
+    fn hub_promise(&mut self, event: Event, window_from: Option<u32>) -> Result<Promise> {
         let h = self.height();
         let cp = self.raw_header(h)?;
-        let r = self.hub.lock().unwrap().receipt(event, h, cp.digest(), cp.nbits())?;
-        self.user_checks_tip(r.shape.prev_anchor)?;
-        let label = receipt_label(r.req_id);
-        let party = &mut self.channel(who).user;
-        party.know_key(&label, r.pk.clone());
-        party.learn_reveal(&label, r.reveal.clone())?;
-        self.receipts.insert(r.req_id, r.clone());
-        Ok(r)
+        let p = self.hub.lock().unwrap().promise(event, h, cp.digest(), cp.nbits())?;
+        self.user_checks_promise(&p, window_from)?;
+        self.promises.insert(p.req_id, p.clone());
+        Ok(p)
     }
 
-    fn nreg_program(&self, r: &Receipt) -> String {
-        NReg::new(NRegParams { req_id: r.req_id, receipt_pk: r.pk.clone(), d_receipt: r.promised_height + GRACE, shape: r.shape.clone(), slot: Self::slot(r.req_id) }, self.store.clone()).program_name()
+    fn nreg_program(&self, p: &Promise) -> String {
+        NReg::new(NRegParams { req_id: p.req_id, claim_from: p.height + GRACE, shape: p.shape.clone(), slot: Self::slot(p.req_id) }, self.store.clone()).program_name()
     }
 
-    /// Install honest bond behaviour: the user claims from `d_receipt` if
+    /// Install honest bond behaviour: the user claims from `claim_from` if
     /// the entry is not anchored and folds the bond once it is, and
     /// refutes the hub's chain if a heavier one is served; the hub answers
     /// a claim with its inclusion proof.
-    fn install_bond_policies(&mut self, who: Who, id: u32, req_id: u32, d_receipt: u32) {
+    fn install_bond_policies(&mut self, who: Who, id: u32, req_id: u32, claim_from: u32) {
         let slot = Self::slot(req_id);
         let anchored = self.anchored.clone();
         let anchored2 = self.anchored.clone();
@@ -251,7 +251,7 @@ impl NamesWorld {
         party.set_move_policy(
             id,
             Box::new(move |ctx: &MoveCtx| match bits_to_uint(ctx.state) {
-                0 => (ctx.height >= d_receipt && !anchored.lock().unwrap().contains(&s1)).then(|| vec![true]),
+                0 => (ctx.height >= claim_from && !anchored.lock().unwrap().contains(&s1)).then(|| vec![true]),
                 2 => store.has(&format!("{s3}/refute")).then(|| vec![true]),
                 _ => None,
             }),
@@ -260,25 +260,25 @@ impl NamesWorld {
         self.channel(who).hub.set_move_policy(id, Box::new(move |ctx: &MoveCtx| (bits_to_uint(ctx.state) == 1 && store2.has(&format!("{slot}/incl"))).then(|| vec![true])));
     }
 
-    fn open_bond(&mut self, who: Who, id: u32, r: &Receipt) -> Result<()> {
-        let program = self.nreg_program(r);
-        let d_receipt = r.promised_height + GRACE;
-        let deadline = d_receipt + self.alice.params().deadline_offset() + 40;
-        self.install_bond_policies(who, id, r.req_id, d_receipt);
+    fn open_bond(&mut self, who: Who, id: u32, p: &Promise) -> Result<()> {
+        let program = self.nreg_program(p);
+        let claim_from = p.height + GRACE;
+        let deadline = claim_from + self.alice.params().deadline_offset() + 40;
+        self.install_bond_policies(who, id, p.req_id, claim_from);
         let msgs = self.channel(who).user.open_contract_with_deadline(id, &program, [Amount::ZERO, BOND], deadline)?;
         self.channel(who).bus(msgs)?;
         Ok(())
     }
 
-    /// Alice registers `alice`: commit receipted, bond opened.
-    pub fn register(&mut self) -> Result<Receipt> {
+    /// Alice registers `alice`: commit requested, promise checked, bond opened.
+    pub fn register(&mut self) -> Result<Promise> {
         let ev = self.alice_name.commit_event();
-        let r = self.hub_receipt(Who::Alice, ev)?;
-        self.open_bond(Who::Alice, ID_BOND, &r)?;
+        let p = self.hub_promise(ev, None)?;
+        self.open_bond(Who::Alice, ID_BOND, &p)?;
         self.registering = true;
-        self.commit_req = Some(r.req_id);
-        self.say(format!("alice sent commit (receipt {}, anchor promised at {}) and opened bond contract {ID_BOND}", r.req_id, r.promised_height));
-        Ok(r)
+        self.commit_req = Some(p.req_id);
+        self.say(format!("alice sent commit (request {}, anchor promised at {}) and opened bond contract {ID_BOND}", p.req_id, p.height));
+        Ok(p)
     }
 
     /// Bob offers to buy `alice` for PRICE (an off-chain intent; the
@@ -288,13 +288,13 @@ impl NamesWorld {
         Ok(())
     }
 
-    /// Alice signs the transfer, the hub receipts it; Bob opens leg 1 (hub
-    /// proves inclusion to get paid), the hub opens leg 2 (Alice proves
+    /// Alice signs the transfer and gets the hub's promise; Bob opens leg 1
+    /// (hub proves inclusion to get paid), the hub opens leg 2 (Alice proves
     /// inclusion to get paid), and Alice opens the transfer bond.
-    pub fn alice_sells(&mut self, h_sale: u32) -> Result<Receipt> {
+    pub fn alice_sells(&mut self, h_sale: u32) -> Result<Promise> {
         let kb = self.bob_key();
         let ev = self.alice_name.transfer_event(&kb, h_sale);
-        let r = self.hub_receipt(Who::Alice, ev)?;
+        let r = self.hub_promise(ev, None)?;
         let slot = Self::slot(r.req_id);
         let (s1, s2) = (slot.clone(), slot.clone());
         // leg 1 in Bob's channel: PRICE to the hub if it proves the transfer anchored
@@ -314,7 +314,7 @@ impl NamesWorld {
         self.alice.bus(msgs)?;
         // the transfer bond
         self.open_bond(Who::Alice, ID_TBOND, &r)?;
-        self.say(format!("alice signed transfer alice -> K_B valid until {h_sale} (receipt {}, anchor promised at {}); leg 1 ({ID_LEG1}), leg 2 ({ID_LEG2}) and transfer bond ({ID_TBOND}) opened", r.req_id, r.promised_height));
+        self.say(format!("alice signed transfer alice -> K_B valid until {h_sale} (request {}, anchor promised at {}); leg 1 ({ID_LEG1}), leg 2 ({ID_LEG2}) and transfer bond ({ID_TBOND}) opened", r.req_id, r.height));
         Ok(r)
     }
 
@@ -368,7 +368,7 @@ impl NamesWorld {
         // what a hub trying to bluff its way through would present
         let anchored_now = self.hub.lock().unwrap().anchors.last().is_some_and(|a| a.height == h && a.tx.is_some());
         if anchored_now {
-            let omitted: Vec<u32> = self.hub.lock().unwrap().receipts.iter().filter(|(_, r)| r.promised_height == h && r.anchored_at.is_none()).map(|(id, _)| *id).collect();
+            let omitted: Vec<u32> = self.hub.lock().unwrap().promises.iter().filter(|(_, r)| r.height == h && r.anchored_at.is_none()).map(|(id, _)| *id).collect();
             confirmed.extend(omitted);
         }
         for req_id in confirmed {
@@ -379,7 +379,7 @@ impl NamesWorld {
 
     /// Build and serve the inclusion proof data for a request anchored at `h`.
     fn serve_inclusion(&mut self, req_id: u32, h: u32, txs: &[Transaction]) -> Result<()> {
-        let r = self.receipts.get(&req_id).ok_or_else(|| anyhow!("no receipt {req_id}"))?.clone();
+        let r = self.promises.get(&req_id).ok_or_else(|| anyhow!("no promise {req_id}"))?.clone();
         let n = r.shape.chain.n_headers as u32;
         let headers: Vec<RawHeader> = (h + 1 - n..=h).map(|x| self.raw_header(x)).collect::<Result<_>>()?;
         let txids: Vec<bitcoin::Txid> = txs.iter().map(|t| t.compute_txid()).collect();
@@ -397,8 +397,8 @@ impl NamesWorld {
             self.anchored.lock().unwrap().insert(slot.clone());
         }
         if self.fork {
-            let receipt_height = h - n;
-            self.forked.push((slot.clone(), receipt_height, n as usize));
+            let request_height = h - n;
+            self.forked.push((slot.clone(), request_height, n as usize));
         }
         self.say(format!("proof data for request {req_id} served ({})", if !included { "entry NOT in the anchored ledger" } else if self.fork { "entry anchored on the hub's fork only" } else { "entry anchored" }));
         Ok(())
@@ -407,13 +407,13 @@ impl NamesWorld {
     /// Serve heavier-chain refutations for fork-anchored slots once the real chain is one longer.
     fn serve_refutations(&mut self) -> Result<()> {
         let h = self.height();
-        for (slot, receipt_height, n) in self.forked.clone() {
+        for (slot, request_height, n) in self.forked.clone() {
             let key = format!("{slot}/refute");
-            if self.store.has(&key) || h < receipt_height + n as u32 + 1 {
+            if self.store.has(&key) || h < request_height + n as u32 + 1 {
                 continue;
             }
-            let headers: Vec<RawHeader> = (receipt_height + 1..=receipt_height + n as u32 + 1).map(|x| self.raw_header(x)).collect::<Result<_>>()?;
-            let cp = self.raw_header(receipt_height)?;
+            let headers: Vec<RawHeader> = (request_height + 1..=request_height + n as u32 + 1).map(|x| self.raw_header(x)).collect::<Result<_>>()?;
+            let cp = self.raw_header(request_height)?;
             let shape = HeaderShape { checkpoint: cp.digest(), nbits: cp.nbits(), n_headers: n + 1 };
             self.store.put(&key, shape.data(&headers));
             self.say(format!("the real chain is heavier than the hub's fork: refutation data served for {slot}"));
@@ -444,11 +444,12 @@ impl NamesWorld {
         if self.registering && !self.reveal_sent {
             let anchored = self.commit_req.is_some_and(|id| self.is_anchored(id));
             if anchored {
+                let h1 = self.hub.lock().unwrap().promises[&self.commit_req.unwrap()].anchored_at.expect("anchored");
                 let ev = self.alice_name.reveal_event();
-                let r = self.hub_receipt(Who::Alice, ev)?;
-                self.open_bond(Who::Alice, ID_RBOND, &r)?;
+                let p = self.hub_promise(ev, Some(h1))?;
+                self.open_bond(Who::Alice, ID_RBOND, &p)?;
                 self.reveal_sent = true;
-                self.say(format!("alice's commit is anchored; sent reveal (receipt {}, anchor promised at {}) and opened bond {ID_RBOND}", r.req_id, r.promised_height));
+                self.say(format!("alice's commit is anchored at {h1}; sent reveal (request {}, anchor promised at {}, within the window) and opened bond {ID_RBOND}", p.req_id, p.height));
             }
         }
         Ok(())
@@ -467,8 +468,8 @@ impl NamesWorld {
     pub fn audit(&self) -> Result<Vec<String>> {
         let anchors = self.anchor_txs()?;
         let hub = self.hub.lock().unwrap();
-        let receipts: Vec<_> = hub.receipts.iter().map(|(k, v)| (*k, v.clone())).collect();
-        Ok(lngap_names::audit::audit(self.genesis, &anchors, &hub.ledger, &receipts))
+        let promises: Vec<_> = hub.promises.iter().map(|(k, v)| (*k, v.clone())).collect();
+        Ok(lngap_names::audit::audit(self.genesis, &anchors, &hub.ledger, &promises))
     }
 
     pub fn narrative(&self) -> String {

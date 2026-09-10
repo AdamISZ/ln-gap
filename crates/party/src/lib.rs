@@ -1,5 +1,5 @@
 //! A party (user or hub): a channel, a Lamport key store, the programs it
-//! knows, statements it holds (receipts, attestations), and the protocol
+//! knows, statements it holds, and the protocol
 //! behaviour for contracts — off-chain negotiation of contract changes, and
 //! on-chain reaction to commitments, Moves, deadlines and challenge windows.
 //! The same code runs for both roles.
@@ -47,7 +47,7 @@ pub enum PartyMsg {
     DraftKeys { seq: u64, keys: MyKeys },
     /// Responder -> proposer: the draft is refused.
     Reject { seq: u64, reason: String },
-    /// A Lamport-signed statement (receipt, attestation) handed over.
+    /// A Lamport-signed statement handed over.
     Statement { label: String, reveal: Reveal },
 }
 

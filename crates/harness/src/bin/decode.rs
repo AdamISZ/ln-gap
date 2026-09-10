@@ -170,7 +170,7 @@ fn decode_witness(w: &bitcoin::Witness) {
                 let v = r.iter().fold(0u64, |a, b| (a << 1) | u64::from(*b));
                 println!("    {} bits revealed by the prover: {s} = {v}", r.len());
             } else {
-                println!("    {} preimages of a fixed statement (expect_bit: a hub receipt/attestation), all present", r.len());
+                println!("    {} preimages of a fixed statement (expect_bit: a Lamport-signed hub statement), all present", r.len());
             }
         }
     }

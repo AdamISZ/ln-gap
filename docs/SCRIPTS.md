@@ -160,18 +160,18 @@ depth tracked at build time.
 Every gadget is checked against its native counterpart on regtest and
 exhaustively in the crate's mini-interpreter (`script32::sim`).
 
-## Names (`lngap-names`), receipts as 32-bit Lamport slots, facts as inclusion proofs
+## Names (`lngap-names`), facts as inclusion proofs
 
-A hub receipt is a 32-bit Lamport key (label `receipt/<req_id>`) whose
-preimages for the request id the hub hands out; the user's claim reveals it
-(`expect_uint`: 736 B script, 672 B witness). Everything else about the
-registry is a bisection claim of the phase-2b shape (D20).
+Nothing in the names contracts is a hub statement: the hub's promise (an
+anchor height and a proof shape) binds through its signature on the bond
+that names it, and every fact about the registry is a bisection claim of
+the phase-2b shape (D20, D22).
 
 ### `nreg:{params}` — bonded registration (hub locks the bond; depths 1–3)
 
 | Depth | Prover | Leaf | Script |
 |---|---|---|---|
-| 1 | user | `move_1` (claim "not anchored") | `<h+2> OP_CLTV OP_DROP [CSV tsd] 2-of-2-verify, reveal(move 1b, state 2b, code 2b), expect_uint(receipt key, req_id), OP_1` |
+| 1 | user | `move_1` (claim "not anchored") | `<h+2> OP_CLTV OP_DROP [CSV tsd] 2-of-2-verify, reveal(move 1b, state 2b, code 2b), OP_1` |
 | 2 | hub | `move_2` (inclusion proof) | `2-of-2-verify, reveals, Winternitz end state (24 words: 6 KB witness, 21 KB verifier), OP_1`; `C'_2` carries the `dispute` leaf and the pre-signed dispute chain |
 | 3 | user | `move_3` (heavier chain) | as `move_2` with the refutation claim's end state |
 | any | `disprove_state_mismatch`, `disprove_code_mismatch` | the generic consistency checks (expected state = depth, code by depth) |
@@ -196,5 +196,5 @@ and copies the root out of the third; predicates on the first chunk pin the
 spent outpoint (bytes 5..41), the output count (byte 46 = 2) and output 0's
 first script byte (byte 56 = `OP_RETURN`), so an anchor with a second
 spendable output cannot be proven against. Users walk the chain from genesis
-(`verify_anchor_chain`) before trusting a receipt's tip; the auditor does the
+(`verify_anchor_chain`) before trusting a promise's tip; the auditor does the
 same and recomputes the root of the published ledger as of each anchor.

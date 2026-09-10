@@ -1,11 +1,12 @@
 //! The contract programs of the names demo, on SPV facts.
 //!
-//! * `nreg:{params}` — bonded registration. The hub locks a bond. From
-//!   `d_receipt` the user may claim "receipted, not anchored" by revealing
-//!   the hub's receipt (depth 1). The hub's only answer is an inclusion
-//!   proof: a bisection claim that the entry is in the ledger anchored at
-//!   the promised height in the chain from the checkpoint (depth 2). The
-//!   user may refute that chain with a heavier one (depth 3).
+//! * `nreg:{params}` — bonded registration. The hub locks a bond against
+//!   its promise (a height and a proof shape, agreed when the bond opens).
+//!   From `claim_from` the user may claim "not anchored" (depth 1). The
+//!   hub's only answer is an inclusion proof: a bisection claim that the
+//!   entry is in the ledger anchored at the promised height in the chain
+//!   from the checkpoint (depth 2). The user may refute that chain with a
+//!   heavier one (depth 3).
 //! * `anchorpay:{params}` — a payment gated on an inclusion proof by the
 //!   prover (depth 1), refutable by a heavier chain (depth 2).
 //!
@@ -20,7 +21,6 @@ use anyhow::{ensure, Result};
 use lngap_contract::claim::{ClaimData, ClaimSpec};
 use lngap_contract::prelude::*;
 use lngap_contract::{Program, ProgramRegistry};
-use lngap_lamport::PublicKey;
 use lngap_spv::AnchorShape;
 use serde::{Deserialize, Serialize};
 
@@ -58,9 +58,8 @@ fn all_to(r: Role) -> Payout {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NRegParams {
     pub req_id: u32,
-    pub receipt_pk: PublicKey,
     /// Claims are allowed from this height (the promised anchor height plus a grace).
-    pub d_receipt: u32,
+    pub claim_from: u32,
     pub shape: AnchorShape,
     pub slot: String,
 }
@@ -75,7 +74,7 @@ pub struct NReg {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NRegState {
     Init,
-    /// The user claimed on the receipt.
+    /// The user claimed "not anchored by the promised height".
     Claimed,
     /// The hub proved inclusion.
     Refuted,
@@ -93,9 +92,6 @@ impl NReg {
     }
     pub fn from_str(params: &str, store: ServedData) -> Result<NReg> {
         Ok(NReg::new(serde_json::from_str(params)?, store))
-    }
-    pub fn receipt_extra(&self) -> Extra {
-        Extra { label: crate::statements::receipt_label(self.params.req_id), pk: self.params.receipt_pk.clone(), value: crate::statements::receipt_value(self.params.req_id) }
     }
 }
 
@@ -168,9 +164,11 @@ impl Contract for NReg {
         ensure!(b.len() == 1);
         Ok(b[0])
     }
+    /// The claim is meaningless before the promised height: CLTV only. The
+    /// hub's acceptance of the request is its signature on the bond itself.
     fn move_extras(&self, depth: u32, _prover: Role) -> MoveExtras {
         if depth == 1 {
-            MoveExtras { cltv: Some(self.params.d_receipt), expects: vec![self.receipt_extra()] }
+            MoveExtras { cltv: Some(self.params.claim_from), expects: vec![] }
         } else {
             MoveExtras::default()
         }
@@ -201,13 +199,13 @@ impl Contract for NReg {
     fn describe_state(&self, s: &NRegState) -> String {
         match s {
             NRegState::Init => "unclaimed".into(),
-            NRegState::Claimed => "claimed (receipted, not anchored)".into(),
+            NRegState::Claimed => "claimed (not anchored by the promised height)".into(),
             NRegState::Refuted => "hub proved inclusion".into(),
             NRegState::Reinstated => "user refuted the hub's chain".into(),
         }
     }
     fn describe_move(&self, _m: &bool) -> String {
-        format!("claim receipt {} unanchored / prove inclusion / refute the chain", self.params.req_id)
+        format!("claim request {} unanchored / prove inclusion / refute the chain", self.params.req_id)
     }
 }
 

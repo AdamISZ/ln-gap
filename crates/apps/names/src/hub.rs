@@ -1,7 +1,9 @@
-//! The registry operator: receipts requests with a promised anchor height,
-//! builds anchors for the world to mine, serves the ledger, and can be told
-//! to misbehave in the ways the scenarios need. It hands out no attestations:
-//! every fact about the registry is proven from the chain.
+//! The registry operator: answers requests with a *promise* (the anchor
+//! height and the inclusion-proof shape the user's bond will be written
+//! against), builds anchors for the world to mine, serves the ledger, and
+//! can be told to misbehave in the ways the scenarios need. It hands out no
+//! statements: every fact about the registry is proven from the chain, and
+//! the promise binds through the bond the hub co-signs.
 
 use std::collections::BTreeMap;
 
@@ -9,33 +11,29 @@ use anyhow::{anyhow, ensure, Result};
 use bitcoin::key::{Keypair, XOnlyPublicKey};
 use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use lngap_btc::keys::{xonly, Seed};
-use lngap_lamport::keystore::KeyStore;
-use lngap_lamport::{PublicKey, Reveal};
 use lngap_spv::chain::{anchor_bytes, RawHeader};
 use lngap_spv::{AnchorData, AnchorShape, HeaderShape};
 use tracing::{info, warn};
 
 use crate::anchor::{anchor_spk, build_anchor_tx};
 use crate::registry::{Anchored, Event, Hash32, Ledger};
-use crate::statements::{receipt_label, receipt_value, STATEMENT_BITS};
 
-/// What the user gets back for a request.
-#[derive(Clone, Debug)]
-pub struct Receipt {
+/// The hub's answer to a request: the terms of its promise. The user opens
+/// a bond naming them; the hub's signature on that channel state is its
+/// acceptance, and from then on it proves inclusion of `shape` or pays.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Promise {
     pub req_id: u32,
-    /// The hub promises the event is in the anchor confirming at this height.
-    pub promised_height: u32,
-    pub pk: PublicKey,
-    /// The hub's Lamport signature: preimages for `receipt_value(req_id)`.
-    pub reveal: Reveal,
+    /// The event is in the anchor confirming at this height.
+    pub height: u32,
     /// The constants of the inclusion proof the hub will owe.
     pub shape: AnchorShape,
 }
 
 #[derive(Clone, Debug)]
-pub struct ReceiptRecord {
+pub struct PromiseRecord {
     pub event: Event,
-    pub promised_height: u32,
+    pub height: u32,
     pub anchored_at: Option<u32>,
     pub shape: AnchorShape,
 }
@@ -44,7 +42,7 @@ pub struct ReceiptRecord {
 pub struct HubFaults {
     /// Stop anchoring altogether.
     pub no_anchor: bool,
-    /// Accept and receipt this request but leave it out of every anchor.
+    /// Promise this request but leave it out of every anchor.
     pub omit_req: Option<u32>,
     /// Anchor a root that does not match the published ledger.
     pub corrupt_root: bool,
@@ -62,11 +60,10 @@ pub struct AnchorRecord {
 
 pub struct NamesHub {
     anchor_key: Keypair,
-    keystore: KeyStore,
     /// Published ledger: anchored events with their heights.
     pub ledger: Ledger,
     pending: Vec<(u32, Event)>,
-    pub receipts: BTreeMap<u32, ReceiptRecord>,
+    pub promises: BTreeMap<u32, PromiseRecord>,
     next_req: u32,
     tip: Option<(OutPoint, TxOut)>,
     /// Confirmation height of the next anchor (the one pending requests go in).
@@ -83,10 +80,9 @@ impl NamesHub {
     pub fn new(seed: &Seed) -> NamesHub {
         NamesHub {
             anchor_key: seed.keypair("anchor"),
-            keystore: KeyStore::new(seed.child("statements")),
             ledger: Ledger::default(),
             pending: Vec::new(),
-            receipts: BTreeMap::new(),
+            promises: BTreeMap::new(),
             next_req: 1,
             tip: None,
             scheduled: None,
@@ -127,20 +123,11 @@ impl NamesHub {
         }
     }
 
-    // ----- statement keys -----
-
-    pub fn receipt_pk(&mut self, req_id: u32) -> PublicKey {
-        self.keystore.generate(&receipt_label(req_id), STATEMENT_BITS).expect("fresh label")
-    }
-    pub fn statement_pk(&self, label: &str) -> Option<PublicKey> {
-        self.keystore.public(label).ok()
-    }
-
     // ----- requests -----
 
-    /// Receipt `event` at `height`, whose block is `checkpoint` (digest,
-    /// nBits). The hub promises the event in the next anchor it schedules.
-    pub fn receipt(&mut self, event: Event, height: u32, checkpoint: Hash32, nbits: u32) -> Result<Receipt> {
+    /// Answer a request for `event` at `height`, whose block is `checkpoint`
+    /// (digest, nBits): promise it in the next anchor the hub schedules.
+    pub fn promise(&mut self, event: Event, height: u32, checkpoint: Hash32, nbits: u32) -> Result<Promise> {
         if let Event::Reveal { name, .. } | Event::Transfer { name, .. } = &event {
             ensure!(name.len() <= crate::registry::MAX_NAME && name.is_ascii(), "bad name");
         }
@@ -156,20 +143,18 @@ impl NamesHub {
             key: event.key(),
             merkle_sides: vec![true],
         };
-        let pk = self.receipt_pk(req_id);
-        let reveal = self.keystore.reveal_uint(&receipt_label(req_id), receipt_value(req_id))?;
-        self.receipts.insert(req_id, ReceiptRecord { event: event.clone(), promised_height: promised, anchored_at: None, shape: shape.clone() });
+        self.promises.insert(req_id, PromiseRecord { event: event.clone(), height: promised, anchored_at: None, shape: shape.clone() });
         if self.faults.omit_req == Some(req_id) {
-            warn!("registry: FAULT omitting receipted request {req_id}");
-            self.say(format!("receipted request {req_id} ({}) for the anchor at {promised} — and will OMIT it", event.describe()));
+            warn!("registry: FAULT omitting promised request {req_id}");
+            self.say(format!("promised request {req_id} ({}) for the anchor at {promised} — and will OMIT it", event.describe()));
         } else {
-            self.say(format!("receipted request {req_id} ({}) for the anchor at {promised}", event.describe()));
+            self.say(format!("promised request {req_id} ({}) for the anchor at {promised}", event.describe()));
             self.pending.push((req_id, event));
         }
-        Ok(Receipt { req_id, promised_height: promised, pk, reveal, shape })
+        Ok(Promise { req_id, height: promised, shape })
     }
     pub fn issued(&self, req_id: u32) -> bool {
-        self.receipts.contains_key(&req_id)
+        self.promises.contains_key(&req_id)
     }
 
     // ----- clock -----
@@ -183,7 +168,7 @@ impl NamesHub {
                 ensure!(height == expected, "anchor confirmed at {height}, promised {expected}");
                 for (req_id, e) in events {
                     self.ledger.events.push(Anchored { event: e, height });
-                    if let Some(r) = self.receipts.get_mut(&req_id) {
+                    if let Some(r) = self.promises.get_mut(&req_id) {
                         r.anchored_at = Some(height);
                     }
                     confirmed.push(req_id);
@@ -231,14 +216,14 @@ impl NamesHub {
         Ok(tx)
     }
 
-    /// The hub's inclusion-proof data for a receipted request, given the
-    /// headers from the receipt's block to the anchor's block and the
+    /// The hub's inclusion-proof data for a promised request, given the
+    /// headers from the request's block to the anchor's block and the
     /// anchor transaction's Merkle siblings. The ledger path is taken from
     /// the ledger as of the anchor (so an omitted entry yields a
     /// non-inclusion path and a corrupt root a path to the wrong root).
     pub fn inclusion_data(&self, req_id: u32, headers: Vec<RawHeader>, merkle_siblings: Vec<[u8; 32]>) -> Result<AnchorData> {
-        let r = self.receipts.get(&req_id).ok_or_else(|| anyhow!("no receipt {req_id}"))?;
-        let h = r.anchored_at.unwrap_or(r.promised_height);
+        let r = self.promises.get(&req_id).ok_or_else(|| anyhow!("no promise {req_id}"))?;
+        let h = r.anchored_at.unwrap_or(r.height);
         let a = self.anchors.iter().find(|a| a.height == h).ok_or_else(|| anyhow!("no anchor at {h}"))?;
         let tx = a.tx.as_ref().ok_or_else(|| anyhow!("genesis has no transaction"))?;
         let path = self.ledger.as_of(h).path(r.shape.key);

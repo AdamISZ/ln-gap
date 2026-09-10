@@ -33,11 +33,11 @@ pub mod script_hash;
 
 /// A statement someone else committed to with a Lamport key: the leaf checks
 /// `expect_uint(pk, value)`, and whoever spends supplies the preimages,
-/// which they hold because the key's owner handed them over (a receipt, an
+/// which they hold because the key's owner handed them over (a statement, an
 /// attestation) or revealed them on-chain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Extra {
-    /// Where the spender looks the preimages up (`receipt/<id>`, `attest/<name>/<key>`).
+    /// Where the spender looks the preimages up (e.g. `attest/<name>/<key>`).
     pub label: String,
     pub pk: lngap_lamport::PublicKey,
     pub value: u32,

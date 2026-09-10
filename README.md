@@ -103,7 +103,7 @@ is a reaction of the party's own watch loop.
 | Channel | M1 tests, T7, c6 | funding, 10 updates, cooperative close, unilateral close with delay, penalty sweep including a contract output |
 | Force-move | T2, T3, T8, T9, c2–c4 | Move chain up to depth 3, Settle after the deadline, Split after Δ / Δ+Δ' |
 | Fraud proofs | T4, T5, T6, T6b, c5 | one-transaction disproofs: occupied cell, wrong board, wrong status, wrong code |
-| Bonded hub | N2, N3, N6 | bond claimed with the hub's receipt; the hub reclaims only by proving inclusion on-chain (a 128-step bisection claim) |
+| Bonded hub | N2, N3, N6 | bond written against the hub's promised anchor height; the hub reclaims only by proving inclusion on-chain (a 128-step bisection claim) |
 | Sale | N4, N5, N7 | payment gated on an inclusion proof; both legs use the same public proof, no attestation |
 | Omission, fake chain | N8, N9 | a bluffed inclusion proof is disproved at the ledger-root check; a proof on a private fork is refuted by the heavier chain |
 | Bisection claims | `p1_claims`, `p2_inner` tests | a 16-step SHA-256 chain disputed by bisection; two-level search ends in a one-round leaf (largest tx 12 kvB, whole dispute ~53 kvB) |

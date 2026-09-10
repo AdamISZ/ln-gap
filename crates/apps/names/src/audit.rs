@@ -1,15 +1,15 @@
 //! Off-chain auditor: checks the anchor chain against the hub's published
-//! ledger and receipts. Findings are reported; the contracts enforce the
+//! ledger and promises. Findings are reported; the contracts enforce the
 //! same facts on-chain through the inclusion proofs.
 
 use bitcoin::{OutPoint, Transaction};
 
 use crate::anchor::root_of;
-use crate::hub::ReceiptRecord;
+use crate::hub::PromiseRecord;
 use crate::registry::Ledger;
 
 /// `anchors`: (confirmation height, tx, anchor outpoint) in chain order, the first after genesis.
-pub fn audit(genesis: OutPoint, anchors: &[(u32, Transaction, OutPoint)], ledger: &Ledger, receipts: &[(u32, ReceiptRecord)]) -> Vec<String> {
+pub fn audit(genesis: OutPoint, anchors: &[(u32, Transaction, OutPoint)], ledger: &Ledger, promises: &[(u32, PromiseRecord)]) -> Vec<String> {
     let mut findings = Vec::new();
     let mut prev = genesis;
     for (h, tx, op) in anchors {
@@ -28,10 +28,10 @@ pub fn audit(genesis: OutPoint, anchors: &[(u32, Transaction, OutPoint)], ledger
     if let Err(e) = crate::anchor::verify_anchor_chain(genesis, &txs) {
         findings.push(format!("anchor chain walk from genesis fails: {e}"));
     }
-    for (req_id, r) in receipts {
-        let present = ledger.events.iter().any(|a| a.event == r.event && a.height <= r.promised_height);
+    for (req_id, r) in promises {
+        let present = ledger.events.iter().any(|a| a.event == r.event && a.height <= r.height);
         if !present {
-            findings.push(format!("receipt {req_id} ({}) promised inclusion at {} but the ledger anchored by then omits it", r.event.describe(), r.promised_height));
+            findings.push(format!("promise {req_id} ({}) named the anchor at {} but the ledger anchored by then omits it", r.event.describe(), r.height));
         }
     }
     findings

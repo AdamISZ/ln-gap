@@ -108,12 +108,8 @@ every confirmed witness for preimages of keys it knows. That last channel is
 how Alice copies the attestation the hub revealed in Bob's channel (N7) or in
 its own disproof (N3).
 
-*Review note (2026-09-10):* for receipts the value is the request id itself
-and the bond is opened after the request with the hub's co-signature, so the
-32-bit slot and the `expect_uint` check in `move_1` add nothing the
-signature does not; a single preimage, or no on-chain check at all, would
-do. Kept for now for uniformity with value-carrying statements; a candidate
-simplification.
+*Resolved by D22 (2026-09-10):* receipts are gone; the statement machinery
+remains for value-carrying statements.
 
 ## D15. Refused valid moves go on-chain
 
@@ -168,10 +164,11 @@ every predicate must hold and the end state must match; a segment with a
 failed predicate counts as wrong. A prover serving different data than it
 commits on-chain is not caught (see the plan's phase 2b limitations).
 
-## D20. Registry facts are inclusion proofs; receipts promise a height
+## D20. Registry facts are inclusion proofs; the hub promises a height
 
-The names registry keeps no attestations. A receipt promises the request
-in the anchor confirming at a specific height and carries the shape of the
+The names registry keeps no attestations. The hub's answer to a request
+(a *promise*, D22; called a receipt when this was written) names the anchor
+confirming at a specific height and carries the shape of the
 inclusion proof the hub will owe (checkpoint block, header count,
 anchor-chain tip, entry), so the bond contract can pre-sign the proof's
 dispute graph at open time. The hub's answer to a claim is the proof
@@ -188,9 +185,9 @@ The anchor chain is a single line only because every anchor has exactly one
 spendable output. That shape is enforced twice: the inclusion claim's first
 anchor step has predicates that the transaction spends the agreed tip, has
 exactly two outputs, and that output 0 begins with `OP_RETURN`; and before
-trusting a receipt's `prev_anchor`, a user walks the chain from genesis
+trusting a promise's `prev_anchor`, a user walks the chain from genesis
 through every anchor it can see (`verify_anchor_chain`) and refuses a
-receipt whose tip is not the chain's. The second is a rule of use, not a
+promise whose tip is not the chain's. The second is a rule of use, not a
 script: an anchor nobody ever proved against could otherwise fork the chain
 for later users.
 
@@ -207,6 +204,21 @@ recomputes the claim on the served data and rejects the draft if a
 predicate fails; the mover then force-closes and the claim's committed end
 state can be disputed on-chain. Without both, a hub could have moved a bond
 from Claimed to Refuted off-chain with no proof at all.
+
+## D22. Promises, not receipts
+
+The hub answers a request with a *promise*: the anchor height and the
+inclusion-proof shape (checkpoint, header count, anchor-chain tip, entry).
+It is not signed and carries no secret; it binds when the user opens a bond
+naming its terms and the hub co-signs that channel state. The earlier
+Lamport-signed receipt checked in the user's `move_1` leaf added nothing to
+that signature (the request precedes the bond), so it was removed along
+with the statement key exchange for these contracts; `move_1` keeps only
+the CLTV at the promised height plus a grace. Before opening the bond the
+user walks the anchor chain to the promise's tip (D20) and, for a reveal,
+checks the promised height lies within the commit's window; the hub's open
+policy checks the bond's terms equal the promise's. Saves ~1.4 KB per
+claim transaction and one message in the opening exchange.
 
 ## TODO
 
