@@ -108,6 +108,13 @@ every confirmed witness for preimages of keys it knows. That last channel is
 how Alice copies the attestation the hub revealed in Bob's channel (N7) or in
 its own disproof (N3).
 
+*Review note (2026-09-10):* for receipts the value is the request id itself
+and the bond is opened after the request with the hub's co-signature, so the
+32-bit slot and the `expect_uint` check in `move_1` add nothing the
+signature does not; a single preimage, or no on-chain check at all, would
+do. Kept for now for uniformity with value-carrying statements; a candidate
+simplification.
+
 ## D15. Refused valid moves go on-chain
 
 If the counterparty rejects a Move draft, the proposer force-closes and makes

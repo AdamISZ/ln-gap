@@ -68,6 +68,15 @@ Receipt {
 `extra_reveals` and on-chain as the last 32 witness elements. Only the hub
 knows the preimages, which is what makes the receipt unforgeable.
 
+Note that in this flow the on-chain check is redundant: the user requests
+first and proposes the bond second, and the hub's channel signature on a
+state containing the bond (with `req_id` and the proof shape baked in) is
+already its acceptance of the request. The Lamport slot is inherited from
+the statement machinery (D14) where values carry information; a receipt's
+value is its own label. It would only earn its place for a bond opened
+before the request, or a receipt shown outside the channel. Candidate for
+removal (see D14).
+
 The shape is a set of constants. From it both parties build the same
 128-step `ClaimSpec` (per header: three compressions with link and nBits
 predicates, a target check; the anchor transaction as five compressions
