@@ -179,9 +179,9 @@ of fees per depth (D8, D18).
 
 ## TODO
 
-- **N8 / anchor verification.** On branch `spv-dispute` omission and a
-  corrupt root are enforced on-chain (D20); on `main` they are reported by
-  the off-chain auditor only.
+- **N8 / anchor verification.** Omission, a corrupt root and a private fork are
+  now enforced on-chain (D20, scenarios N8–N9). Still open: binding the served
+  proof data to the Move, and user-side non-inclusion claims.
 - **T9 / liveness rule.** Scenario T9 documents that an honest user who ignores
   a hub force-close during their own turn forfeits the stake (Settle pays R(s)
   = hub wins). Agreed as the PoC reading on 2026-09-06; revisit whether the
