@@ -57,14 +57,18 @@ Promise {
     chain: { checkpoint: digest of block `now`, nbits, n_headers: h - now },
     prev_anchor,         // the anchor-chain tip the anchor must spend
     entry, key,          // the event's entry and ledger key
-    merkle_sides,        // the anchor's position in its block ([right]: index 1 of 2)
+    merkle_sides,        // left/right pattern the future Merkle proof will have ([right]: index 1 of 2);
+                         // no hashes: the siblings are data supplied once the block exists
   },
 }
 ```
 
-`merkle_sides` belongs to the proof that the anchor transaction is *in*
-the last header's block. This is public information, and the user's node
-can check it directly, but the user is not the verifier: the verdict on a
+`merkle_sides` is the *shape* of the future proof that the anchor
+transaction is in the last header's block, not the proof: the hub commits
+in advance to its anchor's index in a block that does not exist yet (as it
+commits to the height), and the sibling hashes arrive as data when the
+block does. Inclusion is public information, and the user's node can check
+it directly, but the user is not the verifier: the verdict on a
 bond is rendered by leaf scripts that see nothing but the claim, so every
 fact the verdict rests on — headers, the anchor's bytes, its place in a
 block, the ledger path — is re-established inside the claim. The siblings
