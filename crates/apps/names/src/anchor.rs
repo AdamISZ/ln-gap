@@ -7,6 +7,7 @@ use anyhow::Result;
 use bitcoin::key::Keypair;
 use bitcoin::{Amount, OutPoint, Transaction, TxOut};
 use lngap_spv::chain::{anchor_root, anchor_tx, p2tr_spk, sign_keypath};
+pub use lngap_spv::chain::verify_anchor_chain;
 
 use crate::registry::Hash32;
 

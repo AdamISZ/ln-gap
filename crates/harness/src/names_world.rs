@@ -16,6 +16,7 @@ use lngap_btc::keys::Seed;
 use lngap_btc::regtest::Regtest;
 use lngap_channel::Role;
 use lngap_lamport::bits_to_uint;
+use lngap_names::anchor::verify_anchor_chain;
 use lngap_names::hub::{NamesHub, Receipt};
 use lngap_names::programs::{AnchorPayParams, NRegParams};
 use lngap_names::registry::Event;
@@ -205,10 +206,24 @@ impl NamesWorld {
 
     // ----- registry interactions (user application steps) -----
 
+    /// The user's check before trusting a receipt: walk the anchor chain from
+    /// genesis through every anchor it can see (confirmed, and the one in the
+    /// mempool if any); the receipt's `prev_anchor` must be that chain's tip.
+    fn user_checks_tip(&self, prev_anchor: OutPoint) -> Result<()> {
+        let mut txs: Vec<Transaction> = self.anchor_txs()?.into_iter().map(|a| a.1).collect();
+        if let Some(p) = &self.pending_anchor {
+            txs.push(p.clone());
+        }
+        let (tip, _) = verify_anchor_chain(self.genesis, &txs)?;
+        ensure!(tip == prev_anchor, "the receipt names tip {prev_anchor} but the anchor chain's tip is {tip}");
+        Ok(())
+    }
+
     fn hub_receipt(&mut self, who: Who, event: Event) -> Result<Receipt> {
         let h = self.height();
         let cp = self.raw_header(h)?;
         let r = self.hub.lock().unwrap().receipt(event, h, cp.digest(), cp.nbits())?;
+        self.user_checks_tip(r.shape.prev_anchor)?;
         let label = receipt_label(r.req_id);
         let party = &mut self.channel(who).user;
         party.know_key(&label, r.pk.clone());

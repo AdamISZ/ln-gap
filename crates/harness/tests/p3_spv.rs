@@ -35,10 +35,16 @@ struct World {
     rt: Arc<Regtest>,
     hub_claim: AnchorClaim,
     real_chain: HeaderChainClaim,
+    anchor_txid: bitcoin::Txid,
 }
 
 impl World {
     fn new(m: usize, fork: bool) -> World {
+        World::build(m, fork, false)
+    }
+
+    /// `malformed`: the hub's anchor has two spendable outputs (a bare script where the OP_RETURN should be).
+    fn build(m: usize, fork: bool, malformed: bool) -> World {
         let rt = Arc::new(Regtest::start().unwrap());
         let rpc = &rt.rpc;
         // the previous anchor: a plain P2TR output of the hub's anchor key
@@ -60,6 +66,12 @@ impl World {
         // m - 1 blocks, then the anchor transaction in the m-th (the claim's last header)
         rt.mine(m as u64 - 1).unwrap();
         let mut tx = anchor_tx(prev_op, &root, p2tr_spk(&anchor_key), sat(19_000));
+        if malformed {
+            // same length and root position, but output 0 becomes a spendable bare script (OP_TRUE first)
+            let mut script = tx.output[0].script_pubkey.to_bytes();
+            script[0] = 0x51;
+            tx.output[0].script_pubkey = bitcoin::ScriptBuf::from_bytes(script);
+        }
         sign_keypath(&mut tx, &prev_txout, &anchor_kp).unwrap();
         let anchor_height = rt.mine_with(&[tx.clone()]).unwrap();
         assert_eq!(anchor_height, cp_height + m as u32);
@@ -94,7 +106,7 @@ impl World {
             ledger: ledger.path(key),
         };
         let real_chain = HeaderChainClaim { checkpoint: cp.digest(), nbits, headers: real_headers };
-        World { rt, hub_claim, real_chain }
+        World { rt, hub_claim, real_chain, anchor_txid: tx.compute_txid() }
     }
 
     /// A harness whose `spv` program carries the hub's claim and the user's refutation.
@@ -270,5 +282,23 @@ fn false_refutation_is_disproved() {
     assert!(d.starts_with("cpred_hdr_c1"), "{d}");
     assert!(h.hub.narrative().iter().any(|l| l.contains("disputing the claim")));
     assert_eq!(h.balance(Role::Hub), sat(50_000 - K - K) + output_of(&h, |r| r == d));
+    println!("{}", h.narrative());
+}
+
+/// The anchor has two spendable outputs: the chain would fork there. The
+/// shape predicate on the anchor's first chunk fails and is disproved.
+#[test]
+fn anchor_with_two_spendable_outputs_is_disproved() {
+    let w = World::build(3, false, true);
+    let hub = w.hub_claim.build();
+    let (step, name) = first_failing_step(&hub.0, &hub.1).expect("invalid");
+    assert_eq!((step, name.as_str()), (12, "anchor_c1"));
+    assert!(lngap_spv::chain::verify_anchor_chain(w.hub_claim.prev_anchor, &[w.rt.get_tx(&w.anchor_txid).unwrap()]).is_err(), "the off-chain walk rejects it too");
+    let mut h = w.harness("p3-badanchor", hub, w.real_chain.build());
+    h.step_until(400, |h| disproof(h).is_some()).unwrap();
+    h.steps(2).unwrap();
+    let d = disproof(&h).unwrap();
+    assert!(d.starts_with("cpred_anchor_c1"), "{d}");
+    assert_eq!(h.balance(Role::User), sat(50_000 - K) + output_of(&h, |r| r == d));
     println!("{}", h.narrative());
 }

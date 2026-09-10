@@ -177,6 +177,16 @@ sale) depends on the ledger being public. Bonds and payments carrying such
 claims are 40k sat because the pre-signed dispute chain reserves ~27k sat
 of fees per depth (D8, D18).
 
+The anchor chain is a single line only because every anchor has exactly one
+spendable output. That shape is enforced twice: the inclusion claim's first
+anchor step has predicates that the transaction spends the agreed tip, has
+exactly two outputs, and that output 0 begins with `OP_RETURN`; and before
+trusting a receipt's `prev_anchor`, a user walks the chain from genesis
+through every anchor it can see (`verify_anchor_chain`) and refuses a
+receipt whose tip is not the chain's. The second is a rule of use, not a
+script: an anchor nobody ever proved against could otherwise fork the chain
+for later users.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

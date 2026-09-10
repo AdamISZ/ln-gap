@@ -10,7 +10,7 @@
 use lngap_contract::claim::{state_nibbles, words_from_bytes, ClaimData, ClaimSpec, Copy, Init, Pred, Src, Step};
 use serde::{Deserialize, Serialize};
 
-use crate::chain::{outpoint_bytes, MerklePath, RawHeader, ANCHOR_ROOT_OFFSET, ANCHOR_TX_LEN};
+use crate::chain::{outpoint_bytes, MerklePath, RawHeader, ANCHOR_NOUT_OFFSET, ANCHOR_OPRETURN_OFFSET, ANCHOR_ROOT_OFFSET, ANCHOR_TX_LEN};
 use crate::ledger::Path;
 
 pub const N_WORDS: usize = 24;
@@ -197,7 +197,14 @@ impl AnchorShape {
             header_steps(self.chain.nbits, target, &mut steps);
         }
         // the anchor transaction: SHA-256d of 208 bytes; outpoint check on chunk 1, root copy from chunk 3
-        let a1 = Step::compress("anchor_c1", Init::Iv, data_words(16)).with_preds(vec![Pred::EqConst { off: NB + 10, nibbles: nibbles(&outpoint_bytes(&self.prev_anchor)) }]);
+        // chunk 1 carries the outpoint (bytes 5..41), the output count (46) and output 0's
+        // first script byte (56): the anchor must spend the agreed tip and have exactly one
+        // spendable output, so the anchor chain is a single line (D20)
+        let a1 = Step::compress("anchor_c1", Init::Iv, data_words(16)).with_preds(vec![
+            Pred::EqConst { off: NB + 10, nibbles: nibbles(&outpoint_bytes(&self.prev_anchor)) },
+            Pred::EqConst { off: NB + 2 * ANCHOR_NOUT_OFFSET, nibbles: vec![0, 2] },
+            Pred::EqConst { off: NB + 2 * ANCHOR_OPRETURN_OFFSET, nibbles: vec![6, 0xa] },
+        ]);
         let a2 = Step::compress("anchor_c2", Init::D, data_words(16));
         let a3 = Step::compress("anchor_c3", Init::D, data_words(16)).with_copies(vec![Copy { src: NB + 2 * (ANCHOR_ROOT_OFFSET - 128), dst: R, n: 64 }]);
         let a4 = Step::compress("anchor_c4", Init::D, data_padded(4, 8 * ANCHOR_TX_LEN as u32));

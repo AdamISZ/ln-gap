@@ -144,11 +144,36 @@ pub fn anchor_bytes(tx: &Transaction) -> Vec<u8> {
     serialize(&t)
 }
 
-/// Check an anchor transaction's layout and extract its root.
+/// Byte offset of the output count in the serialized anchor (must be 2).
+pub const ANCHOR_NOUT_OFFSET: usize = 46;
+/// Byte offset of output 0's first script byte (must be `OP_RETURN`, 0x6a).
+pub const ANCHOR_OPRETURN_OFFSET: usize = 56;
+
+/// Check an anchor transaction's shape — exactly 208 bytes, two outputs, the
+/// first unspendable (`OP_RETURN …`) — and extract its root. The same three
+/// facts are predicates of the inclusion claim, so the anchor chain has
+/// exactly one spendable output per anchor and is a single line.
 pub fn anchor_root(tx: &Transaction) -> Result<[u8; 32]> {
     let b = anchor_bytes(tx);
     ensure!(b.len() == ANCHOR_TX_LEN, "anchor tx is {} bytes, expected {ANCHOR_TX_LEN}", b.len());
+    ensure!(b[ANCHOR_NOUT_OFFSET] == 2, "anchor tx has {} outputs, expected 2", b[ANCHOR_NOUT_OFFSET]);
+    ensure!(b[ANCHOR_OPRETURN_OFFSET] == 0x6a, "anchor tx output 0 is spendable (no OP_RETURN)");
     Ok(b[ANCHOR_ROOT_OFFSET..ANCHOR_ROOT_OFFSET + 32].try_into().unwrap())
+}
+
+/// Walk an anchor chain from `genesis`: every transaction must have the
+/// anchor shape and spend the previous anchor's output 1. Returns the tip
+/// (the outpoint the next anchor must spend) and the roots in order. This is
+/// the check a user runs before trusting a receipt's `prev_anchor`.
+pub fn verify_anchor_chain(genesis: OutPoint, anchors: &[Transaction]) -> Result<(OutPoint, Vec<[u8; 32]>)> {
+    let mut tip = genesis;
+    let mut roots = Vec::new();
+    for (i, tx) in anchors.iter().enumerate() {
+        ensure!(tx.input.len() == 1 && tx.input[0].previous_output == tip, "anchor {i} does not spend the chain's tip {tip}");
+        roots.push(anchor_root(tx)?);
+        tip = OutPoint { txid: tx.compute_txid(), vout: 1 };
+    }
+    Ok((tip, roots))
 }
 
 /// The 36 outpoint bytes as they appear in the serialization (txid, then vout LE).

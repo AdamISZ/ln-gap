@@ -20,8 +20,13 @@ pub fn audit(genesis: OutPoint, anchors: &[(u32, Transaction, OutPoint)], ledger
         match root_of(tx) {
             Ok(root) if root == ledger.as_of(*h).root() => {}
             Ok(_) => findings.push(format!("anchor at {h} commits a root that is not the published ledger as of {h}: equivocation or hidden entries")),
-            Err(e) => findings.push(format!("anchor at {h} has a bad layout: {e}")),
+            Err(e) => findings.push(format!("anchor at {h} has a bad shape ({e}): the chain is ambiguous from here")),
         }
+    }
+    // the same walk a user performs before trusting a receipt's tip
+    let txs: Vec<Transaction> = anchors.iter().map(|a| a.1.clone()).collect();
+    if let Err(e) = crate::anchor::verify_anchor_chain(genesis, &txs) {
+        findings.push(format!("anchor chain walk from genesis fails: {e}"));
     }
     for (req_id, r) in receipts {
         let present = ledger.events.iter().any(|a| a.event == r.event && a.height <= r.promised_height);

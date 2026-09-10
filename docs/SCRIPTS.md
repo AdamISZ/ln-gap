@@ -192,6 +192,9 @@ Anchor = a fixed-layout transaction (`lngap_spv::chain::anchor_tx`): one
 input spending the previous anchor's change output by key path; outputs
 `OP_RETURN <69 zero bytes> <root> OP_0` and a P2TR change output; 208 bytes
 with the root at byte 128, so the claim hashes it as four 64-byte blocks
-and copies the root out of the third. The auditor recomputes the root of
-the published ledger as of each anchor's height and checks the layout and
-that each anchor spends the previous one.
+and copies the root out of the third; predicates on the first chunk pin the
+spent outpoint (bytes 5..41), the output count (byte 46 = 2) and output 0's
+first script byte (byte 56 = `OP_RETURN`), so an anchor with a second
+spendable output cannot be proven against. Users walk the chain from genesis
+(`verify_anchor_chain`) before trusting a receipt's tip; the auditor does the
+same and recomputes the root of the published ledger as of each anchor.
