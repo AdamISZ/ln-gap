@@ -51,7 +51,8 @@ the chain of anchors is a single line.
 ```
 Receipt {
   req_id,
-  pk, reveal,            // 32-bit Lamport statement "receipt/<req_id>" saying req_id
+  pk,                    // Lamport key of the statement slot "receipt/<req_id>": 32 (h0, h1) hash pairs
+  reveal,                // the hub's signature of the value req_id under it: 32 preimages, one per bit
   promised_height h,     // the hub's next scheduled anchor: max(last + interval, now + 2)
   shape: AnchorShape {   // the inclusion proof the hub will owe
     chain: { checkpoint: digest of block `now`, nbits, n_headers: h - now },
@@ -61,6 +62,11 @@ Receipt {
   },
 }
 ```
+
+`pk` is baked into the user's `move_1` leaf (`expect_uint(pk, req_id)`);
+`reveal` is what the user spends that leaf with, off-chain in the draft's
+`extra_reveals` and on-chain as the last 32 witness elements. Only the hub
+knows the preimages, which is what makes the receipt unforgeable.
 
 The shape is a set of constants. From it both parties build the same
 128-step `ClaimSpec` (per header: three compressions with link and nBits
