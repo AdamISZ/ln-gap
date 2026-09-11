@@ -395,6 +395,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-n4bit"
+version = "0.1.0"
+dependencies = [
+ "hex",
+]
+
+[[package]]
 name = "lngap-names"
 version = "0.1.0"
 dependencies = [
