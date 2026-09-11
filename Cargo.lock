@@ -361,6 +361,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-factchain"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "lngap-n4bit",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "lngap-harness"
 version = "0.1.0"
 dependencies = [
