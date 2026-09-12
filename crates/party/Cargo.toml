@@ -10,6 +10,7 @@ lngap-lamport = { path = "../lamport" }
 lngap-channel = { path = "../channel" }
 lngap-contract = { path = "../contract" }
 lngap-script32 = { path = "../script32" }
+lngap-n4bit = { path = "../n4bit" }
 bitcoin.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

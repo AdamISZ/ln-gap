@@ -1320,7 +1320,7 @@ impl Party {
                     self.live[idx].dispute.as_mut().unwrap().stage = Stage::WaitInnerP(1);
                     return self.dispute_act(idx);
                 }
-                let mine = disp.my_sched.expect("inner computation");
+                let mine = disp.my_sched.as_ref().expect("inner computation");
                 let mut sigs = Vec::new();
                  let bw = disp.spec.hash.block_words() as u32;
                  for i in bw..disp.spec.inner_rounds() {
