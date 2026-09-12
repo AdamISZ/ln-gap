@@ -353,6 +353,7 @@ dependencies = [
  "lngap-btc",
  "lngap-channel",
  "lngap-lamport",
+ "lngap-n4bit",
  "lngap-script32",
  "serde",
  "sha2",

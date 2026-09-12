@@ -1155,7 +1155,7 @@ impl Party {
             }
             n if n.starts_with("p_inner_") => {
                 let r: u32 = n[8..].parse()?;
-                let commits = parse_p_inner(&tx, &ckeys, &disp.inner_path, r)?;
+                let commits = parse_p_inner(&tx, &ckeys, &disp.inner_path, r, disp.spec.inner_search())?;
                 let dd = self.live[idx].dispute.as_mut().unwrap();
                 let points: Vec<u32> = commits.iter().map(|c| c.0).collect();
                 for (i, st, sig) in commits {
@@ -1169,8 +1169,9 @@ impl Party {
                 let j = parse_q_inner(&tx, &ck, r)?;
                 let dd = self.live[idx].dispute.as_mut().unwrap();
                 dd.inner_path.push(j);
-                let (lo, len) = lngap_contract::inner::SEARCH.segment(&dd.inner_path);
-                next_stage = if r < lngap_contract::inner::SEARCH.rounds() { Stage::WaitInnerP(r + 1) } else { Stage::RoundTerminal };
+                let inner_search = dd.spec.inner_search();
+                let (lo, len) = inner_search.segment(&dd.inner_path);
+                next_stage = if r < inner_search.rounds() { Stage::WaitInnerP(r + 1) } else { Stage::RoundTerminal };
                 self.say(format!("contract {id}: challenger picked segment {j} in inner round {r}: rounds {lo}..{}", lo + len));
             }
             "timeout" => {
@@ -1313,9 +1314,16 @@ impl Party {
                 self.broadcast_dispute_tx(&l, &disp, leaf, &sig.consumption_order())
             }
             Stage::WaitSched => {
+                if !disp.spec.has_schedule() {
+                    // No schedule stage for n4bit; skip directly to inner rounds
+                    // This should not be reached for n4bit, but handle gracefully
+                    self.live[idx].dispute.as_mut().unwrap().stage = Stage::WaitInnerP(1);
+                    return self.dispute_act(idx);
+                }
                 let mine = disp.my_sched.expect("inner computation");
                 let mut sigs = Vec::new();
-                for i in 16..lngap_contract::inner::ROUNDS {
+                 let bw = disp.spec.hash.block_words() as u32;
+                 for i in bw..disp.spec.inner_rounds() {
                     let mut w = mine[i as usize];
                     if let Some(cheat) = &self.faults.cheat_schedule {
                         w = cheat(i, w);
@@ -1329,7 +1337,7 @@ impl Party {
             }
             Stage::WaitInnerP(r) => {
                 let mine = disp.my_inner.as_ref().expect("inner computation");
-                let points = lngap_contract::inner::SEARCH.round_points(&disp.inner_path);
+                 let points = disp.spec.inner_search().round_points(&disp.inner_path);
                 let mut sigs = Vec::new();
                 for (t, i) in points.iter().enumerate() {
                     let label = lngap_contract::inner::inner_state_label(id, ks, d, r, t as u32);
@@ -1352,17 +1360,17 @@ impl Party {
                         return self.broadcast_disproof(idx, &disp, &leaf_name, args);
                     }
                     if disp.ckeep_violated() {
-                        let (leaf_name, _) = lngap_contract::inner::ckeep_leaf(&ctx, disp.prover, &keys, disp.spec.n_words, disp.isolated());
+                        let (leaf_name, _) = lngap_contract::inner::ckeep_leaf(&ctx, disp.prover, &keys, &disp.spec, disp.isolated());
                         self.say(format!("contract {id}: the compression changed a register it should not have"));
                         return self.broadcast_disproof(idx, &disp, &leaf_name, disp.re_pair_args()?);
                     }
                     if disp.cpred_violated() {
-                        let (leaf_name, _) = lngap_contract::inner::cpred_leaf(&ctx, disp.prover, &keys, disp.spec.n_words, disp.isolated());
+                        let (leaf_name, _) = lngap_contract::inner::cpred_leaf(&ctx, disp.prover, &keys, &disp.spec, disp.isolated());
                         self.say(format!("contract {id}: a predicate of step {} ({}) fails", disp.isolated_step().2, disp.isolated().name()));
                         return self.broadcast_disproof(idx, &disp, &leaf_name, disp.state_and_block_args(false)?);
                     }
                     if disp.ccopy_violated() {
-                        let (leaf_name, _) = lngap_contract::inner::ccopy_leaf(&ctx, disp.prover, &keys, disp.spec.n_words, disp.isolated());
+                        let (leaf_name, _) = lngap_contract::inner::ccopy_leaf(&ctx, disp.prover, &keys, &disp.spec, disp.isolated());
                         self.say(format!("contract {id}: step {} copied the wrong block words", disp.isolated_step().2));
                         return self.broadcast_disproof(idx, &disp, &leaf_name, disp.state_and_block_args(true)?);
                     }
@@ -1380,7 +1388,7 @@ impl Party {
                 self.broadcast_dispute_tx(&l, &disp, &format!("q_inner_{r}"), &lngap_contract::claim::q_round_witness(&reveal))
             }
             Stage::RoundTerminal => {
-                let (lo, len) = lngap_contract::inner::SEARCH.segment(&disp.inner_path);
+                let (lo, len) = disp.spec.inner_search().segment(&disp.inner_path);
                 debug_assert_eq!(len, 1);
                 let r = lo;
                 let (expect, claimed) = disp.check_round(r)?;

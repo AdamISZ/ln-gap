@@ -10,6 +10,7 @@ lngap-btc = { path = "../btc" }
 lngap-lamport = { path = "../lamport" }
 lngap-channel = { path = "../channel" }
 lngap-script32 = { path = "../script32" }
+lngap-n4bit = { path = "../n4bit" }
 bitcoin.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

@@ -182,10 +182,14 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
                                 Some(InnerKeys {
                                     re_cur: ks.generate_wots(&inner::re_cur_label(c.id, c.keys_seq, d), nb)?,
                                     re_next: ks.generate_wots(&inner::re_next_label(c.id, c.keys_seq, d), nb)?,
-                                    block: (0..16).map(|j| ks.generate_wots(&inner::block_label(c.id, c.keys_seq, d, j), 4)).collect::<Result<Vec<_>>>()?,
-                                    sched: (16..inner::ROUNDS).map(|i| ks.generate_wots(&inner::sched_label(c.id, c.keys_seq, d, i), 4)).collect::<Result<Vec<_>>>()?,
-                                    states: (1..=inner::SEARCH.rounds())
-                                        .map(|r| (0..inner::INNER_K - 1).map(|t| ks.generate_wots(&inner::inner_state_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
+                                    block: (0..spec.hash.block_words()).map(|j| ks.generate_wots(&inner::block_label(c.id, c.keys_seq, d, j as u32), 4)).collect::<Result<Vec<_>>>()?,
+                                    sched: if spec.has_schedule() {
+                                        ((spec.hash.block_words() as u32)..spec.inner_rounds()).map(|i| ks.generate_wots(&inner::sched_label(c.id, c.keys_seq, d, i), 4)).collect::<Result<Vec<_>>>()?
+                                    } else {
+                                        vec![]
+                                    },
+                                    states: (1..=spec.inner_search().rounds())
+                                        .map(|r| (0..spec.inner_k() - 1).map(|t| ks.generate_wots(&inner::inner_state_label(c.id, c.keys_seq, d, r, t), (spec.d_words() * 4) as u32)).collect::<Result<Vec<_>>>())
                                         .collect::<Result<Vec<_>>>()?,
                                 })
                             } else {
@@ -210,7 +214,7 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
                     Some(spec) => ChallengerKeys {
                         indices: (1..=spec.rounds()).map(|r| ks.generate(&index_label(c.id, c.keys_seq, d, r), spec.index_bits())).collect::<Result<Vec<_>>>()?,
                         inner_indices: if spec.inner {
-                            (1..=inner::SEARCH.rounds()).map(|r| ks.generate(&inner::inner_index_label(c.id, c.keys_seq, d, r), inner::SEARCH.index_bits())).collect::<Result<Vec<_>>>()?
+                            (1..=spec.inner_search().rounds()).map(|r| ks.generate(&inner::inner_index_label(c.id, c.keys_seq, d, r), spec.inner_search().index_bits())).collect::<Result<Vec<_>>>()?
                         } else {
                             vec![]
                         },

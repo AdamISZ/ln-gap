@@ -178,7 +178,7 @@ fn inner_and_check_leaves_on_regtest() {
         let block_words: Vec<u32> = (0..16).map(|j| u32::from_be_bytes(block[4 * j..4 * j + 4].try_into().unwrap())).collect();
         let block_sigs = |words: &[u32]| -> Vec<Vec<u8>> { words.iter().enumerate().rev().flat_map(|(j, w)| sign_word(j as u32, *w).consumption_order()).collect() };
         // keep: a register other than D and the copy destination (A) changed
-        let (name, leaf) = ckeep_leaf(&ctx, prover, &keys, N, step);
+        let (name, leaf) = ckeep_leaf(&ctx, prover, &keys, &spec, step);
         let wit = |next: &[u32]| {
             let mut v = sign_state(&re_cur_l, &states[0]).consumption_order();
             v.extend(sign_state(&re_next_l, next).consumption_order());
@@ -191,7 +191,7 @@ fn inner_and_check_leaves_on_regtest() {
         fine[9] ^= 4; // inside the copy destination: not this leaf's business
         assert!(rig.rt.test_accept(&rig.spend("l", &leaf, wit(&fine))).is_err());
         // predicate: the link (block words 1..9 == D)
-        let (name, leaf) = cpred_leaf(&ctx, prover, &keys, N, step);
+        let (name, leaf) = cpred_leaf(&ctx, prover, &keys, &spec, step);
         let wit = |words: &[u32]| {
             let mut v = block_sigs(words);
             v.extend(sign_state(&re_cur_l, &states[0]).consumption_order());
@@ -201,7 +201,7 @@ fn inner_and_check_leaves_on_regtest() {
         lie[5] ^= 0x100;
         rig.check(&name, &leaf, wit(&block_words), wit(&lie));
         // copy: A must equal block words 9..16
-        let (name, leaf) = ccopy_leaf(&ctx, prover, &keys, N, step);
+        let (name, leaf) = ccopy_leaf(&ctx, prover, &keys, &spec, step);
         let wit = |next: &[u32]| {
             let mut v = block_sigs(&block_words);
             v.extend(sign_state(&re_next_l, next).consumption_order());
@@ -222,8 +222,8 @@ fn inner_and_check_leaves_on_regtest() {
         let s = round_states(&init, &w, None);
         assert_eq!(&s[64][..], &next[..8], "inner chain ends at the step's D");
         for r in rounds {
-            let (name, leaf) = round_leaf(&ctx, prover, &keys, N, init_kind, r);
-            let (in_src, out_src, _) = round_sources(init_kind, &[r / 8, r % 8]);
+            let (name, leaf) = round_leaf(&ctx, prover, &keys, &spec, init_kind, r);
+            let (in_src, out_src, _) = round_sources(init_kind, &[r / 8, r % 8], spec.inner_search());
             let sig_inner = |src: &InnerSource, st: &[u32; 8]| -> Option<WotsSig> {
                 match src {
                     InnerSource::Init(Init::Iv) => None,

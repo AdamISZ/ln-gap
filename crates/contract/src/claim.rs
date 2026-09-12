@@ -396,7 +396,14 @@ impl ClaimSpec {
     }
     /// Inner search structure.
     pub fn inner_search(&self) -> Search {
-        Search { n: self.inner_rounds(), k: self.inner_k() }
+        let n = self.inner_rounds();
+        let k = self.inner_k();
+        // Pad n to the next power of k so the bisection is well-defined.
+        let mut padded = 1;
+        while padded < n {
+            padded *= k;
+        }
+        Search { n: padded, k }
     }
     /// Whether the hash has a message schedule.
     pub fn has_schedule(&self) -> bool {

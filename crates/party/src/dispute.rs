@@ -14,7 +14,7 @@ use bitcoin::{OutPoint, Transaction, TxOut};
 use lngap_btc::taptree::TapTree;
 use lngap_btc::witness::witness_args_consumption_order;
 use lngap_channel::{CommitCtx, Role};
-use lngap_contract::claim::{state_from_msg, step_sources, ClaimData, ClaimKeys, ClaimSpec, Init, StateSource, Step};
+use lngap_contract::claim::{state_from_msg, step_sources, ClaimData, ClaimKeys, ClaimSpec, Init, Search, StateSource, Step};
 use lngap_contract::inner::{self, round_sources, round_witness, sched_inputs, sched_witness, InnerSource};
 use lngap_contract::ChallengerKeys;
 use lngap_lamport::winternitz::{WotsPublic, WotsSig};
@@ -90,6 +90,9 @@ impl DisputeLive {
     /// Which tree along the chains the current stage's output uses.
     pub fn tree_index(&self) -> usize {
         let l1 = lngap_contract::claim::level1_tree_count(&self.spec);
+        let sched_off = if self.spec.has_schedule() { 1 } else { 0 };
+        let inner_off = l1 + 2 + sched_off;
+        let inner_rounds = self.spec.inner_search().rounds() as usize;
         match self.stage {
             Stage::WaitP(r) => 2 * (r as usize - 1),
             Stage::WaitQ(r) => 2 * r as usize - 1,
@@ -97,12 +100,12 @@ impl DisputeLive {
             Stage::ReCur => l1,
             Stage::ReNext => l1 + 1,
             Stage::WaitSched => l1 + 2,
-            Stage::WaitInnerP(r) => l1 + 1 + 2 * r as usize,
-            Stage::WaitInnerQ(r) => l1 + 2 + 2 * r as usize,
-            Stage::RoundTerminal => l1 + 7,
-            Stage::CheckReCur => l1 + 8,
-            Stage::CheckReNext => l1 + 9,
-            Stage::CheckTerminal => l1 + 10,
+            Stage::WaitInnerP(r) => inner_off + 2 * (r as usize - 1),
+            Stage::WaitInnerQ(r) => inner_off + 2 * (r as usize - 1) + 1,
+            Stage::RoundTerminal => inner_off + 2 * inner_rounds,
+            Stage::CheckReCur => inner_off + 2 * inner_rounds + 1,
+            Stage::CheckReNext => inner_off + 2 * inner_rounds + 2,
+            Stage::CheckTerminal => inner_off + 2 * inner_rounds + 3,
             Stage::Resolved => self.trees.len() - 1,
         }
     }
@@ -233,19 +236,21 @@ impl DisputeLive {
     /// prover got wrong, or the last segment.
     pub fn choose_inner_index(&self) -> u32 {
         let mine = self.my_inner.as_ref().expect("inner computation");
-        let points = inner::SEARCH.round_points(&self.inner_path);
+        let search = self.spec.inner_search();
+        let points = search.round_points(&self.inner_path);
         for (t, i) in points.iter().enumerate() {
             match self.inner_state(*i) {
                 Some(st) if st == mine[*i as usize] => continue,
                 _ => return t as u32,
             }
         }
-        inner::INNER_K - 1
+        search.k - 1
     }
     /// The first schedule word the prover got wrong, if any.
     pub fn first_bad_sched(&self) -> Option<u32> {
         let mine = self.my_sched.as_ref().expect("inner computation");
-        (16..inner::ROUNDS).find(|i| self.sched.get(i).map(|s| s.0) != Some(mine[*i as usize]))
+        let bw = self.spec.hash.block_words() as u32;
+        (bw..self.spec.inner_rounds()).find(|i| self.sched.get(i).map(|s| s.0) != Some(mine[*i as usize]))
     }
     /// The first committed block word that differs from its constant or
     /// register source in re_cur, if any (data words are unconstrained).
@@ -281,7 +286,7 @@ impl DisputeLive {
         let mask = self.isolated().copy_mask(self.spec.n_words);
         let cn = lngap_contract::claim::state_nibbles(&c.0);
         let nn = lngap_contract::claim::state_nibbles(&n.0);
-        (64..cn.len()).any(|i| !mask[i] && cn[i] != nn[i])
+        (self.spec.d_nibbles()..cn.len()).any(|i| !mask[i] && cn[i] != nn[i])
     }
     /// Witness args for the leaves verifying the 16 block words (15 first) then re_cur (or re_next).
     pub fn state_and_block_args(&self, which_next: bool) -> Result<Vec<Vec<u8>>> {
@@ -341,8 +346,22 @@ impl DisputeLive {
     /// Witness args (after Q's signature) and leaf name for disproving round `r`.
     pub fn round_disproof(&self, ctx: &CommitCtx, keys: &ClaimKeys, r: u32) -> Result<(String, Vec<Vec<u8>>)> {
         let init = self.init_kind();
-        let (name, _) = inner::round_leaf(ctx, self.prover, keys, self.spec.n_words, init, r);
-        let (in_src, _, _) = round_sources(init, &[r / inner::INNER_K, r % inner::INNER_K]);
+        let (name, _) = inner::round_leaf(ctx, self.prover, keys, &self.spec, init, r);
+        let search = self.spec.inner_search();
+        // Compute the inner path for round r (most-significant digit first).
+        let inner_path: Vec<u32> = {
+            let rounds = search.rounds();
+            let mut path = Vec::with_capacity(rounds as usize);
+            let mut divisor = search.n / search.k;
+            let mut idx = r;
+            for _ in 0..rounds {
+                path.push(idx / divisor);
+                idx %= divisor;
+                divisor /= search.k;
+            }
+            path
+        };
+        let (in_src, _, _) = round_sources(init, &inner_path, search);
         let w_sig = self.word_sig(r)?;
         let in_sig = match in_src {
             InnerSource::Init(Init::Iv) => None,
@@ -452,11 +471,11 @@ pub fn parse_p_sched(tx: &Transaction, keys: &ClaimKeys) -> Result<Vec<(u32, u32
 }
 
 /// Parse the prover's `p_inner_r` witness into `(round index, state, sig)` triples.
-pub fn parse_p_inner(tx: &Transaction, keys: &ClaimKeys, inner_path: &[u32], r: u32) -> Result<Vec<(u32, [u32; 8], WotsSig)>> {
+pub fn parse_p_inner(tx: &Transaction, keys: &ClaimKeys, inner_path: &[u32], r: u32, search: Search) -> Result<Vec<(u32, [u32; 8], WotsSig)>> {
     let args = witness_args_consumption_order(&tx.input[0].witness);
     let ik = keys.inner.as_ref().ok_or_else(|| anyhow!("no inner keys"))?;
     let list = parse_wots_list(&args[2..], &ik.states[r as usize - 1], "p_inner")?;
-    let points = inner::SEARCH.round_points(inner_path);
+    let points = search.round_points(inner_path);
     Ok(list.into_iter().zip(points).map(|((msg, sig), i)| (i, state8(&msg), sig)).collect())
 }
 

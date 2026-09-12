@@ -111,12 +111,16 @@ impl ContractInstance {
                 ensure!(ck.indices.len() == rounds && ck.indices.iter().all(|pk| pk.n_bits() == spec.index_bits()), "depth {d}: index keys");
                 if spec.inner {
                     let ik = c.inner.as_ref().ok_or_else(|| anyhow!("depth {d}: inner keys missing"))?;
-                    let ir = crate::inner::SEARCH.rounds() as usize;
+                    let ir = spec.inner_search().rounds() as usize;
                     ensure!(ik.re_cur.params.message_digits == nb && ik.re_next.params.message_digits == nb, "depth {d}: re-commitment keys");
-                    ensure!(ik.block.len() == 16, "depth {d}: block keys");
-                    ensure!(ik.sched.len() as u32 == crate::inner::ROUNDS - 16, "depth {d}: schedule keys");
-                    ensure!(ik.states.len() == ir && ik.states.iter().all(|r| r.len() as u32 == crate::inner::INNER_K - 1), "depth {d}: inner state keys");
-                    ensure!(ck.inner_indices.len() == ir && ck.inner_indices.iter().all(|pk| pk.n_bits() == crate::inner::SEARCH.index_bits()), "depth {d}: inner index keys");
+                    ensure!(ik.block.len() == spec.hash.block_words(), "depth {d}: block keys");
+                    if spec.has_schedule() {
+                        ensure!(ik.sched.len() as u32 == spec.inner_rounds() - spec.hash.block_words() as u32, "depth {d}: schedule keys");
+                    } else {
+                        ensure!(ik.sched.is_empty(), "depth {d}: schedule keys on a hash without a schedule");
+                    }
+                    ensure!(ik.states.len() == ir && ik.states.iter().all(|r| r.len() as u32 == spec.inner_k() - 1), "depth {d}: inner state keys");
+                    ensure!(ck.inner_indices.len() == ir && ck.inner_indices.iter().all(|pk| pk.n_bits() == spec.inner_search().index_bits()), "depth {d}: inner index keys");
                 } else {
                     ensure!(c.inner.is_none() && ck.inner_indices.is_empty(), "depth {d}: inner keys on a flat claim");
                 }
