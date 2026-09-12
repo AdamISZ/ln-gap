@@ -3,6 +3,8 @@
 //! but return Report structs so the scenario runner can --keep them
 //! for the explorer.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use bitcoin::Amount;
 use lngap_channel::Role;
@@ -231,6 +233,72 @@ pub const FC_N7: Scenario = Scenario {
     },
 };
 
+fn disproof(roles: &[String]) -> Option<String> {
+    roles.iter().find(|r| {
+        r.starts_with("cpred_")
+            || r.starts_with("simple_")
+            || r.starts_with("round_")
+            || r.starts_with("sched_")
+            || r.starts_with("block_")
+            || r.starts_with("ccopy_")
+            || r.starts_with("ckeep_")
+            || r.starts_with("re_")
+    }).cloned()
+}
+
+pub const FC_N8: Scenario = Scenario {
+    id: "FCN8",
+    title: "Hub fabricates inclusion proof; Alice disproves by n4bit bisection",
+    expected: "move_1 (Alice claims), move_2 (hub's fabricated proof), bisection disproves at n4bit round leaf, bond to Alice",
+    run: || {
+        let mut w = FcWorld::new("FCN8")?;
+        let r = w.register()?;
+        w.registering = false;
+        let claim_from = r.h_max + GRACE;
+
+        // Alice honestly claims "not anchored" after the grace period
+        w.alice.user.set_move_policy(
+            ID_BOND,
+            Box::new(move |ctx: &MoveCtx| {
+                (ctx.height >= claim_from && lngap_lamport::bits_to_uint(ctx.state) == 0)
+                    .then(|| vec![true])
+            }),
+        );
+        w.alice.user.set_cancel_policy(ID_BOND, Box::new(|_| false));
+        w.alice.user.faults.stop_from_seq = Some(2);
+
+        // Hub cheats: alters the claimed end state of its inclusion proof.
+        // The honest proof computes hash(headers) as the end state; the hub
+        // flips one bit, so the bisection will find the discrepancy.
+        w.alice.hub.faults.cheat_claim = Some(Arc::new(|s: &[u32]| {
+            let mut t = s.to_vec();
+            t[0] ^= 1;
+            t
+        }));
+
+        // Wait for the bisection disproof to appear on-chain
+        w.step_until(400, |w| {
+            let roles = party_txs(&w.alice);
+            disproof(&roles).is_some()
+        })?;
+        w.steps(5)?;
+
+        let roles = party_txs(&w.alice);
+        assert!(roles.iter().any(|r| r == "move_1"), "Alice claimed: {roles:?}");
+        assert!(roles.iter().any(|r| r == "move_2"), "hub answered: {roles:?}");
+        let d = disproof(&roles).expect("bisection disproof");
+        assert!(
+            d.starts_with("round_") || d.starts_with("cpred_") || d.starts_with("block_") || d.starts_with("ckeep_") || d.starts_with("re_"),
+            "disproof at a bisection leaf: {d} (roles: {roles:?})"
+        );
+        // Alice wins the bond (the hub's proof was disproved)
+        assert!(w.alice.balance(Role::User) > sat(100_000), "Alice gained the bond: {}", w.alice.balance(Role::User));
+        let r = fc_report(&w, FC_N8.id, FC_N8.title, FC_N8.expected);
+        println!("\n{}", r.narrative);
+        Ok(r)
+    },
+};
+
 pub fn scenarios() -> Vec<Scenario> {
-    vec![FC_N1, FC_N2, FC_N3, FC_N4, FC_N5, FC_N6, FC_N7]
+    vec![FC_N1, FC_N2, FC_N3, FC_N4, FC_N5, FC_N6, FC_N7, FC_N8]
 }

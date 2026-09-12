@@ -256,3 +256,86 @@ fn n7_hub_proves_onchain_refuses_alice() -> Result<()> {
     println!("\n{}", w.narrative());
     Ok(())
 }
+
+#[test]
+fn n8_fabricated_proof_disproved_by_bisection() -> Result<()> {
+    use lngap_harness::factchain_world::{ID_BOND, GRACE};
+    use std::sync::Arc;
+
+    let mut w = FcWorld::new("N8")?;
+    let r = w.register()?;
+    w.registering = false;
+    let claim_from = r.h_max + GRACE;
+
+    // Alice honestly claims "not anchored" after the grace period.
+    // (The entry IS anchored — the hub submitted it — but Alice can still claim.)
+    w.alice.user.set_move_policy(
+        ID_BOND,
+        Box::new(move |ctx: &MoveCtx| {
+            (ctx.height >= claim_from && lngap_lamport::bits_to_uint(ctx.state) == 0)
+                .then(|| vec![true])
+        }),
+    );
+    w.alice.user.set_cancel_policy(ID_BOND, Box::new(|_| false));
+    w.alice.user.faults.stop_from_seq = Some(2);
+
+    // Hub cheats: alters the claimed end state of its inclusion proof.
+    // The honest proof computes hash(headers) as the end state; the hub
+    // flips one bit, so the bisection will find the discrepancy.
+    w.alice.hub.faults.cheat_claim = Some(Arc::new(|s: &[u32]| {
+        let mut t = s.to_vec();
+        t[0] ^= 1;
+        t
+    }));
+
+    // Wait for the bisection disproof to appear on-chain
+    w.step_until(400, |w| {
+        let roles = party_txs(&w.alice);
+        roles.iter().any(|r| {
+            r.starts_with("round_")
+                || r.starts_with("cpred_")
+                || r.starts_with("simple_")
+                || r.starts_with("sched_")
+                || r.starts_with("block_")
+                || r.starts_with("ccopy_")
+                || r.starts_with("ckeep_")
+                || r.starts_with("re_")
+        })
+    })?;
+    w.steps(5)?;
+
+    let roles = party_txs(&w.alice);
+
+    // The hub force-closes and makes move_1 (its fabricated inclusion proof).
+    // Alice disputes (d1/dispute), the bisection runs, and the hub's proof
+    // is disproved at a bisection leaf.
+    assert!(roles.iter().any(|r| r == "move_1"), "hub's proof move: {roles:?}");
+    assert!(roles.iter().any(|r| r == "d1/dispute"), "Alice disputed: {roles:?}");
+
+    // The disproof lands at a bisection terminal leaf. With a cheated end
+    // state, the bisection narrows to the last step (a NOP padding step)
+    // and disproves it with a flat/simple leaf. If the cheat hit a
+    // compression midstate, it would narrow to an n4bit round leaf instead.
+    let d = roles.iter().find(|r| {
+        r.starts_with("round_")
+            || r.starts_with("cpred_")
+            || r.starts_with("simple_")
+            || r.starts_with("block_")
+            || r.starts_with("ckeep_")
+            || r.starts_with("re_")
+    }).expect("bisection disproof leaf");
+
+    println!("\n=== N8: bisection disproof at {d} ===");
+    println!("  roles: {roles:?}");
+    println!("  alice balance: {} (user), {} (hub)", w.alice.balance(Role::User), w.alice.balance(Role::Hub));
+
+    // Alice wins the bond (the hub's proof was disproved)
+    assert!(
+        w.alice.balance(Role::User) > sat(100_000),
+        "Alice gained the bond: {}",
+        w.alice.balance(Role::User)
+    );
+
+    println!("\n{}", w.narrative());
+    Ok(())
+}
