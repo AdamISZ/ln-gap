@@ -110,7 +110,10 @@ fn false_inner_state_is_disproved_mid_compression() {
     let cheated_end = round_states(&s15, &schedule(&prog.block()), Some(&bad))[64].to_vec();
     assert_ne!(cheated_end, states[16]);
     h.user.faults.cheat_claim = Some(Arc::new(move |_s: &[u32]| cheated_end.clone()));
-    h.user.faults.cheat_inner = Some(Arc::new(bad));
+    // the fault takes the generalized slice form; the cheat itself is fixed-size
+    h.user.faults.cheat_inner = Some(Arc::new(move |i: u32, s: &[u32]| {
+        bad(i, s.try_into().expect("8-word state")).to_vec()
+    }));
     h.step_until(160, |h| roles(h).iter().any(|r| r.starts_with("round_"))).unwrap();
     h.steps(2).unwrap();
     let hub = h.hub.narrative();
