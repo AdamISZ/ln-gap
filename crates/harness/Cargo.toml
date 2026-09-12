@@ -17,6 +17,9 @@ tracing-subscriber.workspace = true
 lngap-tictactoe = { path = "../apps/tictactoe" }
 lngap-names = { path = "../apps/names" }
 lngap-spv = { path = "../apps/spv" }
+lngap-n4bit = { path = "../n4bit" }
+lngap-factchain = { path = "../apps/factchain" }
+lngap-names-fc = { path = "../apps/names-fc" }
 serde_json.workspace = true
 hex.workspace = true
 bitcoincore-rpc.workspace = true
