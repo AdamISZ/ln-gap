@@ -5,11 +5,11 @@
 //! submits entries to the miner, and serves proof data once confirmed. Users
 //! verify fact-chain blocks natively and fold bonds once entries are confirmed.
 //!
-//! Stage 1: no ClaimSpec (no on-chain bisection). The proof is verified natively
-//! off-chain; the on-chain contract is the state machine. The fact chain has one
-//! entry per block (no Merkle tree). W_max = 100; checkpoint refresh happens at
-//! cooperative channel updates (not yet implemented — the PoC scenarios are
-//! short enough that W stays small).
+//! Stage 2: claims carry ClaimSpecs and disputes run the on-chain bisection.
+//! The fact chain has one entry per block (no Merkle tree). W_max = 100;
+//! checkpoint refresh happens at cooperative channel updates (not yet
+//! implemented — the PoC scenarios are short enough that W stays small).
+//! N9 fork mode: the hub's entry is mined on a private fork (see step_fork).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -61,6 +61,14 @@ pub struct FcWorld {
     pub hub: Arc<Mutex<FcHub>>,
     /// The fact-chain miner (entity M, not a channel participant).
     pub miner: Miner,
+    /// Scenario fault (N9): the hub's entry is mined on a private fork only
+    /// the hub sees; the real chain advances past it and the world serves a
+    /// heavier-chain refutation.
+    pub fork: bool,
+    /// The hub's private-fork miner (starts from genesis like the real miner).
+    pub fork_miner: Miner,
+    /// Requests anchored on the fork: (req_id, checkpoint_height, n_headers on the fork).
+    forked: Vec<(u32, u32, usize)>,
     /// The fact-chain genesis digest and height.
     pub fc_genesis_digest: [u8; 20],
     pub fc_genesis_height: u32,
@@ -130,6 +138,9 @@ impl FcWorld {
             bob,
             hub,
             miner,
+            fork: false,
+            fork_miner: Miner::new(fc_genesis_digest, fc_genesis_height),
+            forked: Vec::new(),
             fc_genesis_digest,
             fc_genesis_height,
             alice_fc,
@@ -322,12 +333,15 @@ impl FcWorld {
     }
 
     /// Install honest bond behaviour: the user claims from `claim_from` if
-    /// the entry is not confirmed, and folds the bond once it is. The hub
-    /// answers a claim (state 1 → 2) if the entry is confirmed.
+    /// the entry is not confirmed, folds the bond once it is, and refutes the
+    /// hub's chain when heavier-chain data is served (N9). The hub answers a
+    /// claim (state 1 → 2) when its inclusion proof data exists — in fork
+    /// mode that data covers the hub's fork, not the users' chain.
     fn install_bond_policies(&mut self, who: Who, id: u32, req_id: u32, claim_from: u32) {
         let confirmed = self.confirmed.clone();
         let confirmed2 = self.confirmed.clone();
-        let confirmed_hub = self.confirmed.clone();
+        let store = self.store.clone();
+        let store2 = self.store.clone();
         let party = &mut self.channel(who).user;
         party.set_move_policy(
             id,
@@ -339,9 +353,9 @@ impl FcWorld {
                             .then(|| vec![true])
                     }
                     2 => {
-                        // Refuted: the user could refute with a heavier chain,
-                        // but in stage 1 we don't have that data yet.
-                        None
+                        // Refuted: refute with the heavier real chain, once the
+                        // world has served the refutation data (N9).
+                        store.has(&format!("{req_id}/refute")).then(|| vec![true])
                     }
                     _ => None,
                 }
@@ -357,8 +371,7 @@ impl FcWorld {
         self.channel(who).hub.set_move_policy(
             id,
             Box::new(move |ctx: &MoveCtx| {
-                (bits_to_uint(ctx.state) == 1
-                    && confirmed_hub.lock().unwrap().contains(&req_id))
+                (bits_to_uint(ctx.state) == 1 && store2.has(&format!("{req_id}/incl")))
                     .then(|| vec![true])
             }),
         );
@@ -470,7 +483,9 @@ impl FcWorld {
         self.bob.deliver(btc_h, &txs)?;
 
         // 2. Mine a fact-chain block (if there's a pending entry)
-        if let Some(entry) = self.pending_entry.take() {
+        if self.fork {
+            self.step_fork()?;
+        } else if let Some(entry) = self.pending_entry.take() {
             self.miner.submit(entry);
             let block = self.miner.mine_next().expect("mine");
             let fc_h = block.header.height();
@@ -567,6 +582,95 @@ impl FcWorld {
         let claim_data = fc_shape.data(&raw_headers);
         self.store.put(&format!("{req_id}/incl"), claim_data);
         self.say(format!("proof data for request {req_id} served ({} headers)", raw_headers.len()));
+        Ok(())
+    }
+
+    /// N9 fork mode: the real chain advances with an empty block every step;
+    /// the hub's entry is mined on a private fork only the hub sees. Once the
+    /// real chain is one header longer than the fork, the world serves the
+    /// heavier-chain refutation data.
+    fn step_fork(&mut self) -> Result<()> {
+        // The real chain advances (empty block: no entry)
+        self.miner.submit(vec![]);
+        let block = self.miner.mine_next().expect("mine");
+        self.alice_fc.verify_and_append(&block).map_err(|e| anyhow!(e))?;
+        self.bob_fc.verify_and_append(&block).map_err(|e| anyhow!(e))?;
+
+        // The hub's private fork: mine the pending entry there; only the hub sees it
+        if let Some(entry) = self.pending_entry.take() {
+            let entry_len = entry.len();
+            self.fork_miner.submit(entry);
+            let fblock = self.fork_miner.mine_next().expect("mine");
+            let fh = fblock.header.height();
+            self.hub_fc.verify_and_append(&fblock).map_err(|e| anyhow!(e))?;
+            self.hub.lock().unwrap().on_block(fh, &fblock.entry);
+            self.say(format!(
+                "hub mined its entry on a PRIVATE FORK at fact-chain height {fh} ({entry_len} bytes)"
+            ));
+
+            let newly: Vec<u32> = {
+                let hub = self.hub.lock().unwrap();
+                hub.promises
+                    .keys()
+                    .filter(|id| hub.is_confirmed(**id))
+                    .copied()
+                    .collect()
+            };
+            for req_id in newly {
+                if self.forked.iter().any(|(id, _, _)| *id == req_id) {
+                    continue;
+                }
+                // The inclusion proof covers the fork (the hub's chain view)
+                let fc = self.hub_fc.clone();
+                self.serve_inclusion(req_id, &fc)?;
+                let (cp_h, conf_h) = {
+                    let hub = self.hub.lock().unwrap();
+                    let cp = hub.promises.get(&req_id).map(|p| p.checkpoint_height).unwrap_or(0);
+                    (cp, hub.confirmed_height(req_id).unwrap_or(cp + 1))
+                };
+                self.forked.push((req_id, cp_h, (conf_h - cp_h) as usize));
+            }
+            // The fork entry never lands on the real chain: no ledger update,
+            // and the users' confirmed set stays empty.
+            self.pending_event = None;
+        }
+
+        self.serve_refutations()?;
+        Ok(())
+    }
+
+    /// Serve the heavier-chain refutation for fork-anchored requests once the
+    /// real chain is one header longer than the hub's fork.
+    fn serve_refutations(&mut self) -> Result<()> {
+        for (req_id, cp_height, n) in self.forked.clone() {
+            let key = format!("{req_id}/refute");
+            if self.store.has(&key) {
+                continue;
+            }
+            if self.alice_fc.tip_height() < cp_height + n as u32 + 1 {
+                continue;
+            }
+            let p = self
+                .promises
+                .get(&req_id)
+                .ok_or_else(|| anyhow!("no promise {req_id}"))?
+                .clone();
+            let shape = lngap_factchain::FactShape {
+                checkpoint: p.checkpoint,
+                difficulty_bits: lngap_factchain::DIFFICULTY_BITS,
+                n_headers: n + 1,
+            };
+            // The real chain, from the users' client. (PoC: the checkpoint is
+            // genesis, so build_data's client-relative indexing lines up.)
+            let data = shape.build_data(&self.alice_fc, &p.entry);
+            let fc_shape = lngap_factchain::claim::FactChainShape::from_fact_shape(&shape);
+            let raw_headers: Vec<[u8; 48]> = data.headers.iter().map(|h| h.0).collect();
+            self.store.put(&key, fc_shape.data(&raw_headers));
+            self.say(format!(
+                "the real chain is heavier than the hub's fork: refutation data served for request {req_id} ({} headers)",
+                raw_headers.len()
+            ));
+        }
         Ok(())
     }
 

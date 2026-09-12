@@ -1,5 +1,5 @@
-//! Fact-chain names scenarios: N1–N7 (N8/N9 deferred to stage 2).
-//! Stage 1: no on-chain bisection; proofs verified natively.
+//! Fact-chain names scenarios: N1–N9.
+//! Stages 1+2: on-chain bisection disputes via the flat terminal leaf.
 
 use anyhow::Result;
 use bitcoin::Amount;
@@ -330,6 +330,59 @@ fn n8_fabricated_proof_disproved_by_bisection() -> Result<()> {
     println!("  alice balance: {} (user), {} (hub)", w.alice.balance(Role::User), w.alice.balance(Role::Hub));
 
     // Alice wins the bond (the hub's proof was disproved)
+    assert!(
+        w.alice.balance(Role::User) > sat(100_000),
+        "Alice gained the bond: {}",
+        w.alice.balance(Role::User)
+    );
+
+    println!("\n{}", w.narrative());
+    Ok(())
+}
+
+#[test]
+fn n9_private_fork_refuted_by_heavier_chain() -> Result<()> {
+    let mut w = FcWorld::new("FCN9")?;
+    w.fork = true;
+    w.register()?;
+    w.registering = false; // no reveal: just the commit bond
+
+    // Alice goes dark after proposing the claim, so the dispute resolves
+    // on-chain (same forcing as N3/N8).
+    w.alice.user.faults.stop_from_seq = Some(2);
+
+    // Step until the bond resolves on-chain
+    w.step_until(400, |w| {
+        party_txs(&w.alice).iter().any(|r| r.starts_with("split_"))
+    })?;
+    w.steps(2)?;
+
+    let roles = party_txs(&w.alice);
+    println!("\n=== N9 roles: {roles:?} ===");
+
+    // The hub proves inclusion on its private fork; Alice refutes with the
+    // heavier real chain; the bond splits to her.
+    let moves: Vec<&String> = roles.iter().filter(|r| r.starts_with("move_")).collect();
+    assert!(moves.len() >= 2, "hub's fork proof + Alice's refutation: {roles:?}");
+    let split = roles
+        .iter()
+        .find(|r| r.starts_with("split_"))
+        .expect("a split happened");
+    assert!(split.ends_with("BondToUser"), "the bond went to Alice: {split}");
+
+    // NEITHER claim was disputed: the fork proof is internally valid (Alice
+    // cannot disprove it) and so is Alice's longer chain (the hub cannot
+    // disprove it). The resolution is by chain length alone, so no bisection
+    // ever runs.
+    assert!(
+        !roles.iter().any(|r| r.contains("dispute")),
+        "nothing to disprove on either side: {roles:?}"
+    );
+
+    // The real chain never contained the commit.
+    assert_eq!(w.resolve("alice"), None);
+
+    // Alice wins the bond.
     assert!(
         w.alice.balance(Role::User) > sat(100_000),
         "Alice gained the bond: {}",

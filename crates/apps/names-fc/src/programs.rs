@@ -2,8 +2,9 @@
 //!
 //! `nreg-fc:{params}` — bonded registration. Same state machine as `nreg`
 //! (Init → Claimed → Refuted → Reinstated) but the facts come from the fact
-//! chain. Stage 1: no ClaimSpec (the bisection is deferred). The proof is
-//! verified natively off-chain; the on-chain contract is the state machine.
+//! chain. Stage 2: moves at depths 2 and 3 carry ClaimSpecs (the inclusion
+//! header chain, and the one-header-longer refutation chain); disputes run
+//! the on-chain bisection.
 //!
 //! `anchorpay-fc:{params}` — payment gated on fact-chain inclusion. Same as
 //! `anchorpay` but with the fact chain as the fact source.
