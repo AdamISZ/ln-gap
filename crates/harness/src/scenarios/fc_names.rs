@@ -299,6 +299,46 @@ pub const FC_N8: Scenario = Scenario {
     },
 };
 
+pub const FC_N9: Scenario = Scenario {
+    id: "FCN9",
+    title: "Hub proves inclusion on a private fork; Alice refutes with the heavier chain",
+    expected: "both claims are internally valid, so no dispute runs; the longer chain wins: split BondToUser; the commit is not on the real chain",
+    run: || {
+        let mut w = FcWorld::new("FCN9")?;
+        w.fork = true;
+        w.register()?;
+        w.registering = false; // no reveal: just the commit bond
+
+        // Alice goes dark after proposing the claim, so the dispute resolves on-chain
+        w.alice.user.faults.stop_from_seq = Some(2);
+
+        w.step_until(400, |w| {
+            party_txs(&w.alice).iter().any(|r| r.starts_with("split_"))
+        })?;
+        w.steps(2)?;
+
+        let roles = party_txs(&w.alice);
+        let moves = roles.iter().filter(|r| r.starts_with("move_")).count();
+        assert!(moves >= 2, "hub's fork proof + Alice's refutation: {roles:?}");
+        let split = roles
+            .iter()
+            .find(|r| r.starts_with("split_"))
+            .expect("a split happened");
+        assert!(split.ends_with("BondToUser"), "the bond went to Alice: {split}");
+        // Neither claim was disputed: the fork proof is internally valid and
+        // so is the heavier chain — the resolution is by chain length alone.
+        assert!(
+            !roles.iter().any(|r| r.contains("dispute")),
+            "nothing to disprove on either side: {roles:?}"
+        );
+        assert_eq!(w.resolve("alice"), None, "the commit is not on the real chain");
+        assert!(w.alice.balance(Role::User) > sat(100_000), "Alice gained the bond: {}", w.alice.balance(Role::User));
+        let r = fc_report(&w, FC_N9.id, FC_N9.title, FC_N9.expected);
+        println!("\n{}", r.narrative);
+        Ok(r)
+    },
+};
+
 pub fn scenarios() -> Vec<Scenario> {
-    vec![FC_N1, FC_N2, FC_N3, FC_N4, FC_N5, FC_N6, FC_N7, FC_N8]
+    vec![FC_N1, FC_N2, FC_N3, FC_N4, FC_N5, FC_N6, FC_N7, FC_N8, FC_N9]
 }
