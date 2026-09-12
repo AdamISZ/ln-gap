@@ -266,18 +266,20 @@ impl FcWorld {
 
     // ----- registry interactions -----
 
-    /// Request → promise. The hub promises inclusion by h_max = fc_height + W_MAX.
+    /// Request → promise. The hub promises inclusion by h_max (in Bitcoin
+    /// height, since the fact chain advances 1:1 with Bitcoin in the PoC).
     fn hub_promise(&mut self, event: Event, window_from: Option<u32>) -> Result<FcPromise> {
+        let btc_h = self.height();
         let fc_h = self.fc_height();
         let checkpoint = self.hub_fc.tip();
         let checkpoint_height = self.hub_fc.tip_height();
-        let h_max = fc_h + W_MAX;
-        let p = self
-            .hub
-            .lock()
-            .unwrap()
-            .promise(event.clone(), h_max, checkpoint, checkpoint_height)?;
-        // Queue the entry for the miner
+        let h_max = btc_h + W_MAX;
+        let p = self.hub.lock().unwrap().promise(
+            event.clone(),
+            h_max,
+            checkpoint,
+            checkpoint_height,
+        )?;
         if !self.hub.lock().unwrap().faults.no_submit
             && self.hub.lock().unwrap().faults.omit_req != Some(p.req_id)
         {
@@ -451,6 +453,7 @@ impl FcWorld {
 
         // 2. Mine a fact-chain block (if there's a pending entry)
         if let Some(entry) = self.pending_entry.take() {
+            self.miner.submit(entry);
             let block = self.miner.mine_next().expect("mine");
             let fc_h = block.header.height();
 
