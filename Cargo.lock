@@ -432,6 +432,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-names-fc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-names",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "lngap-party"
 version = "0.1.0"
 dependencies = [
