@@ -28,6 +28,8 @@
 //! (5 bits for the PoC: the top 5 bits of the 160-bit hash must be zero).
 //! No retargeting.
 
+pub mod claim;
+
 use lngap_n4bit::{hash, meets_target, target_from_difficulty, Digest, DIGEST_BYTES};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

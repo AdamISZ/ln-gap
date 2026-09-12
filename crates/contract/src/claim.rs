@@ -101,15 +101,15 @@ pub enum Step {
     /// `D = compress(init, block)`; `preds` must hold over (registers,
     /// block); `copies` move block nibbles into registers other than `D`;
     /// everything else is unchanged.
-    Compress { name: String, init: Init, block: [Src; 16], preds: Vec<Pred>, copies: Vec<Copy> },
+    Compress { name: String, init: Init, block: Vec<Src>, preds: Vec<Pred>, copies: Vec<Copy> },
     /// Predicates must hold on the input state; `copies` are applied
     /// (register to register); everything else is unchanged.
     Simple { name: String, preds: Vec<Pred>, copies: Vec<Copy> },
 }
 
 impl Step {
-    pub fn compress(name: &str, init: Init, block: [Src; 16]) -> Step {
-        Step::Compress { name: name.into(), init, block, preds: vec![], copies: vec![] }
+    pub fn compress(name: &str, init: Init, block: impl IntoIterator<Item = Src>) -> Step {
+        Step::Compress { name: name.into(), init, block: block.into_iter().collect(), preds: vec![], copies: vec![] }
     }
     pub fn with_preds(mut self, p: Vec<Pred>) -> Step {
         match &mut self {

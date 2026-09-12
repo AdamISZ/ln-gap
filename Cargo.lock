@@ -366,6 +366,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
+ "lngap-contract",
  "lngap-n4bit",
  "serde",
  "serde_json",
