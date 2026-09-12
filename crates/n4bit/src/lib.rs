@@ -36,6 +36,8 @@
 //! - **Squeeze**: output state[0..20] (10 bytes), apply `ROUNDS` rounds, output
 //!   state[0..20] again (10 bytes) = 20 bytes total.
 
+pub mod cryptanalysis;
+
 /// PRESENT's 4-bit S-box (ISO/IEC 29192-2).
 pub const SBOX: [u8; 16] = [0xC, 0x5, 0x6, 0xB, 0x9, 0x0, 0xA, 0xD, 0x3, 0xE, 0xF, 0x8, 0x4, 0x7, 0x1, 0x2];
 
