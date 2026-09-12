@@ -164,6 +164,19 @@ fn apply_rounds(state: &mut State, starting_round: usize) {
     }
 }
 
+/// One sponge absorb step: XOR (ADD mod 16) a rate block into the state's
+/// rate part, then apply ROUNDS SPN rounds. This is the per-compression
+/// primitive that the claim model's `apply` calls for n4bit.
+///
+/// `state` is the full 40-nibble state. `block` is the 20-nibble rate block.
+/// `round_counter` is the starting round index (accumulates across absorbs).
+pub fn sponge_absorb(state: &mut State, block: &[u8; RATE_NIBBLES], round_counter: usize) {
+    for i in 0..RATE_NIBBLES {
+        state[i] = (state[i] + block[i]) % 16;
+    }
+    apply_rounds(state, round_counter);
+}
+
 /// Convert bytes to nibbles (high nibble first, little-endian byte order).
 fn bytes_to_nibbles(bytes: &[u8]) -> Vec<u8> {
     let mut nibbles = Vec::with_capacity(bytes.len() * 2);

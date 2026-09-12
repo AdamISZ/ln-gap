@@ -1265,7 +1265,7 @@ impl Party {
                 let (_, _, step) = disp.isolated_step();
                 let cur = disp.state_at(step).ok_or_else(|| anyhow!("no state for step {step}"))?;
                 let claimed_next = disp.state_at(step + 1).ok_or_else(|| anyhow!("no state for step {}", step + 1))?;
-                let (expect, _) = disp.spec.apply(&disp.spec.steps[step as usize], &cur, &[]);
+                let (expect, _) = disp.spec.apply(step as usize, &disp.spec.steps[step as usize], &cur, &[]);
                 if expect == claimed_next {
                     self.say(format!("contract {id}: isolated step {step} is correct; nothing to disprove (the prover will time me out)"));
                     self.live[idx].dispute.as_mut().unwrap().responded = true;
@@ -1286,9 +1286,9 @@ impl Party {
                 let sig = self.keystore.sign_wots(&lngap_contract::inner::re_cur_label(id, ks, d), &words(&cur))?;
                 let mut extra = sig.consumption_order();
                 let leaf = if disp.stage == Stage::ReCur {
-                    let (_, block) = lngap_contract::claim::ClaimSpec::compress_inputs(disp.isolated(), &cur, disp.spec.data_for(&disp.data, step as usize));
+                    let (_, block) = lngap_contract::claim::ClaimSpec::compress_inputs(disp.isolated(), &cur, disp.spec.data_for(&disp.data, step as usize), disp.spec.hash);
                     let mut bsigs = Vec::new();
-                    for j in 0..16 {
+                    for j in 0..disp.spec.hash.block_words() {
                         let w = u32::from_be_bytes(block[4 * j..4 * j + 4].try_into().unwrap());
                         bsigs.push(self.keystore.sign_wots(&lngap_contract::inner::block_label(id, ks, d, j as u32), &w.to_be_bytes())?);
                     }
@@ -1409,7 +1409,7 @@ impl Party {
                 let (_, _, step) = disp.isolated_step();
                 let cur = &disp.re_cur.as_ref().ok_or_else(|| anyhow!("no re_cur"))?.0;
                 let next = &disp.re_next.as_ref().ok_or_else(|| anyhow!("no re_next"))?.0;
-                if disp.spec.step_ok(disp.isolated(), cur, next, &[]) {
+                if disp.spec.step_ok(step as usize, disp.isolated(), cur, next, &[]) {
                     self.say(format!("contract {id}: isolated step {step} ({}) is correct; nothing to disprove (the prover will time me out)", disp.isolated().name()));
                     self.live[idx].dispute.as_mut().unwrap().responded = true;
                     return Ok(());

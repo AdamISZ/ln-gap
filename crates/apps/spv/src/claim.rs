@@ -284,7 +284,7 @@ impl AnchorClaim {
 pub fn first_failing_step(spec: &ClaimSpec, data: &ClaimData) -> Option<(usize, String)> {
     let mut s = spec.start.clone();
     for (i, step) in spec.steps.iter().enumerate() {
-        let (next, ok) = spec.apply(step, &s, spec.data_for(data, i));
+        let (next, ok) = spec.apply(i, step, &s, spec.data_for(data, i));
         if !ok {
             return Some((i, step.name()));
         }

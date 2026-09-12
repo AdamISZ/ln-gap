@@ -339,6 +339,9 @@ impl Pred {
             Pred::EqConst { off, nibbles } => n[*off..*off + nibbles.len()] == nibbles[..],
             Pred::EqNibbles { a, b, n: len } => n[*a..*a + *len] == n[*b..*b + *len],
             Pred::LeTarget { target } => {
+                // NOTE: hardcoded to n[..64] (32 bytes = SHA-256's 8-word D register).
+                // n4bit specs with LeTarget would need 40 nibbles (5-word D);
+                // parameterize if needed.
                 let d = words_bytes(&nibbles_state(&n[..64]));
                 // little-endian: compare from byte 31 down
                 for i in (0..32).rev() {
@@ -427,13 +430,18 @@ impl ClaimSpec {
         self.steps.iter().enumerate().filter(|(_, s)| s.has_data()).map(|(i, _)| i).collect()
     }
     /// The words of a compression's init and block for an input state and data.
-    pub fn compress_inputs(step: &Step, state: &[u32], data: &[u32]) -> ([u32; 8], [u8; 64]) {
+    pub fn compress_inputs(step: &Step, state: &[u32], data: &[u32], hash: HashKind) -> (Vec<u32>, Vec<u8>) {
         let Step::Compress { init, block, .. } = step else { panic!("not a compression") };
-        let init_w: [u32; 8] = match init {
-            Init::Iv => IV,
-            Init::D => state[..8].try_into().unwrap(),
+        let dw = hash.d_words();
+        let bw = hash.block_words();
+        let init_w: Vec<u32> = match init {
+            Init::Iv => match hash {
+                HashKind::Sha256 => IV.to_vec(),
+                HashKind::N4Bit => vec![0u32; dw],
+            },
+            Init::D => state[..dw].to_vec(),
         };
-        let mut b = [0u8; 64];
+        let mut b = vec![0u8; 4 * bw];
         for (j, src) in block.iter().enumerate() {
             let w = match src {
                 Src::Const(c) => *c,
@@ -446,15 +454,34 @@ impl ClaimSpec {
     }
     /// Apply one step (`data` for a compression with data sources). Returns
     /// the output state and whether the step's predicates held.
-    pub fn apply(&self, step: &Step, state: &[u32], data: &[u32]) -> (Vec<u32>, bool) {
+    /// `step_index` is the step's position in the spec (used for n4bit round
+    /// counter accumulation; ignored for SHA-256).
+    pub fn apply(&self, step_index: usize, step: &Step, state: &[u32], data: &[u32]) -> (Vec<u32>, bool) {
         let mut n = state_nibbles(state);
-        let (out_d, space): (Option<[u32; 8]>, Vec<u8>) = match step {
+        let (out_d, space): (Option<Vec<u32>>, Vec<u8>) = match step {
             Step::Compress { .. } => {
-                let (mut s, b) = Self::compress_inputs(step, state, data);
+                let (init_w, b) = Self::compress_inputs(step, state, data, self.hash);
                 let mut space = n.clone();
                 space.extend(byte_nibbles(&b));
-                sha2::compress256(&mut s, &[b.into()]);
-                (Some(s), space)
+                let d = match self.hash {
+                    HashKind::Sha256 => {
+                        let mut s: [u32; 8] = init_w.as_slice().try_into().unwrap();
+                        let block: [u8; 64] = b.as_slice().try_into().unwrap();
+                        sha2::compress256(&mut s, &[block.into()]);
+                        s.to_vec()
+                    }
+                    HashKind::N4Bit => {
+                        let sn = state_nibbles(&init_w);
+                        let mut st: [u8; lngap_n4bit::STATE_NIBBLES] = sn.as_slice().try_into().unwrap();
+                        let bn = byte_nibbles(&b);
+                        let block: [u8; lngap_n4bit::RATE_NIBBLES] =
+                            bn[..lngap_n4bit::RATE_NIBBLES].try_into().unwrap();
+                        let round_counter = step_index * lngap_n4bit::ROUNDS;
+                        lngap_n4bit::sponge_absorb(&mut st, &block, round_counter);
+                        nibbles_state(&st)
+                    }
+                };
+                (Some(d), space)
             }
             Step::Simple { .. } => (None, n.clone()),
         };
@@ -464,13 +491,13 @@ impl ClaimSpec {
         }
         let mut out = nibbles_state(&n);
         if let Some(d) = out_d {
-            out[..8].copy_from_slice(&d);
+            out[..d.len()].copy_from_slice(&d);
         }
         (out, ok)
     }
     /// Is `next` a correct output of `step` on `cur` with `data`?
-    pub fn step_ok(&self, step: &Step, cur: &[u32], next: &[u32], data: &[u32]) -> bool {
-        let (expect, ok) = self.apply(step, cur, data);
+    pub fn step_ok(&self, step_index: usize, step: &Step, cur: &[u32], next: &[u32], data: &[u32]) -> bool {
+        let (expect, ok) = self.apply(step_index, step, cur, data);
         ok && expect == next
     }
     /// The data slice for step `i` (empty for steps without data).
@@ -484,7 +511,7 @@ impl ClaimSpec {
     pub fn states(&self, data: &ClaimData) -> Vec<Vec<u32>> {
         let mut v = vec![self.start.clone()];
         for (i, step) in self.steps.iter().enumerate() {
-            let (s, _) = self.apply(step, v.last().unwrap(), self.data_for(data, i));
+            let (s, _) = self.apply(i, step, v.last().unwrap(), self.data_for(data, i));
             v.push(s);
         }
         v
@@ -499,7 +526,7 @@ impl ClaimSpec {
         let mut s = start.to_vec();
         let mut all_ok = true;
         for i in lo..hi {
-            let (next, ok) = self.apply(&self.steps[i], &s, self.data_for(data, i));
+            let (next, ok) = self.apply(i, &self.steps[i], &s, self.data_for(data, i));
             all_ok &= ok;
             s = next;
         }

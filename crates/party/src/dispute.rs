@@ -138,7 +138,7 @@ impl DisputeLive {
             let b = a + sub;
             let (Some(start), Some(end)) = (self.state_at(a), self.state_at(b)) else { return t };
             let ok = if sub == 1 {
-                self.spec.step_ok(&self.spec.steps[a as usize], &start, &end, self.spec.data_for(&self.data, a as usize))
+                self.spec.step_ok(a as usize, &self.spec.steps[a as usize], &start, &end, self.spec.data_for(&self.data, a as usize))
             } else {
                 let (reference, preds_ok) = self.spec.segment_reference(a as usize, b as usize, &start, &self.data);
                 preds_ok && reference == end
@@ -257,9 +257,10 @@ impl DisputeLive {
     pub fn first_bad_block(&self) -> Option<usize> {
         let cur = &self.re_cur.as_ref()?.0;
         let Step::Compress { block, .. } = self.isolated() else { return None };
-        let data: Vec<u32> = (0..16).map(|j| self.blocks.get(&j).map(|b| b.0).unwrap_or(0)).collect();
-        let (_, expected) = ClaimSpec::compress_inputs(self.isolated(), cur, &data);
-        (0..16).find(|j| !matches!(block[*j], lngap_contract::claim::Src::Data(_)) && self.blocks.get(j).map(|b| b.0) != Some(u32::from_be_bytes(expected[4 * j..4 * j + 4].try_into().unwrap())))
+        let bw = self.spec.hash.block_words();
+        let data: Vec<u32> = (0..bw).map(|j| self.blocks.get(&j).map(|b| b.0).unwrap_or(0)).collect();
+        let (_, expected) = ClaimSpec::compress_inputs(self.isolated(), cur, &data, self.spec.hash);
+        (0..bw).find(|j| !matches!(block[*j], lngap_contract::claim::Src::Data(_)) && self.blocks.get(j).map(|b| b.0) != Some(u32::from_be_bytes(expected[4 * j..4 * j + 4].try_into().unwrap())))
     }
     /// The isolated compression's committed block nibbles appended to re_cur's (the predicate space).
     pub fn pred_space(&self) -> Option<Vec<u8>> {
