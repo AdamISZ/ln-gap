@@ -169,6 +169,67 @@ impl Step {
     }
 }
 
+/// Which hash function a claim verifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HashKind {
+    /// SHA-256: 64 rounds, 8-word state, 16-word block, message schedule.
+    Sha256,
+    /// n4bit sponge: 20 rounds, 5-word (40-nibble) state, 3-word rate block,
+    /// no message schedule, no feed-forward.
+    N4Bit,
+}
+
+impl Default for HashKind {
+    fn default() -> Self {
+        HashKind::Sha256
+    }
+}
+
+impl HashKind {
+    /// D register size in words (the hash function's working state).
+    pub fn d_words(self) -> usize {
+        match self {
+            HashKind::Sha256 => 8,
+            HashKind::N4Bit => 5,
+        }
+    }
+    /// Block size in 32-bit-equivalent words.
+    pub fn block_words(self) -> usize {
+        match self {
+            HashKind::Sha256 => 16,
+            HashKind::N4Bit => 3, // 20 nibbles padded to 24 = 3 words
+        }
+    }
+    /// Rounds per compression.
+    pub fn n_rounds(self) -> u32 {
+        match self {
+            HashKind::Sha256 => 64,
+            HashKind::N4Bit => 20,
+        }
+    }
+    /// Inner bisection branching factor.
+    pub fn inner_k(self) -> u32 {
+        match self {
+            HashKind::Sha256 => 8,
+            HashKind::N4Bit => 2, // 20 rounds padded to 32, 5 inner rounds
+        }
+    }
+    /// Whether the hash has a message schedule (SHA-256 does, n4bit doesn't).
+    pub fn has_schedule(self) -> bool {
+        match self {
+            HashKind::Sha256 => true,
+            HashKind::N4Bit => false,
+        }
+    }
+    /// Whether the hash has a feed-forward addition (SHA-256's MD step).
+    pub fn has_feed_forward(self) -> bool {
+        match self {
+            HashKind::Sha256 => true,
+            HashKind::N4Bit => false,
+        }
+    }
+}
+
 /// The program a claim asserts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimSpec {
@@ -183,6 +244,22 @@ pub struct ClaimSpec {
     /// `n_words == 8` and compression-only steps with constant blocks).
     #[serde(default)]
     pub inner: bool,
+    /// Which hash function the compressions use.
+    #[serde(default)]
+    pub hash: HashKind,
+}
+
+impl Default for ClaimSpec {
+    fn default() -> Self {
+        ClaimSpec {
+            n_words: 0,
+            start: vec![],
+            steps: vec![],
+            k: 2,
+            inner: false,
+            hash: HashKind::Sha256,
+        }
+    }
 }
 
 /// Prover data: one `Vec<u32>` per compression step that has `Data` sources, in step order.
@@ -296,6 +373,38 @@ impl ClaimSpec {
     }
     pub fn rounds(&self) -> u32 {
         self.search().rounds()
+    }
+    /// D register size in words (hash-function's working state).
+    pub fn d_words(&self) -> usize {
+        self.hash.d_words()
+    }
+    /// D register size in nibbles.
+    pub fn d_nibbles(&self) -> usize {
+        8 * self.d_words()
+    }
+    /// Block size in nibbles.
+    pub fn block_nibbles(&self) -> usize {
+        8 * self.hash.block_words()
+    }
+    /// Inner bisection rounds (within one compression step).
+    pub fn inner_rounds(&self) -> u32 {
+        self.hash.n_rounds()
+    }
+    /// Inner bisection branching factor.
+    pub fn inner_k(&self) -> u32 {
+        self.hash.inner_k()
+    }
+    /// Inner search structure.
+    pub fn inner_search(&self) -> Search {
+        Search { n: self.inner_rounds(), k: self.inner_k() }
+    }
+    /// Whether the hash has a message schedule.
+    pub fn has_schedule(&self) -> bool {
+        self.hash.has_schedule()
+    }
+    /// Whether the hash has a feed-forward addition.
+    pub fn has_feed_forward(&self) -> bool {
+        self.hash.has_feed_forward()
     }
     pub fn index_bits(&self) -> usize {
         self.search().index_bits()

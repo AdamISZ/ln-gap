@@ -23,6 +23,7 @@ use lngap_channel::Role;
 use lngap_factchain::{ChainClient, Miner};
 use lngap_lamport::bits_to_uint;
 use lngap_names::registry::{Event, N};
+use lngap_names::ServedData;
 use lngap_names_fc::{
     registry_programs, AnchorPayFc, AnchorPayFcParams, FcHub, FcPromise, NRegFc, NRegFcParams,
     NamesUser,
@@ -102,9 +103,10 @@ impl FcWorld {
 
         // Channels
         let store_confirmed = Arc::new(Mutex::new(HashSet::new()));
-        let reg = registry_programs();
+        let store = ServedData::default();
+        let reg = registry_programs(store.clone());
         let alice = Harness::with_regtest(rt.clone(), &format!("{label}/alice"), reg)?;
-        let bob = Harness::with_regtest(rt.clone(), &format!("{label}/bob"), registry_programs())?;
+        let bob = Harness::with_regtest(rt.clone(), &format!("{label}/bob"), registry_programs(store.clone()))?;
 
         // Fact-chain clients (all start from genesis)
         let alice_fc = ChainClient::from_checkpoint(fc_genesis_height, fc_genesis_digest);
@@ -309,7 +311,7 @@ impl FcWorld {
             checkpoint: p.checkpoint,
             checkpoint_height: p.checkpoint_height,
             h_max: p.h_max,
-        })
+        }, ServedData::default())
         .name()
         .to_string()
     }

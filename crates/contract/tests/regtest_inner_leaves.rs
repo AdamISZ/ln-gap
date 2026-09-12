@@ -102,7 +102,7 @@ fn spec() -> ClaimSpec {
         .with_copies(vec![Copy { src: nn + 72, dst: 64, n: 56 }]);
     let c2 = Step::compress("hdr2", Init::D, block_mixed).with_preds(vec![Pred::EqConst { off: nn + 16, nibbles: state_nibbles(&[0x207f_ffff]) }]).with_copies(vec![Copy { src: nn, dst: 120, n: 8 }]);
     let target_check = Step::check("target", vec![Pred::LeTarget { target }, Pred::EqNibbles { a: 64, b: 128, n: 8 }]);
-    ClaimSpec { n_words: N, start, steps: vec![c1, c2, target_check, Step::nop()], k: 2, inner: true }
+    ClaimSpec { n_words: N, start, steps: vec![c1, c2, target_check, Step::nop()], k: 2, inner: true, ..Default::default() }
 }
 
 #[test]

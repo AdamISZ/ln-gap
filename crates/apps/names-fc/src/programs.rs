@@ -11,6 +11,8 @@
 use anyhow::{ensure, Result};
 use lngap_contract::prelude::*;
 use lngap_contract::{Program, ProgramRegistry};
+use lngap_factchain::claim::FactChainShape;
+use lngap_names::ServedData;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -33,6 +35,7 @@ pub struct NRegFcParams {
 pub struct NRegFc {
     pub params: NRegFcParams,
     name: String,
+    store: ServedData,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,16 +50,16 @@ impl NRegFc {
     pub const PREFIX: &'static str = "nreg-fc";
     pub const BOND_TO_HUB: u8 = 0;
     pub const BOND_TO_USER: u8 = 1;
-    pub fn new(params: NRegFcParams) -> NRegFc {
+    pub fn new(params: NRegFcParams, store: ServedData) -> NRegFc {
         let name = format!(
             "{}:{}",
             Self::PREFIX,
             serde_json::to_string(&params).expect("serializable")
         );
-        NRegFc { params, name }
+        NRegFc { params, name, store }
     }
-    pub fn from_str(params: &str) -> Result<NRegFc> {
-        Ok(NRegFc::new(serde_json::from_str(params)?))
+    pub fn from_str(params: &str, store: ServedData) -> Result<NRegFc> {
+        Ok(NRegFc::new(serde_json::from_str(params)?, store))
     }
 }
 
@@ -143,12 +146,27 @@ impl Contract for NRegFc {
             MoveExtras::default()
         }
     }
-    /// Stage 1: no ClaimSpec. The proof is verified natively off-chain.
-    fn claim(&self, _from: &[bool], _depth: u32) -> Option<lngap_contract::claim::ClaimSpec> {
-        None
+    /// Stage 2: return the ClaimSpec for the fact-chain header verification.
+    /// State Claimed (1): hub proves inclusion via header chain.
+    /// State Refuted (2): user refutes with a heavier chain (n_headers + 1).
+    fn claim(&self, from: &[bool], depth: u32) -> Option<lngap_contract::claim::ClaimSpec> {
+        let shape = FactChainShape {
+            checkpoint: self.params.checkpoint,
+            target: lngap_n4bit::target_from_difficulty(lngap_factchain::DIFFICULTY_BITS),
+            n_headers: (self.params.h_max - self.params.checkpoint_height) as usize,
+        };
+        match bits_to_uint(from) + depth - 1 {
+            1 => Some(shape.spec()),
+            2 => Some(shape.refutation().spec()),
+            _ => None,
+        }
     }
-    fn claim_data(&self, _from: &[bool], _depth: u32) -> lngap_contract::claim::ClaimData {
-        vec![]
+    fn claim_data(&self, from: &[bool], depth: u32) -> lngap_contract::claim::ClaimData {
+        match bits_to_uint(from) + depth - 1 {
+            1 => self.store.get(&format!("{}/incl", self.params.req_id)).unwrap_or_default(),
+            2 => self.store.get(&format!("{}/refute", self.params.req_id)).unwrap_or_default(),
+            _ => vec![],
+        }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
         // Same as nreg: every move advances state by 1; code is BondToHub iff new state is Refuted (2)
@@ -343,13 +361,15 @@ impl Contract for AnchorPayFc {
 }
 
 /// Registry with both factories.
-pub fn registry_programs() -> ProgramRegistry {
+pub fn registry_programs(store: ServedData) -> ProgramRegistry {
     let mut r = ProgramRegistry::new();
+    let store2 = store.clone();
     r.register_factory(NRegFc::PREFIX, move |p| {
-        Ok(Arc::new(NRegFc::from_str(p)?) as Arc<dyn Program>)
+        Ok(Arc::new(NRegFc::from_str(p, store.clone())?) as Arc<dyn Program>)
     });
     r.register_factory(AnchorPayFc::PREFIX, move |p| {
         Ok(Arc::new(AnchorPayFc::from_str(p)?) as Arc<dyn Program>)
     });
+    let _ = store2;
     r
 }

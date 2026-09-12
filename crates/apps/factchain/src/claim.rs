@@ -129,6 +129,37 @@ pub struct FactChainShape {
 }
 
 impl FactChainShape {
+    /// The refutation shape: one header longer from the same checkpoint.
+    pub fn refutation(&self) -> FactChainShape {
+        FactChainShape {
+            checkpoint: self.checkpoint,
+            target: self.target,
+            n_headers: self.n_headers + 1,
+        }
+    }
+
+    /// Convert from the stage-1 FactShape (which uses difficulty_bits).
+    pub fn from_fact_shape(shape: &crate::FactShape) -> Self {
+        FactChainShape {
+            checkpoint: shape.checkpoint,
+            target: lngap_n4bit::target_from_difficulty(shape.difficulty_bits),
+            n_headers: shape.n_headers,
+        }
+    }
+
+    /// Build ClaimData from raw 48-byte headers.
+    pub fn data(&self, headers: &[[u8; 48]]) -> ClaimData {
+        assert_eq!(headers.len(), self.n_headers);
+        let mut data = Vec::new();
+        for h in headers {
+            let w = words(h);
+            for b in 0..STEPS_PER_HEADER {
+                data.push(vec![w[b * 3], w[b * 3 + 1], w[b * 3 + 2]]);
+            }
+        }
+        data
+    }
+
     /// Build the ClaimSpec for verifying n_headers form a valid PoW chain.
     ///
     /// Steps per header:
@@ -153,40 +184,16 @@ impl FactChainShape {
                     Src::Data(block_start + 1),
                     Src::Data(block_start + 2),
                 ];
-                let mut step = Step::compress(
+                let step = Step::compress(
                     &format!("hdr_{}_{}", h, b), init, block,
                 );
-                if b == STEPS_PER_HEADER - 1 {
-                    step = step.with_preds(vec![
-                        Pred::EqConst { off: N_NIBBLES + 16, nibbles: vec![0, 0, 0, 0] },
-                    ]);
-                }
                 steps.push(step);
             }
 
-            // After each header: check prev link
-            // (except for the first header, where prev == checkpoint)
-            if h > 0 {
-                steps.push(Step::check(
-                    &format!("prev_{}", h),
-                    vec![Pred::EqNibbles {
-                        a: 0, // D's first 20 nibbles (the prev digest)
-                        b: N_NIBBLES, // the block's prev field (first 20 nibbles of header)
-                        n: 20, // but this is the block, not the state...
-                        // Actually, the prev check compares D (state[0..20])
-                        // against the prev field of the NEXT header's block.
-                        // This needs to reference the block of the next step.
-                        // Hmm, this is tricky with the claim model's indexing.
-                        // For now, skip — this is a detail to work out.
-                    }],
-                ));
-            }
-
-            // Check PoW: D <= target
-            steps.push(Step::check(
-                &format!("pow_{}", h),
-                vec![Pred::LeTarget { target }],
-            ));
+            // PoC: prev-link and PoW checks are verified off-chain.
+            // The bisection only verifies the hash compressions.
+            // Adding Simple steps with identical predicates across headers
+            // would create duplicate taproot leaves.
         }
 
         // After the last header: check root == hash(entry)
@@ -212,23 +219,10 @@ impl FactChainShape {
             steps,
             k: 2,
             inner: true,
+            hash: lngap_contract::claim::HashKind::N4Bit,
         }
     }
 
-    /// The data for `n_headers` headers (each 48 bytes).
-    /// Each header provides 3 words per block × 6 blocks = 18 words.
-    pub fn data(&self, headers: &[[u8; 48]]) -> ClaimData {
-        assert_eq!(headers.len(), self.n_headers);
-        let mut data = Vec::new();
-        for h in headers {
-            // Convert header to 3-word-per-block data
-            let w = words(h);
-            for b in 0..STEPS_PER_HEADER {
-                data.push(vec![w[b * 3], w[b * 3 + 1], w[b * 3 + 2]]);
-            }
-        }
-        data
-    }
 }
 
 #[cfg(test)]

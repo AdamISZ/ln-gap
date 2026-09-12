@@ -24,7 +24,7 @@ use bitcoin::Amount;
 use lngap_channel::Role;
 use serde::{Deserialize, Serialize};
 
-pub use claim::{ChallengerKeys, ClaimData, ClaimKeys, ClaimSpec};
+pub use claim::{ChallengerKeys, ClaimData, ClaimKeys, ClaimSpec, HashKind};
 pub use instance::{ContractInstance, DepthKeys, InstanceSpec};
 pub use leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx, PriorState};
 pub use registry::ProgramRegistry;

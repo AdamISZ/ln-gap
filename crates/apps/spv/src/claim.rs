@@ -116,7 +116,7 @@ impl HeaderShape {
             header_steps(self.nbits, target, &mut steps);
         }
         pad_to_power(&mut steps, 2);
-        ClaimSpec { n_words: N_WORDS, start: start_state(&self.checkpoint), steps, k: 2, inner: true }
+        ClaimSpec { n_words: N_WORDS, start: start_state(&self.checkpoint), steps, k: 2, inner: true, ..Default::default() }
     }
     /// The data for `headers` (one per header step group).
     pub fn data(&self, headers: &[RawHeader]) -> ClaimData {
@@ -227,7 +227,7 @@ impl AnchorShape {
         }
         steps.push(Step::check("ledger_root", vec![Pred::EqNibbles { a: D, b: R, n: 64 }]));
         pad_to_power(&mut steps, 2);
-        ClaimSpec { n_words: N_WORDS, start: start_state(&self.chain.checkpoint), steps, k: 2, inner: true }
+        ClaimSpec { n_words: N_WORDS, start: start_state(&self.chain.checkpoint), steps, k: 2, inner: true, ..Default::default() }
     }
     pub fn data(&self, d: &AnchorData) -> ClaimData {
         assert_eq!(d.headers.len(), self.chain.n_headers);
