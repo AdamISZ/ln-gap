@@ -14,7 +14,7 @@ use bitcoin::{OutPoint, Transaction, TxOut};
 use lngap_btc::taptree::TapTree;
 use lngap_btc::witness::witness_args_consumption_order;
 use lngap_channel::{CommitCtx, Role};
-use lngap_contract::claim::{state_from_msg, step_sources, ClaimData, ClaimKeys, ClaimSpec, Init, Search, StateSource, Step};
+use lngap_contract::claim::{state_from_msg, step_sources, ClaimData, ClaimKeys, ClaimSpec, HashKind, Init, Search, StateSource, Step};
 use lngap_contract::inner::{self, round_sources, round_witness, sched_inputs, sched_witness, InnerSource};
 use lngap_contract::ChallengerKeys;
 use lngap_lamport::winternitz::{WotsPublic, WotsSig};
@@ -41,6 +41,8 @@ pub enum Stage {
     WaitInnerQ(u32),
     /// `T`: the challenger may disprove the isolated round; else the prover times out.
     RoundTerminal,
+    /// Flat inner: the challenger disproves the compression in one leaf (n4bit flat_inner).
+    FlatTerminal,
     /// Check chain: waiting for the prover's re-commitments.
     CheckReCur,
     CheckReNext,
@@ -77,13 +79,13 @@ pub struct DisputeLive {
     /// Prover's schedule words seen on-chain: index → (word, signature).
     pub sched: HashMap<u32, (u32, WotsSig)>,
     /// Prover's inner states seen on-chain: round index (1..64) → (state, signature).
-    pub inner_known: HashMap<u32, ([u32; 8], WotsSig)>,
+    pub inner_known: HashMap<u32, (Vec<u32>, WotsSig)>,
     pub inner_path: Vec<u32>,
     /// This party's own schedule and round states for the isolated
     /// compression (from the committed block words and init); set once the
     /// block words are known.
-    pub my_sched: Option<[u32; 64]>,
-    pub my_inner: Option<Vec<[u32; 8]>>,
+    pub my_sched: Option<Vec<u32>>,
+    pub my_inner: Option<Vec<Vec<u32>>>,
 }
 
 impl DisputeLive {
@@ -103,6 +105,7 @@ impl DisputeLive {
             Stage::WaitInnerP(r) => inner_off + 2 * (r as usize - 1),
             Stage::WaitInnerQ(r) => inner_off + 2 * (r as usize - 1) + 1,
             Stage::RoundTerminal => inner_off + 2 * inner_rounds,
+            Stage::FlatTerminal => inner_off + 2 * inner_rounds,
             Stage::CheckReCur => inner_off + 2 * inner_rounds + 1,
             Stage::CheckReNext => inner_off + 2 * inner_rounds + 2,
             Stage::CheckTerminal => inner_off + 2 * inner_rounds + 3,
@@ -113,7 +116,7 @@ impl DisputeLive {
     pub fn waiting_for(&self) -> Option<Role> {
         match self.stage {
             Stage::WaitP(_) | Stage::ReCur | Stage::ReNext | Stage::WaitSched | Stage::WaitInnerP(_) | Stage::CheckReCur | Stage::CheckReNext => Some(self.prover),
-            Stage::WaitQ(_) | Stage::Terminal | Stage::WaitInnerQ(_) | Stage::RoundTerminal | Stage::CheckTerminal => Some(self.prover.other()),
+            Stage::WaitQ(_) | Stage::Terminal | Stage::WaitInnerQ(_) | Stage::RoundTerminal | Stage::FlatTerminal | Stage::CheckTerminal => Some(self.prover.other()),
             Stage::Resolved => None,
         }
     }
@@ -189,36 +192,58 @@ impl DisputeLive {
         }
     }
     /// The committed init of the isolated compression (IV or `D` of re_cur).
-    pub fn committed_init(&self) -> Option<[u32; 8]> {
+    pub fn committed_init(&self) -> Option<Vec<u32>> {
         match self.init_kind() {
-            Init::Iv => Some(lngap_contract::claim::IV),
-            Init::D => self.re_cur.as_ref().map(|c| c.0[..8].try_into().unwrap()),
+            Init::Iv => match self.spec.hash {
+                HashKind::Sha256 => Some(lngap_contract::claim::IV.to_vec()),
+                HashKind::N4Bit => Some(vec![0u32; self.spec.d_words()]),
+            },
+            Init::D => self.re_cur.as_ref().map(|c| c.0[..self.spec.d_words()].to_vec()),
         }
     }
-    /// The committed block (from the 16 block-word commitments).
-    pub fn committed_block(&self) -> Option<[u8; 64]> {
-        let mut b = [0u8; 64];
-        for j in 0..16 {
+    /// The committed block (from the block-word commitments).
+    pub fn committed_block(&self) -> Option<Vec<u8>> {
+        let bw = self.spec.hash.block_words();
+        let mut b = vec![0u8; 4 * bw];
+        for j in 0..bw {
             let w = self.blocks.get(&j)?.0;
             b[4 * j..4 * j + 4].copy_from_slice(&w.to_be_bytes());
         }
         Some(b)
     }
     /// Recompute the inner chain from the committed init and block words.
-    pub fn compute_inner(&mut self, cheat: Option<&dyn Fn(u32, &[u32; 8]) -> [u32; 8]>) -> Result<()> {
+    pub fn compute_inner(&mut self, cheat: Option<&dyn Fn(u32, &[u32]) -> Vec<u32>>) -> Result<()> {
         let init = self.committed_init().ok_or_else(|| anyhow!("no re-committed cur"))?;
         let block = self.committed_block().ok_or_else(|| anyhow!("no committed block"))?;
-        let sched = inner::schedule(&block);
-        self.my_sched = Some(sched);
-        self.my_inner = Some(inner::round_states(&init, &sched, cheat));
+        match self.spec.hash {
+            HashKind::Sha256 => {
+                let init_a: [u32; 8] = init.as_slice().try_into().unwrap();
+                let block_a: [u8; 64] = block.as_slice().try_into().unwrap();
+                let sched = inner::schedule(&block_a);
+                self.my_sched = Some(sched.to_vec());
+                let states = if let Some(c) = cheat {
+                    let adapt = |r: u32, s: &[u32; 8]| -> [u32; 8] { c(r, s).as_slice().try_into().unwrap() };
+                    inner::round_states(&init_a, &sched, Some(&adapt))
+                } else {
+                    inner::round_states(&init_a, &sched, None)
+                };
+                self.my_inner = Some(states.into_iter().map(|s| s.to_vec()).collect());
+            }
+            HashKind::N4Bit => {
+                let (_, _, step) = self.isolated_step();
+                let states = n4bit_round_states(&init, &block, step as usize, cheat);
+                self.my_sched = Some(vec![]);
+                self.my_inner = Some(states);
+            }
+        }
         Ok(())
     }
-    /// The prover's committed (or constant) value of an inner state, `0 ↔ init`, `64 ↔ D of re_next`.
-    pub fn inner_state(&self, i: u32) -> Option<[u32; 8]> {
+    /// The prover's committed (or constant) value of an inner state, `0 ↔ init`, `n ↔ D of re_next`.
+    pub fn inner_state(&self, i: u32) -> Option<Vec<u32>> {
         match i {
             0 => self.committed_init(),
-            64 => self.re_next.as_ref().map(|n| n.0[..8].try_into().unwrap()),
-            _ => self.inner_known.get(&i).map(|k| k.0),
+            n if n == self.spec.inner_search().n => self.re_next.as_ref().map(|n| n.0[..self.spec.d_words()].to_vec()),
+            _ => self.inner_known.get(&i).map(|k| k.0.clone()),
         }
     }
     /// The signature behind an inner state (None for a constant init).
@@ -228,7 +253,7 @@ impl DisputeLive {
                 Init::Iv => None,
                 Init::D => Some(self.re_cur.as_ref().ok_or_else(|| anyhow!("no re_cur"))?.1.clone()),
             },
-            64 => Some(self.re_next.as_ref().ok_or_else(|| anyhow!("no re_next"))?.1.clone()),
+            n if n == self.spec.inner_search().n => Some(self.re_next.as_ref().ok_or_else(|| anyhow!("no re_next"))?.1.clone()),
             _ => Some(self.inner_known.get(&i).ok_or_else(|| anyhow!("inner state {i} unknown"))?.1.clone()),
         })
     }
@@ -293,7 +318,7 @@ impl DisputeLive {
     pub fn state_and_block_args(&self, which_next: bool) -> Result<Vec<Vec<u8>>> {
         let st = if which_next { &self.re_next } else { &self.re_cur };
         let mut v = Vec::new();
-        for j in (0..16).rev() {
+        for j in (0..self.spec.hash.block_words()).rev() {
             v.extend(self.blocks.get(&j).ok_or_else(|| anyhow!("no block word {j}"))?.1.consumption_order());
         }
         v.extend(st.as_ref().ok_or_else(|| anyhow!("no re-commitment"))?.1.consumption_order());
@@ -316,14 +341,14 @@ impl DisputeLive {
         None
     }
     pub fn sched_word(&self, i: u32) -> Option<u32> {
-        if i < 16 {
+        if i < self.spec.hash.block_words() as u32 {
             self.blocks.get(&(i as usize)).map(|b| b.0)
         } else {
             self.sched.get(&i).map(|s| s.0)
         }
     }
     pub fn word_sig(&self, i: u32) -> Result<WotsSig> {
-        Ok(if i < 16 {
+        Ok(if i < self.spec.hash.block_words() as u32 {
             self.blocks.get(&(i as usize)).ok_or_else(|| anyhow!("no block word {i}"))?.1.clone()
         } else {
             self.sched.get(&i).ok_or_else(|| anyhow!("no schedule word {i}"))?.1.clone()
@@ -331,18 +356,35 @@ impl DisputeLive {
     }
     /// Recompute the isolated round `r` natively from the prover's commitments:
     /// `(expected s_{r+1}, claimed s_{r+1})`.
-    pub fn check_round(&self, r: u32) -> Result<([u32; 8], [u32; 8])> {
-        let s_in = self.inner_state(r).ok_or_else(|| anyhow!("no inner state {r}"))?;
-        let w = self.sched_word(r).ok_or_else(|| anyhow!("no schedule word {r}"))?;
-        let mut expect = round_native(&s_in, w, K[r as usize]);
-        if r == 63 {
-            let init = self.committed_init().ok_or_else(|| anyhow!("no init"))?;
-            for i in 0..8 {
-                expect[i] = expect[i].wrapping_add(init[i]);
+    pub fn check_round(&self, r: u32) -> Result<(Vec<u32>, Vec<u32>)> {
+        match self.spec.hash {
+            HashKind::Sha256 => {
+                let s_in = self.inner_state(r).ok_or_else(|| anyhow!("no inner state {r}"))?;
+                let w = self.sched_word(r).ok_or_else(|| anyhow!("no schedule word {r}"))?;
+                let s_in_a: [u32; 8] = s_in.as_slice().try_into().unwrap();
+                let mut expect = round_native(&s_in_a, w, K[r as usize]);
+                if self.spec.has_feed_forward() && r == self.spec.hash.n_rounds() - 1 {
+                    let init = self.committed_init().ok_or_else(|| anyhow!("no init"))?;
+                    let init_a: [u32; 8] = init.as_slice().try_into().unwrap();
+                    for i in 0..8 {
+                        expect[i] = expect[i].wrapping_add(init_a[i]);
+                    }
+                }
+                let claimed = self.inner_state(r + 1).ok_or_else(|| anyhow!("no inner state {}", r + 1))?;
+                Ok((expect.to_vec(), claimed))
+            }
+            HashKind::N4Bit => {
+                let s_in = self.inner_state(r).ok_or_else(|| anyhow!("no inner state {r}"))?;
+                let s_nibbles = lngap_contract::claim::state_nibbles(&s_in);
+                let mut st: [u8; lngap_n4bit::STATE_NIBBLES] = s_nibbles.as_slice().try_into().unwrap();
+                let (_, _, step) = self.isolated_step();
+                let round_counter = step as usize * lngap_n4bit::ROUNDS;
+                lngap_n4bit::spn_round(&mut st, round_counter + r as usize);
+                let expect = lngap_contract::claim::nibbles_state(&st);
+                let claimed = self.inner_state(r + 1).ok_or_else(|| anyhow!("no inner state {}", r + 1))?;
+                Ok((expect, claimed))
             }
         }
-        let claimed = self.inner_state(r + 1).ok_or_else(|| anyhow!("no inner state {}", r + 1))?;
-        Ok((expect, claimed))
     }
     /// Witness args (after Q's signature) and leaf name for disproving round `r`.
     pub fn round_disproof(&self, ctx: &CommitCtx, keys: &ClaimKeys, r: u32) -> Result<(String, Vec<Vec<u8>>)> {
@@ -368,7 +410,7 @@ impl DisputeLive {
             InnerSource::Init(Init::Iv) => None,
             _ => self.inner_sig(r)?,
         };
-        let init_sig = if r == 63 { self.inner_sig(0)? } else { None };
+        let init_sig = if self.spec.has_feed_forward() && r == self.spec.hash.n_rounds() - 1 { self.inner_sig(0)? } else { None };
         let out_sig = self.inner_sig(r + 1)?.expect("the output is always committed");
         Ok((name, round_witness(&w_sig, in_sig.as_ref(), init_sig.as_ref(), &out_sig)))
     }
@@ -472,12 +514,36 @@ pub fn parse_p_sched(tx: &Transaction, keys: &ClaimKeys) -> Result<Vec<(u32, u32
 }
 
 /// Parse the prover's `p_inner_r` witness into `(round index, state, sig)` triples.
-pub fn parse_p_inner(tx: &Transaction, keys: &ClaimKeys, inner_path: &[u32], r: u32, search: Search) -> Result<Vec<(u32, [u32; 8], WotsSig)>> {
+pub fn parse_p_inner(tx: &Transaction, keys: &ClaimKeys, inner_path: &[u32], r: u32, search: Search, n_words: usize) -> Result<Vec<(u32, Vec<u32>, WotsSig)>> {
     let args = witness_args_consumption_order(&tx.input[0].witness);
     let ik = keys.inner.as_ref().ok_or_else(|| anyhow!("no inner keys"))?;
     let list = parse_wots_list(&args[2..], &ik.states[r as usize - 1], "p_inner")?;
     let points = search.round_points(inner_path);
-    Ok(list.into_iter().zip(points).map(|((msg, sig), i)| (i, state8(&msg), sig)).collect())
+    Ok(list.into_iter().zip(points).map(|((msg, sig), i)| (i, state_from_msg(&msg)[..n_words].to_vec(), sig)).collect())
+}
+
+/// Recompute the n4bit inner chain from init and block: absorbs the block
+/// into the state's rate, then runs all SPN rounds, recording each state.
+fn n4bit_round_states(init: &[u32], block: &[u8], step_idx: usize, cheat: Option<&dyn Fn(u32, &[u32]) -> Vec<u32>>) -> Vec<Vec<u32>> {
+    let init_nibbles = lngap_contract::claim::state_nibbles(init);
+    let mut st: [u8; lngap_n4bit::STATE_NIBBLES] = init_nibbles.as_slice().try_into().unwrap();
+    // Absorb block: ADD block nibbles to rate
+    let bn = lngap_contract::script_hash::nibbles(block);
+    let mut rate = [0u8; lngap_n4bit::RATE_NIBBLES];
+    let n = bn.len().min(lngap_n4bit::RATE_NIBBLES);
+    rate[..n].copy_from_slice(&bn[..n]);
+    for i in 0..lngap_n4bit::RATE_NIBBLES {
+        st[i] = (st[i] + rate[i]) % 16;
+    }
+    let mut v: Vec<Vec<u32>> = vec![lngap_contract::claim::nibbles_state(&st)];
+    let round_counter = step_idx * lngap_n4bit::ROUNDS;
+    for r in 0..lngap_n4bit::ROUNDS {
+        lngap_n4bit::spn_round(&mut st, round_counter + r);
+        let s = lngap_contract::claim::nibbles_state(&st);
+        let s = if let Some(c) = cheat { c(r as u32 + 1, &s) } else { s };
+        v.push(s);
+    }
+    v
 }
 
 /// The flat terminal leaf's witness args (after Q's signature).

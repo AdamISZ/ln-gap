@@ -84,7 +84,7 @@ pub struct Faults {
     pub cheat_schedule: Option<Arc<dyn Fn(u32, u32) -> u32 + Send + Sync>>,
     /// Alter inner round states (round index → state); the alteration
     /// propagates through the rest of the prover's "computation".
-    pub cheat_inner: Option<Arc<dyn Fn(u32, &[u32; 8]) -> [u32; 8] + Send + Sync>>,
+    pub cheat_inner: Option<Arc<dyn Fn(u32, &[u32]) -> Vec<u32> + Send + Sync>>,
     /// Re-commit this state instead of the committed one (a lying re-commitment).
     pub cheat_recommit: Option<Arc<dyn Fn(bool, &[u32]) -> Vec<u32> + Send + Sync>>,
 }
@@ -1136,12 +1136,14 @@ impl Party {
                 let next = dispute::parse_re_next(&tx, &ckeys)?;
                 let dd = self.live[idx].dispute.as_mut().unwrap();
                 dd.re_next = Some(next);
-                next_stage = if n == "p_re_next" { Stage::WaitSched } else { Stage::CheckTerminal };
+                next_stage = if n == "p_re_next" {
+                    if disp.spec.flat_inner { Stage::FlatTerminal } else { Stage::WaitSched }
+                } else { Stage::CheckTerminal };
                 self.say(format!("contract {id}: prover re-committed the step's output state"));
                 if n == "p_re_next" {
                     // both parties now know the committed init and block: compute the inner chain
                     let cheat = if disp.prover == self.role { self.faults.cheat_inner.clone() } else { None };
-                    self.live[idx].dispute.as_mut().unwrap().compute_inner(cheat.as_ref().map(|c| c.as_ref() as &dyn Fn(u32, &[u32; 8]) -> [u32; 8]))?;
+                    self.live[idx].dispute.as_mut().unwrap().compute_inner(cheat.as_ref().map(|c| c.as_ref() as &dyn Fn(u32, &[u32]) -> Vec<u32>))?;
                 }
             }
             "p_sched" => {
@@ -1155,7 +1157,7 @@ impl Party {
             }
             n if n.starts_with("p_inner_") => {
                 let r: u32 = n[8..].parse()?;
-                let commits = parse_p_inner(&tx, &ckeys, &disp.inner_path, r, disp.spec.inner_search())?;
+                let commits = parse_p_inner(&tx, &ckeys, &disp.inner_path, r, disp.spec.inner_search(), disp.spec.n_words)?;
                 let dd = self.live[idx].dispute.as_mut().unwrap();
                 let points: Vec<u32> = commits.iter().map(|c| c.0).collect();
                 for (i, st, sig) in commits {
@@ -1341,7 +1343,7 @@ impl Party {
                 let mut sigs = Vec::new();
                 for (t, i) in points.iter().enumerate() {
                     let label = lngap_contract::inner::inner_state_label(id, ks, d, r, t as u32);
-                    sigs.push(self.keystore.sign_wots(&label, &lngap_contract::script_hash::state_bytes(&mine[*i as usize]))?);
+                    sigs.push(self.keystore.sign_wots(&label, &lngap_contract::script_hash::state_bytes_vec(&mine[*i as usize]))?);
                 }
                 self.say(format!("contract {id}: answering inner round {r} with states after rounds {points:?}"));
                 let extra = lngap_contract::claim::p_round_witness(&sigs);
@@ -1386,6 +1388,34 @@ impl Party {
                 self.say(format!("contract {id}: inner round {r}: first bad segment is {j}"));
                 self.live[idx].dispute.as_mut().unwrap().responded = true;
                 self.broadcast_dispute_tx(&l, &disp, &format!("q_inner_{r}"), &lngap_contract::claim::q_round_witness(&reveal))
+            }
+            Stage::FlatTerminal => {
+                // Flat inner (n4bit): recompute the isolated compression natively
+                // from the committed init and block words; if it differs from
+                // re_next, disprove with the flat terminal leaf.
+                let (_, _, step) = disp.isolated_step();
+                let cur = disp.re_cur.as_ref().ok_or_else(|| anyhow!("no re_cur"))?.0.clone();
+                let claimed_next = disp.re_next.as_ref().ok_or_else(|| anyhow!("no re_next"))?.0.clone();
+                let bw = disp.spec.hash.block_words();
+                let data: Vec<u32> = (0..bw).map(|j| disp.blocks.get(&j).map(|b| b.0).unwrap_or(0)).collect();
+                let (expect, _) = disp.spec.apply(step as usize, disp.isolated(), &cur, &data);
+                let dw = disp.spec.d_words();
+                if expect[..dw] == claimed_next[..dw] {
+                    self.say(format!("contract {id}: compression is correct; nothing to disprove (the prover will time me out)"));
+                    self.live[idx].dispute.as_mut().unwrap().responded = true;
+                    return Ok(());
+                }
+                let n = disp.spec.inner_search().n;
+                let out_sig = disp.inner_sig(n)?.expect("output always committed");
+                let in_sig = disp.inner_sig(0)?;
+                let block_sigs = (0..bw as u32).map(|j| disp.word_sig(j)).collect::<Result<Vec<_>>>()?;
+                let args = lngap_contract::inner::flat_round_witness(&out_sig, in_sig.as_ref(), &block_sigs);
+                let leaf_name = disp.tree.leaves().iter()
+                    .find(|l| l.name.starts_with("flat_"))
+                    .map(|l| l.name.clone())
+                    .ok_or_else(|| anyhow!("no flat terminal leaf in tree"))?;
+                self.say(format!("contract {id}: flat compression step {step} is wrong"));
+                self.broadcast_disproof(idx, &disp, &leaf_name, args)
             }
             Stage::RoundTerminal => {
                 let (lo, len) = disp.spec.inner_search().segment(&disp.inner_path);

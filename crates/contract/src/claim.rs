@@ -247,6 +247,11 @@ pub struct ClaimSpec {
     /// Which hash function the compressions use.
     #[serde(default)]
     pub hash: HashKind,
+    /// Skip inner round bisection: after re-committing input/output/block,
+    /// a single flat terminal leaf recomputes all rounds. Only valid when
+    /// the round leaf is small enough to fit in one transaction (n4bit).
+    #[serde(default)]
+    pub flat_inner: bool,
 }
 
 impl Default for ClaimSpec {
@@ -258,6 +263,7 @@ impl Default for ClaimSpec {
             k: 2,
             inner: false,
             hash: HashKind::Sha256,
+            flat_inner: false,
         }
     }
 }
@@ -399,6 +405,9 @@ impl ClaimSpec {
     }
     /// Inner search structure.
     pub fn inner_search(&self) -> Search {
+        if self.flat_inner {
+            return Search { n: 1, k: 1 };
+        }
         let n = self.inner_rounds();
         let k = self.inner_k();
         // Pad n to the next power of k so the bisection is well-defined.

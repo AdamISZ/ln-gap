@@ -227,6 +227,7 @@ impl FactChainShape {
             k: 2,
             inner: true,
             hash: lngap_contract::claim::HashKind::N4Bit,
+            flat_inner: true,
         }
     }
 

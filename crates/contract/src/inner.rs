@@ -36,7 +36,7 @@ use lngap_script32::sha::{add_states, differs_and_finish, round_body, round_nati
 use lngap_script32::Stack;
 use serde::{Deserialize, Serialize};
 
-use crate::claim::{cur_sources, load_source, next_sources, park, state_nibbles, timeout_leaf, unpark, wots_verify_drop, ChallengerKeys, ClaimKeys, ClaimSpec, HashKind, Init, Search, Src, Stage, StateSource, Step, IV};
+use crate::claim::{all_paths, cur_sources, load_source, next_sources, park, state_nibbles, step_sources, timeout_leaf, unpark, wots_verify_drop, ChallengerKeys, ClaimKeys, ClaimSpec, HashKind, Init, Search, Src, Stage, StateSource, Step, IV};
 use crate::instance::key_label;
 use crate::script_hash::{nibbles, push_scriptnum};
 
@@ -608,23 +608,30 @@ pub fn compress_chain(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, ck: &Chal
     trees.push(wait_re_next_tree(ctx, prover, keys, true)?);
     leaves.push("p_re_next".into());
     whats.push(format!("{prover} re-commits the step's output state"));
-    // S_1: schedule (only if the hash has a schedule)
-    if has_sched {
-        trees.push(wait_sched_tree(ctx, prover, keys)?);
-        leaves.push("p_sched".into());
-        whats.push(format!("{prover} publishes the schedule words"));
+    if spec.flat_inner {
+        // Flat inner: skip schedule + inner rounds, go directly to flat terminal
+        trees.push(flat_terminal_tree(ctx, prover, keys, spec)?);
+        leaves.push("flat_terminal".into());
+        whats.push(format!("{} disproves the compression in one leaf", q));
+    } else {
+        // S_1: schedule (only if the hash has a schedule)
+        if has_sched {
+            trees.push(wait_sched_tree(ctx, prover, keys)?);
+            leaves.push("p_sched".into());
+            whats.push(format!("{prover} publishes the schedule words"));
+        }
+        // Inner bisection rounds
+        for r in 1..=inner_rounds {
+            trees.push(wait_inner_p_tree(ctx, prover, keys, r)?);
+            leaves.push(format!("p_inner_{r}"));
+            whats.push(format!("{prover} commits inner round {r} states"));
+            trees.push(wait_inner_q_tree(ctx, prover, keys, ck, spec, r)?);
+            leaves.push(format!("q_inner_{r}"));
+            whats.push(format!("{q} picks a segment in inner round {r}"));
+        }
+        // T: terminal
+        trees.push(round_terminal_tree(ctx, prover, keys, spec)?);
     }
-    // Inner bisection rounds
-    for r in 1..=inner_rounds {
-        trees.push(wait_inner_p_tree(ctx, prover, keys, r)?);
-        leaves.push(format!("p_inner_{r}"));
-        whats.push(format!("{prover} commits inner round {r} states"));
-        trees.push(wait_inner_q_tree(ctx, prover, keys, ck, spec, r)?);
-        leaves.push(format!("q_inner_{r}"));
-        whats.push(format!("{q} picks a segment in inner round {r}"));
-    }
-    // T: terminal
-    trees.push(round_terminal_tree(ctx, prover, keys, spec)?);
     // The first leaf (spending R_R) is always q_round_{rr}
     let mut all_leaves = vec![format!("q_round_{rr}")];
     all_leaves.extend(leaves);
@@ -632,6 +639,151 @@ pub fn compress_chain(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, ck: &Chal
     all_whats.extend(whats);
     let stages = all_leaves.into_iter().zip(trees.iter().cloned()).zip(all_whats).map(|((leaf, next), what)| Stage { leaf, next, what }).collect();
     Ok((stages, trees))
+}
+
+/// The flat terminal for n4bit: one leaf recomputing all SPN rounds of
+/// one compression step, using the re-committed input/output/block words.
+/// Only used when `spec.flat_inner` is true. Replaces the entire inner
+/// bisection (schedule + inner rounds + round terminal) with one leaf.
+pub fn flat_terminal_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec: &ClaimSpec) -> Result<TapTree> {
+    let mut leaves: Vec<Leaf> = Vec::new();
+    for path in crate::claim::all_paths(spec) {
+        let (_, _, step_idx) = step_sources(spec, &path);
+        let step = &spec.steps[step_idx as usize];
+        if !matches!(step, Step::Compress { .. }) {
+            continue;
+        }
+        let (name, script) = flat_round_leaf(ctx, prover, keys, spec, step_idx as usize);
+        if !leaves.iter().any(|l| l.name == name) {
+            leaves.push(Leaf::new(name, script, Timelock::NONE));
+        }
+    }
+    leaves.push(timeout_leaf(ctx, prover));
+    TapTree::new(leaves)
+}
+
+/// Build a flat terminal leaf that recomputes all n4bit SPN rounds for
+/// compression step `step_idx`. Verifies input state, block words, and
+/// output state via WOTS, absorbs the block, runs all rounds in Script,
+/// and compares the computed output against the committed output.
+fn flat_round_leaf(
+    ctx: &CommitCtx,
+    prover: Role,
+    keys: &ClaimKeys,
+    spec: &ClaimSpec,
+    step_idx: usize,
+) -> (String, ScriptBuf) {
+    let q = ctx.key(prover.other()).payment;
+    let ik = keys.inner.as_ref().expect("inner keys for flat terminal");
+    let n_words = spec.n_words;
+    let d_words = spec.d_words();
+    let d_nibbles = spec.d_nibbles();
+    let bw = spec.hash.block_words();
+    let n_rounds = spec.hash.n_rounds() as usize;
+    let round_counter = step_idx * n_rounds;
+    let step = &spec.steps[step_idx];
+    let init = match step { Step::Compress { init, .. } => *init, _ => unreachable!() };
+
+    let mut b = Builder::new().checksigverify(&q);
+
+    // 1. Verify and park output state (d_nibbles) from re_next
+    b = load_d_of(b, &ik.re_next, n_words, d_words);
+
+    // 2. Load input state: constant IV or WOTS-verified re_cur, parked on alt
+    b = match init {
+        Init::Iv => park(nibbles(&crate::script_hash::state_bytes(&IV)).into_iter().fold(b, push_scriptnum), d_nibbles),
+        Init::D => load_d_of(b, &ik.re_cur, n_words, d_words),
+    };
+
+    // 3. Unpark input state onto main stack: [state(40)] (state[39] on top)
+    b = unpark(b, d_nibbles);
+
+    // 4. Absorb block: for each block word j, verify it and ADD its nibbles
+    //    to the corresponding state rate nibbles.
+    for j in 0..bw {
+        // wots_verify puts 8 nibbles on stack (nib[0] deepest, nib[7] on top)
+        b = b.wots_verify(&ik.block[j]);
+        // Stack: [state(remaining), block_word_j(8)]
+        // Process k = 7 down to 0:
+        //   k=7: depth = d_nibbles - 8*j (state nibble is below all 8 block nibbles)
+        //   k<7: depth = k + 1 (after consuming k=7, block nibbles are on top)
+        for k in (0..8u32).rev() {
+            let depth: usize = if k == 7 { d_nibbles - 8 * j } else { (k + 1) as usize };
+            b = b.push_int(depth as i64).push_opcode(OP_ROLL);  // state nibble to top
+            b = b.push_opcode(OP_SWAP);                          // block nibble on top
+            b = b.push_opcode(OP_ADD);                            // state + block
+            b = mod16_leaf(b);                                    // (state + block) % 16
+            b = b.push_opcode(OP_TOALTSTACK);                     // save result
+        }
+    }
+    // After absorption: main has [state[block_nibbles..d_nibbles-1]] (non-rate, 24 nibbles)
+    // Alt (top to bottom): result[0]..result[15], output(40)
+
+    // 5. Park non-rate state on alt
+    let non_rate = d_nibbles - bw * 8;
+    b = park(b, non_rate);
+    // Alt: non_rate(top).., result[0]..result[15], output(40)
+
+    // 6. Push S-box table
+    b = script::push_sbox_table(b);
+
+    // 7. Unpark results (16) on top of S-box
+    b = unpark(b, bw * 8);
+    // Main: [S-box(16), result[0]..result[15]] (result[15] on top)
+
+    // 8. Unpark non-rate state on top
+    b = unpark(b, non_rate);
+    // Main: [S-box(16), result[0]..result[15], non_rate(24)] (state[39] on top)
+
+    // 9. Run all SPN rounds
+    for r in 0..n_rounds {
+        b = script::spn_round_script(b, round_counter + r);
+    }
+
+    // 10. Park computed, drop S-box table, unpark computed
+    b = park(b, d_nibbles);
+    for _ in 0..script::SBOX_TABLE_SIZE {
+        b = b.push_opcode(OP_DROP);
+    }
+    b = unpark(b, d_nibbles);
+
+    // 11. Unpark output state
+    b = unpark(b, d_nibbles);
+
+    // 12. Compare computed vs output (true iff any differs)
+    b = differs_masked(b, d_nibbles, &vec![true; d_nibbles]);
+
+    let script = b.into_script();
+    let h = lngap_btc::hash160(script.as_bytes());
+    (format!("flat_{}", hex::encode(&h[..4])), script)
+}
+
+/// mod-16 correction: if top >= 16, subtract 16.
+fn mod16_leaf(b: Builder) -> Builder {
+    b.push_opcode(OP_DUP)
+        .push_int(16)
+        .push_opcode(OP_GREATERTHANOREQUAL)
+        .push_opcode(OP_IF)
+        .push_int(16)
+        .push_opcode(OP_SUB)
+        .push_opcode(OP_ENDIF)
+}
+
+/// Witness args for the flat terminal leaf (after Q's signature):
+/// output state sig, then input state sig (if init=D), then block word sigs.
+pub fn flat_round_witness(
+    out_sig: &WotsSig,
+    in_sig: Option<&WotsSig>,
+    block_sigs: &[WotsSig],
+) -> Vec<Vec<u8>> {
+    let mut v = out_sig.consumption_order();
+    if let Some(s) = in_sig {
+        v.extend(s.consumption_order());
+    }
+    for s in block_sigs {
+        v.extend(s.consumption_order());
+    }
+    v
 }
 
 /// Witness args for `p_re_cur` after the two channel signatures: the state, then the 16 block words.
