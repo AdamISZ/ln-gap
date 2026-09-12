@@ -20,9 +20,9 @@ to intermediate states, the challenger narrows to one step, and a
 terminal leaf recomputes that step on-chain. No soft fork, no trusted
 party.
 
-## 2. Scenarios (N1-N8)
+## 2. Scenarios (N1-N9)
 
-All 8 scenarios pass on regtest:
+All 9 scenarios pass on regtest:
 
   cargo test -p lngap-harness --test fc_names
 
@@ -36,6 +36,7 @@ All 8 scenarios pass on regtest:
 | N6 | Sale; hub refuses to submit transfer | Bob refunded; Alice keeps name |
 | N7 | Sale; hub proves inclusion in leg 1, refuses to pay Alice | Bob's leg resolves; registry shows transfer |
 | N8 | Hub fabricates inclusion proof; Alice disproves by bisection | bisection disproof at terminal leaf; bond to Alice |
+| N9 | Hub proves inclusion on a private fork; Alice refutes with the heavier chain | no dispute is possible on either side; resolution by chain length; bond to Alice |
 
 N8 is the key stage-2 scenario: the hub cheats by altering the claimed
 end state of its inclusion proof. Alice disputes, the bisection
@@ -49,6 +50,19 @@ dispute transaction chain executes on regtest:
     d1/dispute (Alice disputes), p_round_1, q_round_1, p_round_2,
     q_round_2, p_round_3, q_round_3_check, c_re_cur, c_re_next,
     simple_nop (disproof)
+
+N9 is the complementary case: the hub's inclusion proof is on a private
+fork — internally valid, so Alice cannot disprove it. Her answer is the
+heavier real chain: the factchain world mines the hub's entry on a fork
+(hub sees it, users don't) while the real chain advances past it, then
+serves the refutation data (`{req}/refute`, one more header from the same
+checkpoint). On-chain: commitment_2, claim_to_remote, claim_to_local,
+move_1 (hub's fork proof — Alice's party recomputes it: end state
+correct, nothing to dispute), move_2 (Alice's refutation — the hub
+recomputes it: correct, nothing to dispute), split_2_BondToUser after the
+challenge window. The bisection never runs; the resolution is by chain
+length, encoded structurally: the depth-3 claim commits to n_headers+1
+headers from the same checkpoint.
 
 ## 3. Dispute chain measurement
 
@@ -171,18 +185,15 @@ next power of 2 for k=2 bisection.
 4. **Variable-length claims**: n_headers is fixed at 1 in the contract
    program. The full design would adapt to the actual confirmed height.
 
-5. **N9 (TODO, parked)**: The hub presents a valid but
-   shorter chain (internally correct headers/PoW/root, just fewer
-   blocks). Alice refutes with a longer chain from the same checkpoint.
-   Both chains are internally valid, so the bisection finds nothing
-   to disprove — the resolution is by chain length (heaviest-chain
-   rule: with fixed difficulty, longer = heavier). The hub disputes
-   Alice's longer chain, finds nothing wrong, and times out. Needs: a
-   second miner in the factchain world producing a competing shorter
-   chain, and wiring up the refutation move (depth 2: Alice presents
-   the longer chain). The existing timeout resolution should give the
-   correct result (longer chain wins), but the heaviest-chain comparison
-   is currently implicit, not an explicit on-chain check.
+5. **Heaviest-chain is structural, not an explicit on-chain check**: N9
+   now runs on the fact chain: the hub's private-fork proof and Alice's
+   heavier-chain refutation are both internally valid, no bisection runs,
+   and the longer chain wins by timeout. But "heavier" is encoded by the
+   refutation ClaimSpec's shape (n_headers+1 from the same checkpoint),
+   not by an on-chain comparison of two chains. That suffices at fixed
+   difficulty with n_headers = 1; the general version (variable-length
+   claims, item 4, and comparing chains of different lengths) needs the
+   comparison made explicit.
 
 ## 6. How to reproduce
 
