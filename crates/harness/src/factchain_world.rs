@@ -72,7 +72,7 @@ pub struct FcWorld {
     /// Promises issued by the hub.
     pub promises: HashMap<u32, FcPromise>,
     /// The entry currently being mined (one per block, stage 1).
-    pending_entry: Option<Vec<u8>>,
+    pub pending_entry: Option<Vec<u8>>,
     /// The event for the pending entry (for the ledger).
     pending_event: Option<Event>,
     pub alice_name: NamesUser,
@@ -315,10 +315,12 @@ impl FcWorld {
     }
 
     /// Install honest bond behaviour: the user claims from `claim_from` if
-    /// the entry is not confirmed, and folds the bond once it is.
+    /// the entry is not confirmed, and folds the bond once it is. The hub
+    /// answers a claim (state 1 → 2) if the entry is confirmed.
     fn install_bond_policies(&mut self, who: Who, id: u32, req_id: u32, claim_from: u32) {
         let confirmed = self.confirmed.clone();
         let confirmed2 = self.confirmed.clone();
+        let confirmed_hub = self.confirmed.clone();
         let party = &mut self.channel(who).user;
         party.set_move_policy(
             id,
@@ -342,6 +344,15 @@ impl FcWorld {
             id,
             Box::new(move |_ctx: &MoveCtx| {
                 confirmed2.lock().unwrap().contains(&req_id)
+            }),
+        );
+        // Hub move policy: answer a claim (state 1 → 2) if the entry is confirmed
+        self.channel(who).hub.set_move_policy(
+            id,
+            Box::new(move |ctx: &MoveCtx| {
+                (bits_to_uint(ctx.state) == 1
+                    && confirmed_hub.lock().unwrap().contains(&req_id))
+                    .then(|| vec![true])
             }),
         );
     }
