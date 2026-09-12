@@ -40,16 +40,15 @@ All 8 scenarios pass on regtest:
 N8 is the key stage-2 scenario: the hub cheats by altering the claimed
 end state of its inclusion proof. Alice disputes, the bisection
 protocol runs through 3 level-1 rounds (k=2), narrows to the isolated
-step, and disproves it at a flat terminal leaf. The full dispute
-transaction chain executes on regtest:
+step. With flat_inner, the dispute then uses a single flat terminal leaf
+that recomputes all 20 n4bit SPN rounds in one transaction — no
+re-commitments, no inner rounds, no back-and-forth narrowing. The full
+dispute transaction chain executes on regtest:
 
     commitment_2, claim_to_remote, claim_to_local, move_1 (hub's proof),
     d1/dispute (Alice disputes), p_round_1, q_round_1, p_round_2,
     q_round_2, p_round_3, q_round_3_check, c_re_cur, c_re_next,
     simple_nop (disproof)
-
-Alice's balance after N8: 128,000 sat (100k funding + 40k bond - ~12k
-fees).
 
 ## 3. Dispute chain measurement
 
@@ -59,20 +58,20 @@ fees).
 
 | kind    | W   | steps | rounds | script (B) | witness (B) | fee (sat) | txs | build (ms) |
 |---------|-----|-------|--------|------------|-------------|-----------|-----|------------|
-| n4bit   | 1   | 8     | 3      | 41,637     | 22          | 22,000    | 22  | 32         |
-| SHA-256 | 1   | 4     | 2      | 204,342    | 15          | 19,803    | 15  | 165        |
-| n4bit   | 10  | 128   | 7      | 55,121     | 30          | 30,000    | 30  | 53         |
-| SHA-256 | 10  | 64    | 6      | 262,514    | 23          | 27,803    | 23  | 254        |
-| n4bit   | 100 | 1024  | 10     | 65,234     | 36          | 36,000    | 36  | 118        |
-| SHA-256 | 100 | 512   | 9      | 306,143    | 29          | 33,803    | 29  | 779        |
+| n4bit   | 1   | 8     | 3      | 24,782      | 12          | 12,000     | 12  | 20         |
+| SHA-256 | 1   | 4     | 2      | 204,342     | 15          | 19,803     | 15  | 162        |
+| n4bit   | 10  | 128   | 7      | 38,266      | 20          | 20,000     | 20  | 101        |
+| SHA-256 | 10  | 64    | 6      | 262,514    | 23          | 27,803     | 23  | 249        |
+| n4bit   | 100 | 1024  | 10     | 48,379      | 26          | 26,000     | 26  | 790        |
+| SHA-256 | 100 | 512   | 9      | 306,143    | 29          | 33,803     | 29  | 766        |
 
 ### 3.2 n4bit vs SHA-256 ratios (SHA-256 / n4bit)
 
 | W   | script  | witness | fee  | tx   | build |
 |-----|---------|---------|------|------|-------|
-| 1   | 4.9x    | 0.7x    | 0.9x | 0.7x | 5.2x  |
-| 10  | 4.8x    | 0.8x    | 0.9x | 0.8x | 4.8x  |
-| 100 | 4.7x    | 0.8x    | 0.9x | 0.8x | 6.6x  |
+| 1   | 8.2x    | 1.2x    | 1.7x | 1.2x | 8.1x  |
+| 10  | 6.9x    | 1.1x    | 1.4x | 1.1x | 2.5x  |
+| 100 | 6.3x    | 1.1x    | 1.3x | 1.1x | 1.0x  |
 
 ### 3.3 Per-round Script leaf
 
@@ -83,30 +82,39 @@ fees).
 
 ### 3.4 Key findings
 
-1. **Script size: n4bit is 4.7-4.9x smaller** across all W values. At
-   W=100, n4bit uses 65 KB of script vs 306 KB for SHA-256.
+1. **Script size: n4bit is 6.3-8.2x smaller** across all W values. At
+   W=100, n4bit uses 48 KB of script vs 306 KB for SHA-256.
 
-2. **Build time: n4bit is 4.8-6.6x faster** because the round leaf is
-   smaller and the Script construction is simpler (16-entry S-box table
-   vs 608-element XOR/AND/shift tables).
+2. **Build time: n4bit is comparable or faster** — at W=1 and W=10
+   it's 2.5-8x faster; at W=100 the flat terminal leaf is larger,
+   evening out the build time (the 20-round leaf takes more Script to
+   construct than the old 1-round leaf).
 
 3. **Both scale logarithmically.** Bisection means the transaction
-   count grows as O(log W), not O(W). n4bit goes 22 -> 30 -> 36 txs
+   count grows as O(log W), not O(W). n4bit goes 12 -> 20 -> 26 txs
    (W=1 -> 10 -> 100); SHA-256 goes 15 -> 23 -> 29.
 
-4. **Script grows sub-linearly.** n4bit script: 42 KB -> 55 KB -> 65 KB
-   (1.57x from W=1 to W=100). The growth is dominated by the
+4. **The flat_inner optimization eliminated 10 transactions.** By
+   replacing the inner bisection (re-commit + schedule + 5 inner rounds
+   + terminal = 13 txs) with one flat terminal leaf that recomputes all
+   20 SPN rounds in a single transaction, n4bit drops from 36 to 26 txs
+   at W=100. SHA-256 cannot do this (64 rounds x 12 KB = 768 KB in one leaf
+   is a non-starter); the inner bisection is forced by SHA-256's cost. n4bit
+   is cheap enough to skip it entirely.
+
+5. **Script grows sub-linearly.** n4bit script: 25 KB -> 38 KB -> 48 KB
+   (1.95x from W=1 to W=100). The growth is dominated by the
    level-1 round transactions (which carry WOTS commitments that don't
    shrink with the hash function), not the terminal leaf.
 
-5. **Fee and witness counts are slightly worse for n4bit** because n4bit
-   has more steps (7/header vs 4/header) and thus more bisection
-   rounds. In a real fee market where cost scales with script/witness
-   size, n4bit would be significantly cheaper: 65 KB vs 306 KB of
-   script means far less block space consumed.
+6. **Fee and witness counts are slightly better for n4bit** now that
+   flat_inner removed the extra inner-round transactions. At W=100,
+   n4bit uses 26 txs / 26k sat vs SHA-256's 29 txs / 34k sat. In a real
+   fee market where cost scales with script/witness size, n4bit would be
+   far cheaper: 48 KB vs 306 KB of script means far less block space.
 
 6. **The per-round leaf ratio (11.5x) is higher than the total-chain
-   ratio (4.9x)** because WOTS commitment overhead doesn't shrink. Each
+  ratio (6.3x)** because WOTS commitment overhead doesn't shrink. Each
    p_round leaf verifies k-1 WOTS commitments regardless of hash kind.
    The hash function only affects the terminal round leaf, which is one
    transaction out of the chain.
@@ -166,9 +174,8 @@ next power of 2 for k=2 bisection.
 5. **N8 disproof at NOP step**: the current cheat (flipping the end
    state) causes the bisection to narrow to a NOP padding step, not a
    real n4bit compression. A cheat that corrupts a compression midstate
-   would trigger the inner chain (re-commit -> n4bit round leaf), which
-   is a stronger test. The infrastructure supports it; only the test
-   setup needs adjustment.
+   would trigger the flat terminal leaf directly. The infrastructure
+   supports it; only the test setup needs adjustment.
 
 ## 6. How to reproduce
 
