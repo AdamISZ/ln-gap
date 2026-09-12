@@ -352,6 +352,7 @@ fn sha256_spec(w: usize) -> ClaimSpec {
         k: 2,
         inner: true,
         hash: HashKind::Sha256,
+        flat_inner: false,
     }
 }
 
