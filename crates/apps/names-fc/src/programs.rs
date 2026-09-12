@@ -149,11 +149,17 @@ impl Contract for NRegFc {
     /// Stage 2: return the ClaimSpec for the fact-chain header verification.
     /// State Claimed (1): hub proves inclusion via header chain.
     /// State Refuted (2): user refutes with a heavier chain (n_headers + 1).
+    ///
+    /// PoC: n_headers is fixed at 1 (the typical case: one block from
+    /// checkpoint to confirmation). The full design would adapt the
+    /// spec to the actual confirmed height, but that requires a
+    /// variable-length claim — a future improvement.
     fn claim(&self, from: &[bool], depth: u32) -> Option<lngap_contract::claim::ClaimSpec> {
+        let n_headers = 1; // PoC: fixed at 1 header
         let shape = FactChainShape {
             checkpoint: self.params.checkpoint,
             target: lngap_n4bit::target_from_difficulty(lngap_factchain::DIFFICULTY_BITS),
-            n_headers: (self.params.h_max - self.params.checkpoint_height) as usize,
+            n_headers,
         };
         match bits_to_uint(from) + depth - 1 {
             1 => Some(shape.spec()),

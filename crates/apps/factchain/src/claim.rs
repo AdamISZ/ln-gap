@@ -38,10 +38,10 @@ const N_NIBBLES: usize = 40;
 const RATE_NIBBLES: usize = 20;
 
 /// Number of compression steps per header:
-/// 48 bytes = 96 nibbles, rate = 20 nibbles.
-/// 96 / 20 = 4 full blocks + 1 partial (16 nibbles, padded to 20)
-/// + 1 padding block = 6 steps.
-const STEPS_PER_HEADER: usize = 6;
+/// 48 bytes = 96 nibbles. Using 2 words (16 nibbles) per step,
+/// 96 / 16 = 6 absorb steps + 1 padding = 7 steps.
+/// The 4-nibble gap per step (20-16=4) is zero-filled in the rate.
+const STEPS_PER_HEADER: usize = 7;
 
 /// The fact-chain checkpoint: a 20-byte digest.
 pub type Checkpoint = [u8; 20];
@@ -148,14 +148,20 @@ impl FactChainShape {
     }
 
     /// Build ClaimData from raw 48-byte headers.
+    /// 7 steps per header: 6 absorb (2 words each = 12 header words)
+    /// + 1 padding (2 zero words). Each step provides 16 nibbles;
+    /// the 4-nibble gap to the 20-nibble rate is zero-filled.
     pub fn data(&self, headers: &[[u8; 48]]) -> ClaimData {
         assert_eq!(headers.len(), self.n_headers);
         let mut data = Vec::new();
         for h in headers {
             let w = words(h);
-            for b in 0..STEPS_PER_HEADER {
-                data.push(vec![w[b * 3], w[b * 3 + 1], w[b * 3 + 2]]);
+            // 6 absorb steps (2 words each = 12 words = all header data)
+            for b in 0..6 {
+                data.push(vec![w[b * 2], w[b * 2 + 1]]);
             }
+            // 7th step: padding block (2 zero words)
+            data.push(vec![0u32, 0u32]);
         }
         data
     }
@@ -175,15 +181,16 @@ impl FactChainShape {
         let mut steps = Vec::new();
 
         for h in 0..self.n_headers {
-            // 6 compression steps per header
+            // 7 compression steps per header (6 absorb + 1 padding)
             for b in 0..STEPS_PER_HEADER {
                 let init = if h == 0 && b == 0 { Init::Iv } else { Init::D };
-                let block_start = (h * STEPS_PER_HEADER + b) * 3;
-                let block = vec![
-                    Src::Data(block_start),
-                    Src::Data(block_start + 1),
-                    Src::Data(block_start + 2),
-                ];
+                let block = if b < 6 {
+                    // Each absorb step uses 2 data words (local indices 0, 1)
+                    vec![Src::Data(0), Src::Data(1)]
+                } else {
+                    // Padding step: zero block
+                    vec![Src::Const(0), Src::Const(0)]
+                };
                 let step = Step::compress(
                     &format!("hdr_{}_{}", h, b), init, block,
                 );

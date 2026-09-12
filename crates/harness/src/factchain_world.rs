@@ -82,6 +82,8 @@ pub struct FcWorld {
     reveal_sent: bool,
     pub registering: bool,
     commit_req: Option<u32>,
+    /// Served proof data for claims (shared with NRegFc programs).
+    pub store: ServedData,
     pub log: Vec<String>,
 }
 
@@ -142,6 +144,7 @@ impl FcWorld {
             reveal_sent: false,
             registering: false,
             commit_req: None,
+            store,
             log: Vec::new(),
         };
         w.install_hub_policies();
@@ -303,15 +306,17 @@ impl FcWorld {
         }
         Ok(())
     }
-
     fn nreg_program(&self, p: &FcPromise) -> String {
-        NRegFc::new(NRegFcParams {
-            req_id: p.req_id,
-            claim_from: p.h_max + GRACE,
-            checkpoint: p.checkpoint,
-            checkpoint_height: p.checkpoint_height,
-            h_max: p.h_max,
-        }, ServedData::default())
+        NRegFc::new(
+            NRegFcParams {
+                req_id: p.req_id,
+                claim_from: p.h_max + GRACE,
+                checkpoint: p.checkpoint,
+                checkpoint_height: p.checkpoint_height,
+                h_max: p.h_max,
+            },
+            self.store.clone(),
+        )
         .name()
         .to_string()
     }
@@ -478,14 +483,21 @@ impl FcWorld {
             // Hub checks which promises are confirmed
             self.hub.lock().unwrap().on_block(fc_h, &block.entry);
 
-            // Update the shared confirmed set
-            let hub = self.hub.lock().unwrap();
-            for req_id in hub.promises.keys() {
-                if hub.is_confirmed(*req_id) {
-                    self.confirmed.lock().unwrap().insert(*req_id);
-                }
+            // Update the shared confirmed set and serve proof data
+            let newly_confirmed: Vec<u32> = {
+                let hub = self.hub.lock().unwrap();
+                hub.promises.keys()
+                    .filter(|id| hub.is_confirmed(**id))
+                    .copied()
+                    .collect()
+            };
+            for req_id in &newly_confirmed {
+                self.confirmed.lock().unwrap().insert(*req_id);
             }
-            drop(hub);
+            for req_id in &newly_confirmed {
+                let fc = self.hub_fc.clone();
+                self.serve_inclusion(*req_id, &fc)?;
+            }
 
             // Update the ledger (the world knows the event)
             if let Some(ref event) = self.pending_event {
@@ -539,6 +551,22 @@ impl FcWorld {
         for _ in 0..n {
             self.step()?;
         }
+        Ok(())
+    }
+
+    /// Build and serve the inclusion proof data for a confirmed request.
+    /// Converts the fact-chain headers to ClaimData format and stores it
+    /// so the NRegFc program's claim_data() can serve it.
+    fn serve_inclusion(&mut self, req_id: u32, client: &ChainClient) -> Result<()> {
+        let hub = self.hub.lock().unwrap();
+        let (shape, data) = hub.inclusion_data(req_id, client)?;
+        drop(hub);
+        // Convert FactData (headers + entry) to ClaimData (Vec<Vec<u32>>)
+        let fc_shape = lngap_factchain::claim::FactChainShape::from_fact_shape(&shape);
+        let raw_headers: Vec<[u8; 48]> = data.headers.iter().map(|h| h.0).collect();
+        let claim_data = fc_shape.data(&raw_headers);
+        self.store.put(&format!("{req_id}/incl"), claim_data);
+        self.say(format!("proof data for request {req_id} served ({} headers)", raw_headers.len()));
         Ok(())
     }
 

@@ -197,7 +197,7 @@ impl HashKind {
     pub fn block_words(self) -> usize {
         match self {
             HashKind::Sha256 => 16,
-            HashKind::N4Bit => 3, // 20 nibbles padded to 24 = 3 words
+            HashKind::N4Bit => 2, // 16 nibbles per step (20-nibble rate, 4 zero-filled)
         }
     }
     /// Rounds per compression.
@@ -474,8 +474,11 @@ impl ClaimSpec {
                         let sn = state_nibbles(&init_w);
                         let mut st: [u8; lngap_n4bit::STATE_NIBBLES] = sn.as_slice().try_into().unwrap();
                         let bn = byte_nibbles(&b);
-                        let block: [u8; lngap_n4bit::RATE_NIBBLES] =
-                            bn[..lngap_n4bit::RATE_NIBBLES].try_into().unwrap();
+                        // Zero-pad block nibbles to RATE_NIBBLES (block may be
+                        // shorter: 2 words = 16 nibbles, rate = 20 nibbles).
+                        let mut block = [0u8; lngap_n4bit::RATE_NIBBLES];
+                        let n = bn.len().min(lngap_n4bit::RATE_NIBBLES);
+                        block[..n].copy_from_slice(&bn[..n]);
                         let round_counter = step_index * lngap_n4bit::ROUNDS;
                         lngap_n4bit::sponge_absorb(&mut st, &block, round_counter);
                         nibbles_state(&st)
