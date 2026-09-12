@@ -171,11 +171,18 @@ next power of 2 for k=2 bisection.
 4. **Variable-length claims**: n_headers is fixed at 1 in the contract
    program. The full design would adapt to the actual confirmed height.
 
-5. **N8 disproof at NOP step**: the current cheat (flipping the end
-   state) causes the bisection to narrow to a NOP padding step, not a
-   real n4bit compression. A cheat that corrupts a compression midstate
-   would trigger the flat terminal leaf directly. The infrastructure
-   supports it; only the test setup needs adjustment.
+5. **N9 (TODO, parked)**: The hub presents a valid but
+   shorter chain (internally correct headers/PoW/root, just fewer
+   blocks). Alice refutes with a longer chain from the same checkpoint.
+   Both chains are internally valid, so the bisection finds nothing
+   to disprove — the resolution is by chain length (heaviest-chain
+   rule: with fixed difficulty, longer = heavier). The hub disputes
+   Alice's longer chain, finds nothing wrong, and times out. Needs: a
+   second miner in the factchain world producing a competing shorter
+   chain, and wiring up the refutation move (depth 2: Alice presents
+   the longer chain). The existing timeout resolution should give the
+   correct result (longer chain wins), but the heaviest-chain comparison
+   is currently implicit, not an explicit on-chain check.
 
 ## 6. How to reproduce
 
