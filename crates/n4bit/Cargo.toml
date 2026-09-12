@@ -6,3 +6,6 @@ license.workspace = true
 
 [dependencies]
 hex = { workspace = true }
+bitcoin = { workspace = true }
+lngap-btc = { path = "../btc" }
+lngap-lamport = { path = "../lamport" }

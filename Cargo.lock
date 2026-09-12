@@ -413,7 +413,10 @@ dependencies = [
 name = "lngap-n4bit"
 version = "0.1.0"
 dependencies = [
+ "bitcoin",
  "hex",
+ "lngap-btc",
+ "lngap-lamport",
 ]
 
 [[package]]
