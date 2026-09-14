@@ -185,7 +185,14 @@ next power of 2 for k=2 bisection.
 4. **Variable-length claims**: n_headers is fixed at 1 in the contract
    program. The full design would adapt to the actual confirmed height.
 
-5. **Heaviest-chain is structural, not an explicit on-chain check**: N9
+5. **The inclusion claim only hashes the header bytes** (found 2026-09-14,
+   branch `ttt-venue`): `FactChainShape` carries no prev-link, PoW or
+   root predicate, and until D23 the claim's hash was not even the
+   chain's, so N8 and N9 only ever showed that a wrong *end state* is
+   caught. The slot claim of docs/GAME_PROTOCOL.md §3 is the full version;
+   the names contracts still use `FactChainShape`.
+
+6. **Heaviest-chain is structural, not an explicit on-chain check**: N9
    now runs on the fact chain: the hub's private-fork proof and Alice's
    heavier-chain refutation are both internally valid, no bisection runs,
    and the longer chain wins by timeout. But "heavier" is encoded by the

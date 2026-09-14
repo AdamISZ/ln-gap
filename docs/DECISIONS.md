@@ -220,11 +220,83 @@ checks the promised height lies within the commit's window; the hub's open
 policy checks the bond's terms equal the promise's. Saves ~1.4 KB per
 claim transaction and one message in the opening exchange.
 
+## D23. The fact chain hashes with the function the claim model computes
+
+`lngap_n4bit::hash_claim` absorbs 8-byte blocks (two 32-bit claim words)
+zero-padded to the rate, restarts the round counter at every message and
+advances it per block, pads with one all-zero block and outputs the whole
+40-nibble state. The chain's digests, roots and proof of work use it.
+Before this the claim model and `n4bit::hash` were unrelated functions
+(10-byte blocks, a `+1` padding step, a squeeze; and the claim's round
+counter depended on the step's position in the whole claim), so the
+fact-chain claim could only assert that the prover knew a hash chain of
+the header bytes — no prev-link, proof-of-work or root predicate could be
+written, and the builder skipped them (`FactChainShape` still does).
+`ClaimSpec::round_counter` is the message-relative counter, used by the
+native evaluation, the flat terminal leaf and the party's inner-chain
+recomputation alike. `Pred::LeTargetBe` compares a nibble range as a
+big-endian number, the n4bit target check.
+
+## D24. Slot claims verify inclusion in full
+
+`lngap_factchain::slot::SlotShape`: a 16-word register file `D | P | R | E`
+(hash state, previous digest, root field, entry word). Header fields enter
+as block nibbles, so the prev-link is an `EqNibbles` predicate on the
+absorb steps and the root field is copied to `R` as it streams by; the
+proof of work and `D -> P` are one simple step per header; the entry's
+constant word is `EqConst` and its `(move, state)` word is copied to `E`;
+`root_ok` compares `D` to `R`. With `flat_inner` the compress-step
+predicates and copies were unenforced (the flat terminal tree carried only
+the compression leaf); it now carries the block, mismatch, `ckeep`,
+`cpred` and `ccopy` leaves and the party checks them before the
+compression.
+
+## D25. Star graphs, prior reveals, and the end-state bind
+
+`GraphShape::Star`: a claim leaf per depth off the commitment's contract
+output, each revealing the counterparty's state at the previous depth
+under the counterparty's own per-depth key (the reveal is read off the
+venue); off each claim one refutation (`r{d}/move_{d+1}`), and nothing
+after a refutation. The refuted claimant is on turn at `s_{d+1}` and
+forfeits by the existing rule. `EndBind` makes the Move leaf decode the
+move and state reveals and compare them with a word of the WOTS-committed
+end state, so a claim's disproofs judge the move the venue entry names.
+Star programs never move off-chain: the contract's state is the initial
+state until it folds (`Change::Fold`, an agreed distribution the responder
+checks against the venue; refused by default).
+
+## D26. The venue is slotted and absence is a lie
+
+One fact-chain block per Bitcoin block; block `d` after the open is move
+`d`'s slot, so every claim's header count is fixed at open and a late
+move is a stall. A depth-`d` claim carries `CLTV btc_open + d + 1 + grace`:
+the counterparty's slot passes before a timeout claim can be made. A
+timeout claim refuted by the counterparty's move `d + 1` (with its
+inclusion claim) is a lie and forfeits the stake; the summons response on
+Bitcoin (VENUE.md §4) is not built, since a single honest miner cannot
+censor. Each side stakes `STAKE + RESERVE`; the reserve returns on a fold
+and goes to the winner on-chain, so stalling costs more than resigning.
+
+## D27. Entry authentication is off-chain only
+
+A venue entry carries a tag over the mover's Lamport preimages, served
+alongside; the claim binds the entry's content to the on-chain reveal but
+never hashes the preimages. An entry with the right content and garbage
+preimages is a stall the counterparty cannot attribute on-chain. Listed
+with the served-data gap (D19, SPV_DISPUTE.md limitations): both are
+bytes the commitment does not cover. The fix is to hash the preimages
+inside the claim under an n4bit-keyed Lamport key, which needs
+conditional predicates.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
   now enforced on-chain (D20, scenarios N8–N9). Still open: binding the served
   proof data to the Move, and user-side non-inclusion claims.
+- **Venue (GAME_PROTOCOL.md §5).** Entry authentication in the claim (D27);
+  the summons response on Bitcoin; variable-length claims for response
+  windows; the equivocation leaf; `settle` after the deadline ignores the
+  venue; a smaller register file for the claim transaction.
 - **T9 / liveness rule.** Scenario T9 documents that an honest user who ignores
   a hub force-close during their own turn forfeits the stake (Settle pays R(s)
   = hub wins). Agreed as the PoC reading on 2026-09-06; revisit whether the

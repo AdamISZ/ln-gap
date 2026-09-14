@@ -4,6 +4,7 @@
 
 pub mod names;
 pub mod fc_names;
+pub mod fc_game;
 pub mod tictactoe;
 
 use anyhow::Result;
@@ -58,5 +59,6 @@ pub fn all() -> Vec<Scenario> {
     let mut v = tictactoe::scenarios();
     v.extend(names::scenarios());
     v.extend(fc_names::scenarios());
+    v.extend(fc_game::scenarios());
     v
 }

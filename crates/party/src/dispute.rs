@@ -519,7 +519,8 @@ pub fn parse_p_inner(tx: &Transaction, keys: &ClaimKeys, inner_path: &[u32], r: 
     let ik = keys.inner.as_ref().ok_or_else(|| anyhow!("no inner keys"))?;
     let list = parse_wots_list(&args[2..], &ik.states[r as usize - 1], "p_inner")?;
     let points = search.round_points(inner_path);
-    Ok(list.into_iter().zip(points).map(|((msg, sig), i)| (i, state_from_msg(&msg)[..n_words].to_vec(), sig)).collect())
+    // inner states are the hash register (`d_words` words), which may be narrower than the claim's `n_words`
+    Ok(list.into_iter().zip(points).map(|((msg, sig), i)| { let st = state_from_msg(&msg); let n = n_words.min(st.len()); (i, st[..n].to_vec(), sig) }).collect())
 }
 
 /// Recompute the n4bit inner chain from init and block: absorbs the block
