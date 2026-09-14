@@ -12,15 +12,15 @@ heights; the channel is funded at height ~204 in every scenario.
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `13c3e5564682f2ceedb834313fc45ce05da26f655114de52ad5c232c0ec0b6f4` |
-| 205 | `coop_close` | user | `031944ea7d2d3c0bbce33f987dab7cd118784fb41c7354040277f09e205be5b9` |
+| 204 | `funding` | harness | `b93551e0f23e65cc8c8afe5e4f070b750e0ea537d0ae5bda4f826f2acfdc517a` |
+| 205 | `coop_close` | user | `db85d5a486fc3fcd6f6631319452494d6f939445553225637d08b4ff6e9b14ab` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding 13c3e5564682f2ceedb834313fc45ce05da26f655114de52ad5c232c0ec0b6f4 (harness) 203 vB / 812 WU
-block 205: coop_close 031944ea7d2d3c0bbce33f987dab7cd118784fb41c7354040277f09e205be5b9 (user) 197 vB / 786 WU
+block 204: funding b93551e0f23e65cc8c8afe5e4f070b750e0ea537d0ae5bda4f826f2acfdc517a (harness) 203 vB / 812 WU
+block 205: coop_close db85d5a486fc3fcd6f6631319452494d6f939445553225637d08b4ff6e9b14ab (user) 197 vB / 786 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -70,27 +70,27 @@ block 205: coop_close 031944ea7d2d3c0bbce33f987dab7cd118784fb41c7354040277f09e20
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `edfe79e0a8c7142c6194e61e144d1714350454b49dbddc4545f553de24165410` |
-| 208 | `commitment_5` | user | `999b1360de3ba5471c1a59e640eab7e8627856b4dc8e72f51b15578615025464` |
-| 209 | `claim_to_remote` | hub | `5dbba14cd89f83c81a5ca6cccab608515cbadae5904d26f0cd47e160526c74ef` |
-| 214 | `claim_to_local` | user | `632fe0c76cb7d86988ebccbbe444f7079294f900d0e2fb593d30a1df7aeac826` |
-| 214 | `move_1` | user | `50662cbb0a8891cea42486d479dd6c60d04349d88a32d4f881fd6b56c63a63b4` |
-| 215 | `move_2` | hub | `5d07302fca9b49b1843952750c78afc5a731ac62232ba1015b7040bc382574d7` |
-| 216 | `move_3` | user | `a0475a83eac0262aa7d16aea749e43e559081f5d722f486ec870ab9ee3725f2d` |
-| 228 | `split_3_UserWins` | user | `5c64aaa65487fc3eb89c892640ced47e9dcdfb7cd0f606e4fc1518255fa28eb4` |
+| 204 | `funding` | harness | `d0d71e620bd5ffaa9dbb01ff2a0ae3ef04d215a18ced481a17c269f22f340211` |
+| 208 | `commitment_5` | user | `1fc38b9e851a4ef761aad8fb1c5a10da5737d18a4e5095e1b69a96d27b12fa3c` |
+| 209 | `claim_to_remote` | hub | `6d2dcf79eb1860ddec3028bde55b51d308ddba1ee392be70d33152ddee372d3c` |
+| 214 | `claim_to_local` | user | `d1723e19578f7fddb5f49786ea1ef1ceb8e2dd29ca9d8008e73b58f10b4c0dbc` |
+| 214 | `move_1` | user | `02d0c0fea941178bf1cec84d26c66dfaad854fd3e35d91718655c22dd57ad2c6` |
+| 215 | `move_2` | hub | `9fc4f5769587109afa34709d8223c1646b2a5aa636880c10da0d5c331d17a7a3` |
+| 216 | `move_3` | user | `ba7646e1c538752c2250490db2b349143d6f3fa05f7c55bc7c12ac3a77ffdb04` |
+| 228 | `split_3_UserWins` | user | `ac8f91a3aa76152665ab45aa0e09bf54ceff7a0081eab58c4e02e361123b6f6e` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding edfe79e0a8c7142c6194e61e144d1714350454b49dbddc4545f553de24165410 (harness) 203 vB / 812 WU
-block 208: commitment_5 999b1360de3ba5471c1a59e640eab7e8627856b4dc8e72f51b15578615025464 (user) 240 vB / 958 WU
-block 209: claim_to_remote 5dbba14cd89f83c81a5ca6cccab608515cbadae5904d26f0cd47e160526c74ef (hub) 129 vB / 513 WU
-block 214: claim_to_local 632fe0c76cb7d86988ebccbbe444f7079294f900d0e2fb593d30a1df7aeac826 (user) 137 vB / 548 WU
-block 214: move_1 50662cbb0a8891cea42486d479dd6c60d04349d88a32d4f881fd6b56c63a63b4 (user) 663 vB / 2650 WU
-block 215: move_2 5d07302fca9b49b1843952750c78afc5a731ac62232ba1015b7040bc382574d7 (hub) 694 vB / 2775 WU
-block 216: move_3 a0475a83eac0262aa7d16aea749e43e559081f5d722f486ec870ab9ee3725f2d (user) 694 vB / 2775 WU
-block 228: split_3_UserWins 5c64aaa65487fc3eb89c892640ced47e9dcdfb7cd0f606e4fc1518255fa28eb4 (user) 217 vB / 866 WU
+block 204: funding d0d71e620bd5ffaa9dbb01ff2a0ae3ef04d215a18ced481a17c269f22f340211 (harness) 203 vB / 812 WU
+block 208: commitment_5 1fc38b9e851a4ef761aad8fb1c5a10da5737d18a4e5095e1b69a96d27b12fa3c (user) 240 vB / 958 WU
+block 209: claim_to_remote 6d2dcf79eb1860ddec3028bde55b51d308ddba1ee392be70d33152ddee372d3c (hub) 129 vB / 513 WU
+block 214: claim_to_local d1723e19578f7fddb5f49786ea1ef1ceb8e2dd29ca9d8008e73b58f10b4c0dbc (user) 137 vB / 548 WU
+block 214: move_1 02d0c0fea941178bf1cec84d26c66dfaad854fd3e35d91718655c22dd57ad2c6 (user) 663 vB / 2650 WU
+block 215: move_2 9fc4f5769587109afa34709d8223c1646b2a5aa636880c10da0d5c331d17a7a3 (hub) 694 vB / 2775 WU
+block 216: move_3 ba7646e1c538752c2250490db2b349143d6f3fa05f7c55bc7c12ac3a77ffdb04 (user) 694 vB / 2775 WU
+block 228: split_3_UserWins ac8f91a3aa76152665ab45aa0e09bf54ceff7a0081eab58c4e02e361123b6f6e (user) 217 vB / 866 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -113,7 +113,7 @@ block 228: split_3_UserWins 5c64aaa65487fc3eb89c892640ced47e9dcdfb7cd0f606e4fc15
 [user @ 215] contract 1: broadcasting move_3: cell 2 -> state XOX/OX./X.O turn=hub X won, outcome code 0
 [user @ 216] contract 1: move_3 by user confirmed: move cell 2, claimed state XOX/OX./X.O turn=hub X won, claimed outcome UserWins
 [user @ 227] contract 1: challenge window (12 blocks) after move_3 passed; broadcasting split_UserWins
-[user @ 228] contract 1 resolved by split_UserWins (5c64aaa65487fc3eb89c892640ced47e9dcdfb7cd0f606e4fc1518255fa28eb4)
+[user @ 228] contract 1 resolved by split_UserWins (ac8f91a3aa76152665ab45aa0e09bf54ceff7a0081eab58c4e02e361123b6f6e)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -134,7 +134,7 @@ block 228: split_3_UserWins 5c64aaa65487fc3eb89c892640ced47e9dcdfb7cd0f606e4fc15
 [hub @ 216] contract 1: move_3 by user confirmed: move cell 2, claimed state XOX/OX./X.O turn=hub X won, claimed outcome UserWins
 [hub @ 216] contract 1: counterparty's move_3 is consistent with the program
 [hub @ 227] contract 1: challenge window (12 blocks) after move_3 passed; broadcasting split_UserWins
-[hub @ 228] contract 1 resolved by split_UserWins (5c64aaa65487fc3eb89c892640ced47e9dcdfb7cd0f606e4fc1518255fa28eb4)
+[hub @ 228] contract 1 resolved by split_UserWins (ac8f91a3aa76152665ab45aa0e09bf54ceff7a0081eab58c4e02e361123b6f6e)
 ```
 </details>
 
@@ -146,23 +146,23 @@ block 228: split_3_UserWins 5c64aaa65487fc3eb89c892640ced47e9dcdfb7cd0f606e4fc15
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `96e38e1ae019a6996dd1e8e4ec00c670a2fead231c44e5cb7886785bf132fc56` |
-| 208 | `commitment_5` | user | `0376149a95964adc0808fa2c98fc7e02aa208b05a701693a7c4690dc5c3df610` |
-| 209 | `claim_to_remote` | hub | `db6cfcc94d095f34490d645e9e27402dca6c2e462439860a49d5198fde164581` |
-| 214 | `claim_to_local` | user | `43ffdd9a2e3c9dbfb6c32eeb99e15eda465bf3e79a9803c38468ed8248ee4ec5` |
-| 214 | `move_1` | user | `41ceefd732e2a06deacaf93cf9c798ce5c828f9df9f465e2afe8ea47af8d68d7` |
-| 226 | `split_1_UserWins` | user | `57baeeef45465f5055103fee838816626330c34796edc9905bcc24ac2d13ccdd` |
+| 204 | `funding` | harness | `b82844d93bcbba4ddd4f1a7519f1f8720f4bbe4ae96d683fcfa909e0f3eb37f6` |
+| 208 | `commitment_5` | user | `9b91f725eeb23aa65b752cd86a7f171cb08c42ae62718e76515cb14342939458` |
+| 209 | `claim_to_remote` | hub | `e518864948c7184af71d6691b5e764873c6b78b0d6d83e03084ca7aec153da1a` |
+| 214 | `claim_to_local` | user | `8bf77c216fca05e8cb158365b4be4ba77f0d19cd37461983686c090535acf150` |
+| 214 | `move_1` | user | `47938a8de84ecd5ab36cb714b1015cd8c2bba1b0b92b297cfa77d7f3c2453352` |
+| 226 | `split_1_UserWins` | user | `37cd4f61dea07ed216f68be9930a21166a05591b5ab2036abff6de8b836770f6` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding 96e38e1ae019a6996dd1e8e4ec00c670a2fead231c44e5cb7886785bf132fc56 (harness) 203 vB / 812 WU
-block 208: commitment_5 0376149a95964adc0808fa2c98fc7e02aa208b05a701693a7c4690dc5c3df610 (user) 240 vB / 958 WU
-block 209: claim_to_remote db6cfcc94d095f34490d645e9e27402dca6c2e462439860a49d5198fde164581 (hub) 129 vB / 513 WU
-block 214: claim_to_local 43ffdd9a2e3c9dbfb6c32eeb99e15eda465bf3e79a9803c38468ed8248ee4ec5 (user) 137 vB / 548 WU
-block 214: move_1 41ceefd732e2a06deacaf93cf9c798ce5c828f9df9f465e2afe8ea47af8d68d7 (user) 671 vB / 2682 WU
-block 226: split_1_UserWins 57baeeef45465f5055103fee838816626330c34796edc9905bcc24ac2d13ccdd (user) 217 vB / 866 WU
+block 204: funding b82844d93bcbba4ddd4f1a7519f1f8720f4bbe4ae96d683fcfa909e0f3eb37f6 (harness) 203 vB / 812 WU
+block 208: commitment_5 9b91f725eeb23aa65b752cd86a7f171cb08c42ae62718e76515cb14342939458 (user) 240 vB / 958 WU
+block 209: claim_to_remote e518864948c7184af71d6691b5e764873c6b78b0d6d83e03084ca7aec153da1a (hub) 129 vB / 513 WU
+block 214: claim_to_local 8bf77c216fca05e8cb158365b4be4ba77f0d19cd37461983686c090535acf150 (user) 137 vB / 548 WU
+block 214: move_1 47938a8de84ecd5ab36cb714b1015cd8c2bba1b0b92b297cfa77d7f3c2453352 (user) 671 vB / 2682 WU
+block 226: split_1_UserWins 37cd4f61dea07ed216f68be9930a21166a05591b5ab2036abff6de8b836770f6 (user) 217 vB / 866 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -181,7 +181,7 @@ block 226: split_1_UserWins 57baeeef45465f5055103fee838816626330c34796edc9905bcc
 [user @ 213] contract 1: broadcasting move_1: cell 6 -> state XO./.X./X.O turn=hub open, outcome code 0
 [user @ 214] contract 1: move_1 by user confirmed: move cell 6, claimed state XO./.X./X.O turn=hub open, claimed outcome UserWins
 [user @ 225] contract 1: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
-[user @ 226] contract 1 resolved by split_UserWins (57baeeef45465f5055103fee838816626330c34796edc9905bcc24ac2d13ccdd)
+[user @ 226] contract 1 resolved by split_UserWins (37cd4f61dea07ed216f68be9930a21166a05591b5ab2036abff6de8b836770f6)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -198,7 +198,7 @@ block 226: split_1_UserWins 57baeeef45465f5055103fee838816626330c34796edc9905bcc
 [hub @ 214] contract 1: move_1 by user confirmed: move cell 6, claimed state XO./.X./X.O turn=hub open, claimed outcome UserWins
 [hub @ 214] contract 1: counterparty's move_1 is consistent with the program
 [hub @ 225] contract 1: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
-[hub @ 226] contract 1 resolved by split_UserWins (57baeeef45465f5055103fee838816626330c34796edc9905bcc24ac2d13ccdd)
+[hub @ 226] contract 1 resolved by split_UserWins (37cd4f61dea07ed216f68be9930a21166a05591b5ab2036abff6de8b836770f6)
 ```
 </details>
 
@@ -210,25 +210,25 @@ block 226: split_1_UserWins 57baeeef45465f5055103fee838816626330c34796edc9905bcc
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `01af058721dd644cc7110b513644cdc614e5acdb9a6e62302b2478c2dfef201c` |
-| 208 | `commitment_5` | user | `7a5c93356fb619bf8ce5da6a0d1460e8085b59526b869197c58f00a4d13307a6` |
-| 209 | `claim_to_remote` | hub | `691ebab4813f5094a32f41c636c34ce12befe74533f3f84a77bef4e2136041dc` |
-| 214 | `claim_to_local` | user | `0a250be70a41bf9be5baece3554e86ff41804bb5f90cbe3be43b48edd1ffcca0` |
-| 214 | `move_1` | user | `8ec5aa56f9bf50fc676726695efdc0c41ad0a3b5b50ef9f0ad8c4b46e0edb762` |
-| 215 | `move_2` | hub | `c01ae6fd5a29f66fdd043f245e45e063ab428a6836af1abf8a767647bf5596a0` |
-| 216 | `disprove_cell_occupied_6` | user | `b619f0c7dd73907869c14a549ff67d1687da7b01eae7a201e82dad24ab374c1f` |
+| 204 | `funding` | harness | `015e6006b93e3c5feee35d0bccc3737f24b623e0ddf6883a586aba706fac42b6` |
+| 208 | `commitment_5` | user | `2a0d12d5b39b4823b7fca6ff3d2800b6bcfa825170447e60d2b18437ed9f8640` |
+| 209 | `claim_to_remote` | hub | `b269258271e0a05398df4a20918e017c3c3dab19700000cf2a6fd888a72766d1` |
+| 214 | `claim_to_local` | user | `53378852d32a65527d3fd66b80b66f67885b2b1cba20834e6fd9d160a9121650` |
+| 214 | `move_1` | user | `e598df0d764b8e3c2f518cf4ca387d976e9089ab75b9a7fad5fdd44be22a7c94` |
+| 215 | `move_2` | hub | `4916a744e1581fbc0a446e0652283c5b82a793d7b6aa3ec2eff8388e2b0d660c` |
+| 216 | `disprove_cell_occupied_6` | user | `abff3cd9f975067c322b2c47dab53e47362155405fc480da4f31442d3dd50d8b` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding 01af058721dd644cc7110b513644cdc614e5acdb9a6e62302b2478c2dfef201c (harness) 203 vB / 812 WU
-block 208: commitment_5 7a5c93356fb619bf8ce5da6a0d1460e8085b59526b869197c58f00a4d13307a6 (user) 240 vB / 958 WU
-block 209: claim_to_remote 691ebab4813f5094a32f41c636c34ce12befe74533f3f84a77bef4e2136041dc (hub) 129 vB / 513 WU
-block 214: claim_to_local 0a250be70a41bf9be5baece3554e86ff41804bb5f90cbe3be43b48edd1ffcca0 (user) 137 vB / 548 WU
-block 214: move_1 8ec5aa56f9bf50fc676726695efdc0c41ad0a3b5b50ef9f0ad8c4b46e0edb762 (user) 663 vB / 2650 WU
-block 215: move_2 c01ae6fd5a29f66fdd043f245e45e063ab428a6836af1abf8a767647bf5596a0 (hub) 694 vB / 2775 WU
-block 216: disprove_cell_occupied_6 b619f0c7dd73907869c14a549ff67d1687da7b01eae7a201e82dad24ab374c1f (user) 280 vB / 1118 WU
+block 204: funding 015e6006b93e3c5feee35d0bccc3737f24b623e0ddf6883a586aba706fac42b6 (harness) 203 vB / 812 WU
+block 208: commitment_5 2a0d12d5b39b4823b7fca6ff3d2800b6bcfa825170447e60d2b18437ed9f8640 (user) 240 vB / 958 WU
+block 209: claim_to_remote b269258271e0a05398df4a20918e017c3c3dab19700000cf2a6fd888a72766d1 (hub) 129 vB / 513 WU
+block 214: claim_to_local 53378852d32a65527d3fd66b80b66f67885b2b1cba20834e6fd9d160a9121650 (user) 137 vB / 548 WU
+block 214: move_1 e598df0d764b8e3c2f518cf4ca387d976e9089ab75b9a7fad5fdd44be22a7c94 (user) 663 vB / 2650 WU
+block 215: move_2 4916a744e1581fbc0a446e0652283c5b82a793d7b6aa3ec2eff8388e2b0d660c (hub) 694 vB / 2775 WU
+block 216: disprove_cell_occupied_6 abff3cd9f975067c322b2c47dab53e47362155405fc480da4f31442d3dd50d8b (user) 280 vB / 1118 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -249,7 +249,7 @@ block 216: disprove_cell_occupied_6 b619f0c7dd73907869c14a549ff67d1687da7b01eae7
 [user @ 215] contract 1: move_2 by hub confirmed: move cell 6, claimed state XO./.X./O.O turn=user open, claimed outcome HubWins
 [user @ 215] contract 1: counterparty's move_2 is INVALID (invalid move: invalid move: cell 6 occupied); disproving
 [user @ 215] contract 1: broadcast disprove_cell_occupied_6 taking 0.00017000 BTC sats
-[user @ 216] contract 1 resolved by disprove_cell_occupied_6 (b619f0c7dd73907869c14a549ff67d1687da7b01eae7a201e82dad24ab374c1f)
+[user @ 216] contract 1 resolved by disprove_cell_occupied_6 (abff3cd9f975067c322b2c47dab53e47362155405fc480da4f31442d3dd50d8b)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -268,7 +268,7 @@ block 216: disprove_cell_occupied_6 b619f0c7dd73907869c14a549ff67d1687da7b01eae7
 [hub @ 214] contract 1: CHEATING in move_2: claiming move cell 6 state XO./.X./O.O turn=user open code 1
 [hub @ 214] contract 1: broadcasting move_2: cell 6 -> state XO./.X./O.O turn=user open, outcome code 1
 [hub @ 215] contract 1: move_2 by hub confirmed: move cell 6, claimed state XO./.X./O.O turn=user open, claimed outcome HubWins
-[hub @ 216] contract 1 resolved by disprove_cell_occupied_6 (b619f0c7dd73907869c14a549ff67d1687da7b01eae7a201e82dad24ab374c1f)
+[hub @ 216] contract 1 resolved by disprove_cell_occupied_6 (abff3cd9f975067c322b2c47dab53e47362155405fc480da4f31442d3dd50d8b)
 ```
 </details>
 
@@ -280,25 +280,25 @@ block 216: disprove_cell_occupied_6 b619f0c7dd73907869c14a549ff67d1687da7b01eae7
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `bf51ba3b59c34596b7629b4f740e7d7a495df95fb6741961dffea5e568303a14` |
-| 208 | `commitment_5` | user | `0c21e8974c39d4e2df5869717e0bd151d4d32652d1c6339fe0db6ed88f44be33` |
-| 209 | `claim_to_remote` | hub | `12cbeeeb09bbb3bb1dc0011cdfc63f7f925855d7114c2e54124b87d10a2592bf` |
-| 214 | `claim_to_local` | user | `f1bd872733d1815b11e75a6d558408ea47192a459cba8f1568d70938f98a8eba` |
-| 214 | `move_1` | user | `08f31202764c60c19259f1aae1d143c9f4b258ec7da8cda6e8fb98bd4fbaec9a` |
-| 215 | `move_2` | hub | `b0874064dc4d3cbd8d4f48e7733f6126dd275d9812138786c13283f415c52a1b` |
-| 216 | `disprove_board_mismatch_5` | user | `62bd1fa7004ca39a5ad1f61ddd87d2ff0b91ab6771d30d854db1886ba8bd296e` |
+| 204 | `funding` | harness | `e58111033e835e81a82024cfb0bea28b2043fe34bd736bd6ca59c727d1301aa2` |
+| 208 | `commitment_5` | user | `29b8640ca07b01b353df3dd9c60a5450fc026a817b83bca033510eea17829382` |
+| 209 | `claim_to_remote` | hub | `8e4fd4d57bdf7c2d79a9793ac3869300c970d89703909217c112a547d80783b6` |
+| 214 | `claim_to_local` | user | `bfc751cda7d9c489d431f10f4150da51bf3bf70ed4559f3bc73ccc93d64027cd` |
+| 214 | `move_1` | user | `9134fb0adf1dec3cf55d84e7e4a85ea6d8ddc6699fc612a9caeb64bd25ed16de` |
+| 215 | `move_2` | hub | `8c1e48abc3902b9a0239a69efb7e8686468930994c35af9df441e6bd0e429a8a` |
+| 216 | `disprove_board_mismatch_5` | user | `4be31ef7e3a0b78ab7d665b640881fe8e9d21df749df642c8bce3fb7dbf99d6a` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding bf51ba3b59c34596b7629b4f740e7d7a495df95fb6741961dffea5e568303a14 (harness) 203 vB / 812 WU
-block 208: commitment_5 0c21e8974c39d4e2df5869717e0bd151d4d32652d1c6339fe0db6ed88f44be33 (user) 240 vB / 958 WU
-block 209: claim_to_remote 12cbeeeb09bbb3bb1dc0011cdfc63f7f925855d7114c2e54124b87d10a2592bf (hub) 129 vB / 513 WU
-block 214: claim_to_local f1bd872733d1815b11e75a6d558408ea47192a459cba8f1568d70938f98a8eba (user) 137 vB / 548 WU
-block 214: move_1 08f31202764c60c19259f1aae1d143c9f4b258ec7da8cda6e8fb98bd4fbaec9a (user) 663 vB / 2650 WU
-block 215: move_2 b0874064dc4d3cbd8d4f48e7733f6126dd275d9812138786c13283f415c52a1b (hub) 686 vB / 2743 WU
-block 216: disprove_board_mismatch_5 62bd1fa7004ca39a5ad1f61ddd87d2ff0b91ab6771d30d854db1886ba8bd296e (user) 329 vB / 1313 WU
+block 204: funding e58111033e835e81a82024cfb0bea28b2043fe34bd736bd6ca59c727d1301aa2 (harness) 203 vB / 812 WU
+block 208: commitment_5 29b8640ca07b01b353df3dd9c60a5450fc026a817b83bca033510eea17829382 (user) 240 vB / 958 WU
+block 209: claim_to_remote 8e4fd4d57bdf7c2d79a9793ac3869300c970d89703909217c112a547d80783b6 (hub) 129 vB / 513 WU
+block 214: claim_to_local bfc751cda7d9c489d431f10f4150da51bf3bf70ed4559f3bc73ccc93d64027cd (user) 137 vB / 548 WU
+block 214: move_1 9134fb0adf1dec3cf55d84e7e4a85ea6d8ddc6699fc612a9caeb64bd25ed16de (user) 663 vB / 2650 WU
+block 215: move_2 8c1e48abc3902b9a0239a69efb7e8686468930994c35af9df441e6bd0e429a8a (hub) 686 vB / 2743 WU
+block 216: disprove_board_mismatch_5 4be31ef7e3a0b78ab7d665b640881fe8e9d21df749df642c8bce3fb7dbf99d6a (user) 329 vB / 1313 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -319,7 +319,7 @@ block 216: disprove_board_mismatch_5 62bd1fa7004ca39a5ad1f61ddd87d2ff0b91ab6771d
 [user @ 215] contract 1: move_2 by hub confirmed: move cell 3, claimed state XO./OXO/X.O turn=user open, claimed outcome HubWins
 [user @ 215] contract 1: counterparty's move_2 is INVALID (claimed state does not match the transition); disproving
 [user @ 215] contract 1: broadcast disprove_board_mismatch_5 taking 0.00017000 BTC sats
-[user @ 216] contract 1 resolved by disprove_board_mismatch_5 (62bd1fa7004ca39a5ad1f61ddd87d2ff0b91ab6771d30d854db1886ba8bd296e)
+[user @ 216] contract 1 resolved by disprove_board_mismatch_5 (4be31ef7e3a0b78ab7d665b640881fe8e9d21df749df642c8bce3fb7dbf99d6a)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -338,7 +338,7 @@ block 216: disprove_board_mismatch_5 62bd1fa7004ca39a5ad1f61ddd87d2ff0b91ab6771d
 [hub @ 214] contract 1: CHEATING in move_2: claiming move cell 3 state XO./OXO/X.O turn=user open code 1
 [hub @ 214] contract 1: broadcasting move_2: cell 3 -> state XO./OXO/X.O turn=user open, outcome code 1
 [hub @ 215] contract 1: move_2 by hub confirmed: move cell 3, claimed state XO./OXO/X.O turn=user open, claimed outcome HubWins
-[hub @ 216] contract 1 resolved by disprove_board_mismatch_5 (62bd1fa7004ca39a5ad1f61ddd87d2ff0b91ab6771d30d854db1886ba8bd296e)
+[hub @ 216] contract 1 resolved by disprove_board_mismatch_5 (4be31ef7e3a0b78ab7d665b640881fe8e9d21df749df642c8bce3fb7dbf99d6a)
 ```
 </details>
 
@@ -350,25 +350,25 @@ block 216: disprove_board_mismatch_5 62bd1fa7004ca39a5ad1f61ddd87d2ff0b91ab6771d
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `5ebdd05512b96bd4194a07a750fef1f699f43fa8d4e5798e961c3ee53b989237` |
-| 208 | `commitment_5` | user | `ac15ec592f0d02c3d839109cb75f6b2439f9d529d8ab2409690bde8056267025` |
-| 209 | `claim_to_remote` | hub | `07bcf26e4b77382db61af6ab5a6cca37c03e5d899c3cbc1af5eb8fce4893fd42` |
-| 214 | `claim_to_local` | user | `cd0973cd43a7aecaf1cbd0f028616ae6aa636962423dbd710fe8174ee5684422` |
-| 214 | `move_1` | user | `71a7d920c31a1a13fe92dd47db14b839de46a89a668e60cb056d086dd2bc54f6` |
-| 215 | `move_2` | hub | `f88a2c788db9e81085bc8f21409b180d6f8a112ba85f66f997a898733a20aef1` |
-| 216 | `disprove_status_mismatch` | user | `707a95ca878c1ec41e5db39000eb63e0cd7abeacb042cecb669ca0e04e7820fc` |
+| 204 | `funding` | harness | `6135894b48817e07c02259f7e783dac38feb48e0ff87a0aaae81029942e5214d` |
+| 208 | `commitment_5` | user | `03286b2551a201fe855083ceeddb30e19b6c73e153740de07f8f69f254475d4d` |
+| 209 | `claim_to_remote` | hub | `47b3348307412d9e6616848df4c00244a67ac12ef96a28c606921e182da25650` |
+| 214 | `claim_to_local` | user | `4d29a2ec6e13484940c9d6243fc03d34dd1899c5079ae2601f2b7d278d6379ff` |
+| 214 | `move_1` | user | `9579b0e857d5d88f52c57938ded4b5a9a17d5ae06c9118b7d8aff09d53ea2201` |
+| 215 | `move_2` | hub | `665876b79d11bee40ce366eb87db89848e1828823dd9724038a1f9d219052b72` |
+| 216 | `disprove_status_mismatch` | user | `6cc4c1d071e11ad9725d339ecc73700bdc898f469b86eaa0a9ccfce19607f34c` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding 5ebdd05512b96bd4194a07a750fef1f699f43fa8d4e5798e961c3ee53b989237 (harness) 203 vB / 812 WU
-block 208: commitment_5 ac15ec592f0d02c3d839109cb75f6b2439f9d529d8ab2409690bde8056267025 (user) 240 vB / 958 WU
-block 209: claim_to_remote 07bcf26e4b77382db61af6ab5a6cca37c03e5d899c3cbc1af5eb8fce4893fd42 (hub) 129 vB / 513 WU
-block 214: claim_to_local cd0973cd43a7aecaf1cbd0f028616ae6aa636962423dbd710fe8174ee5684422 (user) 137 vB / 548 WU
-block 214: move_1 71a7d920c31a1a13fe92dd47db14b839de46a89a668e60cb056d086dd2bc54f6 (user) 671 vB / 2682 WU
-block 215: move_2 f88a2c788db9e81085bc8f21409b180d6f8a112ba85f66f997a898733a20aef1 (hub) 686 vB / 2743 WU
-block 216: disprove_status_mismatch 707a95ca878c1ec41e5db39000eb63e0cd7abeacb042cecb669ca0e04e7820fc (user) 610 vB / 2440 WU
+block 204: funding 6135894b48817e07c02259f7e783dac38feb48e0ff87a0aaae81029942e5214d (harness) 203 vB / 812 WU
+block 208: commitment_5 03286b2551a201fe855083ceeddb30e19b6c73e153740de07f8f69f254475d4d (user) 240 vB / 958 WU
+block 209: claim_to_remote 47b3348307412d9e6616848df4c00244a67ac12ef96a28c606921e182da25650 (hub) 129 vB / 513 WU
+block 214: claim_to_local 4d29a2ec6e13484940c9d6243fc03d34dd1899c5079ae2601f2b7d278d6379ff (user) 137 vB / 548 WU
+block 214: move_1 9579b0e857d5d88f52c57938ded4b5a9a17d5ae06c9118b7d8aff09d53ea2201 (user) 671 vB / 2682 WU
+block 215: move_2 665876b79d11bee40ce366eb87db89848e1828823dd9724038a1f9d219052b72 (hub) 686 vB / 2743 WU
+block 216: disprove_status_mismatch 6cc4c1d071e11ad9725d339ecc73700bdc898f469b86eaa0a9ccfce19607f34c (user) 610 vB / 2440 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -389,7 +389,7 @@ block 216: disprove_status_mismatch 707a95ca878c1ec41e5db39000eb63e0cd7abeacb042
 [user @ 215] contract 1: move_2 by hub confirmed: move cell 3, claimed state XO./OX./X.O turn=user O won, claimed outcome HubWins
 [user @ 215] contract 1: counterparty's move_2 is INVALID (claimed state does not match the transition); disproving
 [user @ 215] contract 1: broadcast disprove_status_mismatch taking 0.00017000 BTC sats
-[user @ 216] contract 1 resolved by disprove_status_mismatch (707a95ca878c1ec41e5db39000eb63e0cd7abeacb042cecb669ca0e04e7820fc)
+[user @ 216] contract 1 resolved by disprove_status_mismatch (6cc4c1d071e11ad9725d339ecc73700bdc898f469b86eaa0a9ccfce19607f34c)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -408,7 +408,7 @@ block 216: disprove_status_mismatch 707a95ca878c1ec41e5db39000eb63e0cd7abeacb042
 [hub @ 214] contract 1: CHEATING in move_2: claiming move cell 3 state XO./OX./X.O turn=user O won code 1
 [hub @ 214] contract 1: broadcasting move_2: cell 3 -> state XO./OX./X.O turn=user O won, outcome code 1
 [hub @ 215] contract 1: move_2 by hub confirmed: move cell 3, claimed state XO./OX./X.O turn=user O won, claimed outcome HubWins
-[hub @ 216] contract 1 resolved by disprove_status_mismatch (707a95ca878c1ec41e5db39000eb63e0cd7abeacb042cecb669ca0e04e7820fc)
+[hub @ 216] contract 1 resolved by disprove_status_mismatch (6cc4c1d071e11ad9725d339ecc73700bdc898f469b86eaa0a9ccfce19607f34c)
 ```
 </details>
 
@@ -420,25 +420,25 @@ block 216: disprove_status_mismatch 707a95ca878c1ec41e5db39000eb63e0cd7abeacb042
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `8a0d929187caf8ca31a3617ab5ba51d2697bc03ebca88a671d7f3f1a863a9d24` |
-| 208 | `commitment_5` | user | `eb232c6ef9b25e685ad0b328da435a45bf42c6afd0eb009c202301b193f1440f` |
-| 209 | `claim_to_remote` | hub | `d8cb13dcc43e39d6b57fbad1f6908b11a5ce38e553dd330a98a242bf60ece2ed` |
-| 214 | `claim_to_local` | user | `b83b9a56e35d19b27059e95227b0613856d1fb0bc838d43f0e54ec3df5e098ce` |
-| 214 | `move_1` | user | `5cb9ae14e3a7ade3eb259348a99b0430d679f3312e7971ca578d03c2d47a0b5f` |
-| 215 | `move_2` | hub | `6e0fe53881a4ad03b301d4b7c309dee24a2fd91812f026f025416b9af61c7d0f` |
-| 216 | `disprove_code_mismatch` | user | `f54a29f7bb713c721b4a77ac8a05e68edf60c3968c5b604e55131b1cfb2addde` |
+| 204 | `funding` | harness | `23faebe7849d30b7d7e090e0d0836a055c494f63f0b59fdadf747f88df511fc0` |
+| 208 | `commitment_5` | user | `09a927e3acb1c91fc98c686fce87f4b378572fa52536a5b689a28b6cad7f81d2` |
+| 209 | `claim_to_remote` | hub | `c0ab1ad629812ff8d6b9528b2127eb43e40452ddc3a913485b88c7f18b2a1219` |
+| 214 | `claim_to_local` | user | `3cac257591b32f07ff85c00d82713157302594c3e562c68ed69f5c0301282ec3` |
+| 214 | `move_1` | user | `aeff1448e13f9e63b81eb0b1853244ec6306eacb39d809e14854464dfebc6a5c` |
+| 215 | `move_2` | hub | `a2598135689981d9b0f99a2b5894674466db95dff64dc0f420e84dce1989a0a4` |
+| 216 | `disprove_code_mismatch` | user | `0f96881f3928127592a4e2fa6a5c839033e3ddf30d639ae08ba4efb8457cb19c` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding 8a0d929187caf8ca31a3617ab5ba51d2697bc03ebca88a671d7f3f1a863a9d24 (harness) 203 vB / 812 WU
-block 208: commitment_5 eb232c6ef9b25e685ad0b328da435a45bf42c6afd0eb009c202301b193f1440f (user) 240 vB / 958 WU
-block 209: claim_to_remote d8cb13dcc43e39d6b57fbad1f6908b11a5ce38e553dd330a98a242bf60ece2ed (hub) 129 vB / 513 WU
-block 214: claim_to_local b83b9a56e35d19b27059e95227b0613856d1fb0bc838d43f0e54ec3df5e098ce (user) 137 vB / 548 WU
-block 214: move_1 5cb9ae14e3a7ade3eb259348a99b0430d679f3312e7971ca578d03c2d47a0b5f (user) 671 vB / 2682 WU
-block 215: move_2 6e0fe53881a4ad03b301d4b7c309dee24a2fd91812f026f025416b9af61c7d0f (hub) 694 vB / 2775 WU
-block 216: disprove_code_mismatch f54a29f7bb713c721b4a77ac8a05e68edf60c3968c5b604e55131b1cfb2addde (user) 272 vB / 1086 WU
+block 204: funding 23faebe7849d30b7d7e090e0d0836a055c494f63f0b59fdadf747f88df511fc0 (harness) 203 vB / 812 WU
+block 208: commitment_5 09a927e3acb1c91fc98c686fce87f4b378572fa52536a5b689a28b6cad7f81d2 (user) 240 vB / 958 WU
+block 209: claim_to_remote c0ab1ad629812ff8d6b9528b2127eb43e40452ddc3a913485b88c7f18b2a1219 (hub) 129 vB / 513 WU
+block 214: claim_to_local 3cac257591b32f07ff85c00d82713157302594c3e562c68ed69f5c0301282ec3 (user) 137 vB / 548 WU
+block 214: move_1 aeff1448e13f9e63b81eb0b1853244ec6306eacb39d809e14854464dfebc6a5c (user) 671 vB / 2682 WU
+block 215: move_2 a2598135689981d9b0f99a2b5894674466db95dff64dc0f420e84dce1989a0a4 (hub) 694 vB / 2775 WU
+block 216: disprove_code_mismatch 0f96881f3928127592a4e2fa6a5c839033e3ddf30d639ae08ba4efb8457cb19c (user) 272 vB / 1086 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -459,7 +459,7 @@ block 216: disprove_code_mismatch f54a29f7bb713c721b4a77ac8a05e68edf60c3968c5b60
 [user @ 215] contract 1: move_2 by hub confirmed: move cell 3, claimed state XO./OX./X.O turn=user open, claimed outcome Draw
 [user @ 215] contract 1: counterparty's move_2 is INVALID (claimed outcome code 2 but R(s') = 1 (HubWins)); disproving
 [user @ 215] contract 1: broadcast disprove_code_mismatch taking 0.00017000 BTC sats
-[user @ 216] contract 1 resolved by disprove_code_mismatch (f54a29f7bb713c721b4a77ac8a05e68edf60c3968c5b604e55131b1cfb2addde)
+[user @ 216] contract 1 resolved by disprove_code_mismatch (0f96881f3928127592a4e2fa6a5c839033e3ddf30d639ae08ba4efb8457cb19c)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -478,7 +478,7 @@ block 216: disprove_code_mismatch f54a29f7bb713c721b4a77ac8a05e68edf60c3968c5b60
 [hub @ 214] contract 1: CHEATING in move_2: claiming move cell 3 state XO./OX./X.O turn=user open code 2
 [hub @ 214] contract 1: broadcasting move_2: cell 3 -> state XO./OX./X.O turn=user open, outcome code 2
 [hub @ 215] contract 1: move_2 by hub confirmed: move cell 3, claimed state XO./OX./X.O turn=user open, claimed outcome Draw
-[hub @ 216] contract 1 resolved by disprove_code_mismatch (f54a29f7bb713c721b4a77ac8a05e68edf60c3968c5b604e55131b1cfb2addde)
+[hub @ 216] contract 1 resolved by disprove_code_mismatch (0f96881f3928127592a4e2fa6a5c839033e3ddf30d639ae08ba4efb8457cb19c)
 ```
 </details>
 
@@ -490,17 +490,17 @@ block 216: disprove_code_mismatch f54a29f7bb713c721b4a77ac8a05e68edf60c3968c5b60
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `440f8a178ebc376b2cad5b2434c977f4ad0dcb668adbab1eb8e66c5c58dacf45` |
-| 205 | `commitment_3` | hub | `c50d9e6e04ef92b5a2744f0c90c9741599d7ba1b0d9a550ca9698a404a314d3b` |
-| 206 | `revoke_sweep_3` | user | `8b6c2726a1ead072935b32ca275ae825aaabadf3f6730476fefb74704dee680a` |
+| 204 | `funding` | harness | `f618eb9d2aec935a6b09cef1283d8fe6781e4e8133758e2acb8503b9edcfb6a9` |
+| 205 | `commitment_3` | hub | `f628929a5e37d9ee2b344d8d77f371fde8a8ac9bfede0080b2ebf0f8bf862fe1` |
+| 206 | `revoke_sweep_3` | user | `31d48f5311b4bb4dc070b1b66d6916013326768a5d2cac415012493edbbfb4a9` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding 440f8a178ebc376b2cad5b2434c977f4ad0dcb668adbab1eb8e66c5c58dacf45 (harness) 203 vB / 812 WU
-block 205: commitment_3 c50d9e6e04ef92b5a2744f0c90c9741599d7ba1b0d9a550ca9698a404a314d3b (hub) 240 vB / 958 WU
-block 206: revoke_sweep_3 8b6c2726a1ead072935b32ca275ae825aaabadf3f6730476fefb74704dee680a (user) 322 vB / 1287 WU
+block 204: funding f618eb9d2aec935a6b09cef1283d8fe6781e4e8133758e2acb8503b9edcfb6a9 (harness) 203 vB / 812 WU
+block 205: commitment_3 f628929a5e37d9ee2b344d8d77f371fde8a8ac9bfede0080b2ebf0f8bf862fe1 (hub) 240 vB / 958 WU
+block 206: revoke_sweep_3 31d48f5311b4bb4dc070b1b66d6916013326768a5d2cac415012493edbbfb4a9 (user) 322 vB / 1287 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -542,7 +542,7 @@ block 206: revoke_sweep_3 8b6c2726a1ead072935b32ca275ae825aaabadf3f6730476fefb74
 [hub @ 204] state 9 signed by both
 [hub @ 205] my commitment for state 3 confirmed with 1 contract output(s)
 [hub @ 205] contract 1 on-chain at depth 0: state .O./.X./... turn=user open, turn Some(User), deadline 224
-[hub @ 206] contract 1 resolved by revoke (8b6c2726a1ead072935b32ca275ae825aaabadf3f6730476fefb74704dee680a)
+[hub @ 206] contract 1 resolved by revoke (31d48f5311b4bb4dc070b1b66d6916013326768a5d2cac415012493edbbfb4a9)
 ```
 </details>
 
@@ -554,23 +554,23 @@ block 206: revoke_sweep_3 8b6c2726a1ead072935b32ca275ae825aaabadf3f6730476fefb74
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `972113941c6474a197624b683003dd345f504d5d7e083a4f904e815a33b3d279` |
-| 208 | `commitment_4` | hub | `de99a57b419de396a1e4d8f5d69ff4bc98c6e334e5d659a399b91de2121ec3ae` |
-| 209 | `claim_to_remote` | user | `c9685f94ec3d545dd31345c1d7eb06fadffad14f5f42ef5a28687cce8ba65d8a` |
-| 214 | `claim_to_local` | hub | `1427aadaff604a75efd7c1b479d6e9cb5fb4417bc05a5c6791aae55f6736506a` |
-| 214 | `move_1` | hub | `a9ba7c98e7f8ec6671f36ee12fff17cc7b6792823d700d2347b3efa2fe151ccb` |
-| 226 | `split_1_HubWins` | user | `dfc76db2239b306e5bf3e51bea81dbae7a0a11284e628ecf0fbe7c50a56a28b4` |
+| 204 | `funding` | harness | `a0f61754c27c578eaa5482cfe9f798ed3b14fb5a243bb7670f28a636e4ee71b7` |
+| 208 | `commitment_4` | hub | `3ae85aa132149ca4647d66fda60487e0776f10af551a8bc80bc12c4db0cca00a` |
+| 209 | `claim_to_remote` | user | `b7c129771c7a531de22d6c4973452033125973d2d7936b96dd79d72518e5a369` |
+| 214 | `claim_to_local` | hub | `6fd4bf0cbe610be2b14ed946ec71c5f7511dff8d286420f7a75fe0d9f96546c6` |
+| 214 | `move_1` | hub | `8ffab7a01397dce6d6286529c1d66ea0b9b58a40e0956794511d9c470652d0a5` |
+| 226 | `split_1_HubWins` | user | `5feb95e179c2aa9cd3d9149b851b7a8e47a9c583cae30930709c09ffb80ee2f3` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding 972113941c6474a197624b683003dd345f504d5d7e083a4f904e815a33b3d279 (harness) 203 vB / 812 WU
-block 208: commitment_4 de99a57b419de396a1e4d8f5d69ff4bc98c6e334e5d659a399b91de2121ec3ae (hub) 240 vB / 958 WU
-block 209: claim_to_remote c9685f94ec3d545dd31345c1d7eb06fadffad14f5f42ef5a28687cce8ba65d8a (user) 129 vB / 513 WU
-block 214: claim_to_local 1427aadaff604a75efd7c1b479d6e9cb5fb4417bc05a5c6791aae55f6736506a (hub) 137 vB / 548 WU
-block 214: move_1 a9ba7c98e7f8ec6671f36ee12fff17cc7b6792823d700d2347b3efa2fe151ccb (hub) 671 vB / 2682 WU
-block 226: split_1_HubWins dfc76db2239b306e5bf3e51bea81dbae7a0a11284e628ecf0fbe7c50a56a28b4 (user) 217 vB / 866 WU
+block 204: funding a0f61754c27c578eaa5482cfe9f798ed3b14fb5a243bb7670f28a636e4ee71b7 (harness) 203 vB / 812 WU
+block 208: commitment_4 3ae85aa132149ca4647d66fda60487e0776f10af551a8bc80bc12c4db0cca00a (hub) 240 vB / 958 WU
+block 209: claim_to_remote b7c129771c7a531de22d6c4973452033125973d2d7936b96dd79d72518e5a369 (user) 129 vB / 513 WU
+block 214: claim_to_local 6fd4bf0cbe610be2b14ed946ec71c5f7511dff8d286420f7a75fe0d9f96546c6 (hub) 137 vB / 548 WU
+block 214: move_1 8ffab7a01397dce6d6286529c1d66ea0b9b58a40e0956794511d9c470652d0a5 (hub) 671 vB / 2682 WU
+block 226: split_1_HubWins 5feb95e179c2aa9cd3d9149b851b7a8e47a9c583cae30930709c09ffb80ee2f3 (user) 217 vB / 866 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -585,7 +585,7 @@ block 226: split_1_HubWins dfc76db2239b306e5bf3e51bea81dbae7a0a11284e628ecf0fbe7
 [user @ 214] contract 1: move_1 by hub confirmed: move cell 8, claimed state XO./.X./..O turn=user open, claimed outcome HubWins
 [user @ 214] contract 1: counterparty's move_1 is consistent with the program
 [user @ 225] contract 1: challenge window (12 blocks) after move_1 passed; broadcasting split_HubWins
-[user @ 226] contract 1 resolved by split_HubWins (dfc76db2239b306e5bf3e51bea81dbae7a0a11284e628ecf0fbe7c50a56a28b4)
+[user @ 226] contract 1 resolved by split_HubWins (5feb95e179c2aa9cd3d9149b851b7a8e47a9c583cae30930709c09ffb80ee2f3)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -602,7 +602,7 @@ block 226: split_1_HubWins dfc76db2239b306e5bf3e51bea81dbae7a0a11284e628ecf0fbe7
 [hub @ 213] contract 1: broadcasting move_1: cell 8 -> state XO./.X./..O turn=user open, outcome code 1
 [hub @ 214] contract 1: move_1 by hub confirmed: move cell 8, claimed state XO./.X./..O turn=user open, claimed outcome HubWins
 [hub @ 225] contract 1: challenge window (12 blocks) after move_1 passed; broadcasting split_HubWins
-[hub @ 226] contract 1 resolved by split_HubWins (dfc76db2239b306e5bf3e51bea81dbae7a0a11284e628ecf0fbe7c50a56a28b4)
+[hub @ 226] contract 1 resolved by split_HubWins (5feb95e179c2aa9cd3d9149b851b7a8e47a9c583cae30930709c09ffb80ee2f3)
 ```
 </details>
 
@@ -614,21 +614,21 @@ block 226: split_1_HubWins dfc76db2239b306e5bf3e51bea81dbae7a0a11284e628ecf0fbe7
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `cd6bfa3001c225f394eff406b421308eba758dc22c22f8d0cb675694ce8b5008` |
-| 205 | `commitment_5` | hub | `d3d2ae51a26bb0417749e4ebef08ca5b648272e3dba375ac4f5b17e4b3e20fd9` |
-| 206 | `claim_to_remote` | user | `214fb0a9cd671d88da7f8947d2da54185556bc91c734ef84af6c67941a746250` |
-| 211 | `claim_to_local` | hub | `4efd33da711484abdf1d147493be4fdbdf38f8429418eec330e291fba1dd9e5a` |
-| 225 | `settle` | user | `9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6ac` |
+| 204 | `funding` | harness | `0019f1be9471cd7d5f0e70b56288549590d36d04e35caa489c37fedd867e8ddf` |
+| 205 | `commitment_5` | hub | `fd1d4ba79e52fb4e22e0b095ef5b68c4e1f07c6271540c97e9c2b72252ff8ade` |
+| 206 | `claim_to_remote` | user | `bccbba9bd8bfce08fb34acaf8500a989274f4e32d75f3aa9827e8227f75fdc97` |
+| 211 | `claim_to_local` | hub | `dbc20051814f1be7d60ef820420194093c86ad960810d801d26497716115b454` |
+| 225 | `settle` | user | `f11fdd82647bfaffde98bb1035ea2597146ce5e3c1ef4470c365c43abef68a9d` |
 
 <details><summary>narrative</summary>
 
 ```
 --- on-chain ---
-block 204: funding cd6bfa3001c225f394eff406b421308eba758dc22c22f8d0cb675694ce8b5008 (harness) 203 vB / 812 WU
-block 205: commitment_5 d3d2ae51a26bb0417749e4ebef08ca5b648272e3dba375ac4f5b17e4b3e20fd9 (hub) 240 vB / 958 WU
-block 206: claim_to_remote 214fb0a9cd671d88da7f8947d2da54185556bc91c734ef84af6c67941a746250 (user) 129 vB / 513 WU
-block 211: claim_to_local 4efd33da711484abdf1d147493be4fdbdf38f8429418eec330e291fba1dd9e5a (hub) 137 vB / 548 WU
-block 225: settle 9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6ac (user) 172 vB / 686 WU
+block 204: funding 0019f1be9471cd7d5f0e70b56288549590d36d04e35caa489c37fedd867e8ddf (harness) 203 vB / 812 WU
+block 205: commitment_5 fd1d4ba79e52fb4e22e0b095ef5b68c4e1f07c6271540c97e9c2b72252ff8ade (hub) 240 vB / 958 WU
+block 206: claim_to_remote bccbba9bd8bfce08fb34acaf8500a989274f4e32d75f3aa9827e8227f75fdc97 (user) 129 vB / 513 WU
+block 211: claim_to_local dbc20051814f1be7d60ef820420194093c86ad960810d801d26497716115b454 (hub) 137 vB / 548 WU
+block 225: settle f11fdd82647bfaffde98bb1035ea2597146ce5e3c1ef4470c365c43abef68a9d (user) 172 vB / 686 WU
 --- user ---
 [user @ 204] propose seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [user @ 204] state 1 signed by both
@@ -643,7 +643,7 @@ block 225: settle 9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6
 [user @ 205] counterparty's commitment for state 5 confirmed with 1 contract output(s)
 [user @ 205] contract 1 on-chain at depth 0: state XO./.X./..O turn=user open, turn Some(User), deadline 224
 [user @ 224] contract 1: deadline 224 passed with no move; broadcasting settle (R(s) = HubWins)
-[user @ 225] contract 1 resolved by settle (9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6ac)
+[user @ 225] contract 1 resolved by settle (f11fdd82647bfaffde98bb1035ea2597146ce5e3c1ef4470c365c43abef68a9d)
 --- hub ---
 [hub @ 204] accept draft seq 1: open contract 1 (tictactoe) stakes 0.00010000 BTC/0.00010000 BTC deadline 224
 [hub @ 204] state 1 signed by both
@@ -658,7 +658,7 @@ block 225: settle 9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6
 [hub @ 205] my commitment for state 5 confirmed with 1 contract output(s)
 [hub @ 205] contract 1 on-chain at depth 0: state XO./.X./..O turn=user open, turn Some(User), deadline 224
 [hub @ 224] contract 1: deadline 224 passed with no move; broadcasting settle (R(s) = HubWins)
-[hub @ 225] contract 1 resolved by settle (9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6ac)
+[hub @ 225] contract 1 resolved by settle (f11fdd82647bfaffde98bb1035ea2597146ce5e3c1ef4470c365c43abef68a9d)
 ```
 </details>
 
@@ -670,10 +670,10 @@ block 225: settle 9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `bd4add645c0c06c7f723cdb28fc4d94e05b9cad1c74ccf25df48d66e22e2ea6e` |
-| 208 | `bob:funding` | hub-registry | `d9ed830b82e0115479a9435a96db69122eafde2ddf9f324ebb089307ae4967bd` |
-| 210 | `alice:anchor` | hub-registry | `f67cba8165acd1160b3b5afc066dd141b8e24db11bb15ab648d4c824a9a2dc68` |
-| 213 | `alice:anchor` | hub-registry | `31b039494f35565a72f4df2b61cf65f71299a8a4d92f5ae796ead2360a70894d` |
+| 205 | `alice:funding` | hub-registry | `0a1968594ba5e9378d1af45c01eac8c0c7676a9015f78ee6bdbad70f3275b324` |
+| 208 | `bob:funding` | hub-registry | `8fd3fc232cb4b31d252045bc203044170acae47b2ff31f7ae773abb3c8ee8e28` |
+| 210 | `alice:anchor` | hub-registry | `041e7d234fcec70b7911534ccf4b159a654abd54b87ed80468a076d5d4c0e7bb` |
+| 213 | `alice:anchor` | hub-registry | `653ae6127a15be1868eb413d5a5633b49ce87e79f42272bc2f1855b1c113b3cf` |
 
 <details><summary>narrative</summary>
 
@@ -685,29 +685,29 @@ block 225: settle 9d709eaec4032a221df2557d893afe8136d9aaaa6239aafad406ac5ac43ae6
 [world @ 213] proof data for request 2 served (entry anchored)
 --- registry ---
 [registry] promised request 1 (commit e8254b0a490126fa) for the anchor at 210
-[registry] built anchor f67cba8165acd1160b3b5afc066dd141b8e24db11bb15ab648d4c824a9a2dc68 for requests [1], root 43adecca608df565, to confirm at 210
+[registry] built anchor 041e7d234fcec70b7911534ccf4b159a654abd54b87ed80468a076d5d4c0e7bb for requests [1], root 43adecca608df565, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root 43adecca608df565
 [registry] promised request 2 (reveal alice -> 1ebbd83e) for the anchor at 213
-[registry] built anchor 31b039494f35565a72f4df2b61cf65f71299a8a4d92f5ae796ead2360a70894d for requests [2], root 6222a1f7916bab5d, to confirm at 213
+[registry] built anchor 653ae6127a15be1868eb413d5a5633b49ce87e79f42272bc2f1855b1c113b3cf for requests [2], root 6222a1f7916bab5d, to confirm at 213
 [registry] anchor confirmed at 213 carrying requests [2]; root 6222a1f7916bab5d
 === alice's channel ===
 --- on-chain ---
-block 205: funding bd4add645c0c06c7f723cdb28fc4d94e05b9cad1c74ccf25df48d66e22e2ea6e (harness) 203 vB / 812 WU
-block 210: anchor f67cba8165acd1160b3b5afc066dd141b8e24db11bb15ab648d4c824a9a2dc68 (harness) 225 vB / 900 WU
-block 213: anchor 31b039494f35565a72f4df2b61cf65f71299a8a4d92f5ae796ead2360a70894d (harness) 225 vB / 900 WU
+block 205: funding 0a1968594ba5e9378d1af45c01eac8c0c7676a9015f78ee6bdbad70f3275b324 (harness) 203 vB / 812 WU
+block 210: anchor 041e7d234fcec70b7911534ccf4b159a654abd54b87ed80468a076d5d4c0e7bb (harness) 225 vB / 900 WU
+block 213: anchor 653ae6127a15be1868eb413d5a5633b49ce87e79f42272bc2f1855b1c113b3cf (harness) 225 vB / 900 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[197,71,174,186,214,115,236,167,98,133,60,255,137,91,73,197,127,86,36,6,159,231,226,32,7,102,53,195,115,190,197,21],"nbits":545259519,"n_headers":2},"prev_anchor":"5a0458a24da254a6660a05d15ffea78c2bbac8ee5428444b0657bd7015a3fe30:0","entry":"01e8254b0a490126faf7860d858bae51a56624e213f8d9b62995bf9b669854eec500000000000000000000000000000000000000000000000000000000000000","key":580520741,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[195,121,136,1,183,209,107,101,43,166,145,254,212,95,37,23,218,11,163,65,58,76,220,67,40,243,98,145,217,104,141,10],"nbits":545259519,"n_headers":2},"prev_anchor":"b4e3b0e0ce6c5c473f840a597470e3a9e61b5339c7f68ed7ed9437d03fa3f6b4:1","entry":"01e8254b0a490126faf7860d858bae51a56624e213f8d9b62995bf9b669854eec500000000000000000000000000000000000000000000000000000000000000","key":580520741,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
-[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[167,68,143,83,189,125,164,31,117,202,56,218,249,235,206,194,121,180,155,71,120,152,165,9,109,119,18,132,96,38,204,111],"nbits":545259519,"n_headers":3},"prev_anchor":"f67cba8165acd1160b3b5afc066dd141b8e24db11bb15ab648d4c824a9a2dc68:1","entry":"02616c69636500000000000000000000001ebbd83efd17e2834898a824e4dbec3bc06ef2febc39520067ab6a3e3f08baf1000000000000000000000000000000","key":995790891,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[206,65,203,217,251,198,135,151,58,196,136,249,6,31,58,43,146,88,173,98,71,168,63,162,115,255,149,206,187,149,221,36],"nbits":545259519,"n_headers":3},"prev_anchor":"041e7d234fcec70b7911534ccf4b159a654abd54b87ed80468a076d5d4c0e7bb:1","entry":"02616c69636500000000000000000000001ebbd83efd17e2834898a824e4dbec3bc06ef2febc39520067ab6a3e3f08baf1000000000000000000000000000000","key":995790891,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [user @ 210] state 2 signed by both
 [user @ 210] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 210] state 3 signed by both
 [user @ 213] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 213] state 4 signed by both
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[197,71,174,186,214,115,236,167,98,133,60,255,137,91,73,197,127,86,36,6,159,231,226,32,7,102,53,195,115,190,197,21],"nbits":545259519,"n_headers":2},"prev_anchor":"5a0458a24da254a6660a05d15ffea78c2bbac8ee5428444b0657bd7015a3fe30:0","entry":"01e8254b0a490126faf7860d858bae51a56624e213f8d9b62995bf9b669854eec500000000000000000000000000000000000000000000000000000000000000","key":580520741,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[195,121,136,1,183,209,107,101,43,166,145,254,212,95,37,23,218,11,163,65,58,76,220,67,40,243,98,145,217,104,141,10],"nbits":545259519,"n_headers":2},"prev_anchor":"b4e3b0e0ce6c5c473f840a597470e3a9e61b5339c7f68ed7ed9437d03fa3f6b4:1","entry":"01e8254b0a490126faf7860d858bae51a56624e213f8d9b62995bf9b669854eec500000000000000000000000000000000000000000000000000000000000000","key":580520741,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
-[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[167,68,143,83,189,125,164,31,117,202,56,218,249,235,206,194,121,180,155,71,120,152,165,9,109,119,18,132,96,38,204,111],"nbits":545259519,"n_headers":3},"prev_anchor":"f67cba8165acd1160b3b5afc066dd141b8e24db11bb15ab648d4c824a9a2dc68:1","entry":"02616c69636500000000000000000000001ebbd83efd17e2834898a824e4dbec3bc06ef2febc39520067ab6a3e3f08baf1000000000000000000000000000000","key":995790891,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[206,65,203,217,251,198,135,151,58,196,136,249,6,31,58,43,146,88,173,98,71,168,63,162,115,255,149,206,187,149,221,36],"nbits":545259519,"n_headers":3},"prev_anchor":"041e7d234fcec70b7911534ccf4b159a654abd54b87ed80468a076d5d4c0e7bb:1","entry":"02616c69636500000000000000000000001ebbd83efd17e2834898a824e4dbec3bc06ef2febc39520067ab6a3e3f08baf1000000000000000000000000000000","key":995790891,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [hub @ 210] state 2 signed by both
 [hub @ 210] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 210] state 3 signed by both
@@ -715,9 +715,9 @@ block 213: anchor 31b039494f35565a72f4df2b61cf65f71299a8a4d92f5ae796ead2360a7089
 [hub @ 213] state 4 signed by both
 === bob's channel ===
 --- on-chain ---
-block 208: funding d9ed830b82e0115479a9435a96db69122eafde2ddf9f324ebb089307ae4967bd (harness) 203 vB / 812 WU
-block 210: anchor f67cba8165acd1160b3b5afc066dd141b8e24db11bb15ab648d4c824a9a2dc68 (harness) 225 vB / 900 WU
-block 213: anchor 31b039494f35565a72f4df2b61cf65f71299a8a4d92f5ae796ead2360a70894d (harness) 225 vB / 900 WU
+block 208: funding 8fd3fc232cb4b31d252045bc203044170acae47b2ff31f7ae773abb3c8ee8e28 (harness) 203 vB / 812 WU
+block 210: anchor 041e7d234fcec70b7911534ccf4b159a654abd54b87ed80468a076d5d4c0e7bb (harness) 225 vB / 900 WU
+block 213: anchor 653ae6127a15be1868eb413d5a5633b49ce87e79f42272bc2f1855b1c113b3cf (harness) 225 vB / 900 WU
 --- user ---
 --- hub ---
 ```
@@ -731,13 +731,13 @@ block 213: anchor 31b039494f35565a72f4df2b61cf65f71299a8a4d92f5ae796ead2360a7089
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `b8995be408303d69269f10304db03f44f14367fdb2f203403da5f30903fc58cf` |
-| 208 | `bob:funding` | hub-registry | `6a34c3402562494c153349f991bf8494122e522d5b90f48b4935378aec4932f3` |
-| 215 | `alice:commitment_1` | user | `8b9e440d121dfa2628f7970f77bb405a45c9d35966d7f6ced39e4cc4489ded7f` |
-| 216 | `alice:claim_to_remote` | hub | `61e7d50359fdd0c30001a0cfbeb572704623ec445b125e050563311c6663d3f3` |
-| 221 | `alice:claim_to_local` | user | `19f62a55ea84948063f56edf22c77ebc52d8054c3838b7a7c0187b79fe763f79` |
-| 221 | `alice:move_1` | user | `f57078b96619597f9b5d985d1def04770875c08704f91b31d155763748c46a35` |
-| 233 | `alice:split_1_BondToUser` | user | `fc18229c9b13921a08afb49cb557a96e47dbc89b2b4289bc9456bdc813d5d225` |
+| 205 | `alice:funding` | hub-registry | `989bbf2ce791f78e4de53ef82b5ef1464889f284fcdb2007aa096e795d6a88c1` |
+| 208 | `bob:funding` | hub-registry | `81dab96a3437e820ae64ef96954b138ba86e4c736dfdfe50e4f88881e1e2613a` |
+| 215 | `alice:commitment_1` | user | `b2baa70bc86be56d2917e5ffd4c0f9b95fc6b26e87595b3791878047f2376930` |
+| 216 | `alice:claim_to_remote` | hub | `206cc9c2947ec838a84517807fe3bf39542360d0d6e9d38fb2f58c826bf5bad3` |
+| 221 | `alice:claim_to_local` | user | `e98622e413fe2775a4f1c99e7a8c5933f1f5fbdcd2a97457bfacc66040725f56` |
+| 221 | `alice:move_1` | user | `1549beb40b1acd387f57e5dd72fcdcfe47c0a13d3c67c804d951167f9b77adc0` |
+| 233 | `alice:split_1_BondToUser` | user | `eaf1f81ba55dee9daf0fd834b94e051cd26aad0cb5737cf3e65c7cc835d4ef39` |
 
 <details><summary>narrative</summary>
 
@@ -749,14 +749,14 @@ block 213: anchor 31b039494f35565a72f4df2b61cf65f71299a8a4d92f5ae796ead2360a7089
 [registry] FAULT: not anchoring (an anchor was promised at 210)
 === alice's channel ===
 --- on-chain ---
-block 205: funding b8995be408303d69269f10304db03f44f14367fdb2f203403da5f30903fc58cf (harness) 203 vB / 812 WU
-block 215: commitment_1 8b9e440d121dfa2628f7970f77bb405a45c9d35966d7f6ced39e4cc4489ded7f (user) 240 vB / 958 WU
-block 216: claim_to_remote 61e7d50359fdd0c30001a0cfbeb572704623ec445b125e050563311c6663d3f3 (hub) 129 vB / 513 WU
-block 221: claim_to_local 19f62a55ea84948063f56edf22c77ebc52d8054c3838b7a7c0187b79fe763f79 (user) 137 vB / 548 WU
-block 221: move_1 f57078b96619597f9b5d985d1def04770875c08704f91b31d155763748c46a35 (user) 265 vB / 1059 WU
-block 233: split_1_BondToUser fc18229c9b13921a08afb49cb557a96e47dbc89b2b4289bc9456bdc813d5d225 (user) 193 vB / 770 WU
+block 205: funding 989bbf2ce791f78e4de53ef82b5ef1464889f284fcdb2007aa096e795d6a88c1 (harness) 203 vB / 812 WU
+block 215: commitment_1 b2baa70bc86be56d2917e5ffd4c0f9b95fc6b26e87595b3791878047f2376930 (user) 240 vB / 958 WU
+block 216: claim_to_remote 206cc9c2947ec838a84517807fe3bf39542360d0d6e9d38fb2f58c826bf5bad3 (hub) 129 vB / 513 WU
+block 221: claim_to_local e98622e413fe2775a4f1c99e7a8c5933f1f5fbdcd2a97457bfacc66040725f56 (user) 137 vB / 548 WU
+block 221: move_1 1549beb40b1acd387f57e5dd72fcdcfe47c0a13d3c67c804d951167f9b77adc0 (user) 265 vB / 1059 WU
+block 233: split_1_BondToUser eaf1f81ba55dee9daf0fd834b94e051cd26aad0cb5737cf3e65c7cc835d4ef39 (user) 193 vB / 770 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[171,47,109,156,81,43,6,212,46,24,185,196,159,193,247,170,238,151,183,202,199,247,203,32,236,137,31,180,82,129,199,91],"nbits":545259519,"n_headers":2},"prev_anchor":"bf2bd41cb07805e7911ecc583a41a60ef4c6c4e6878dbff380bdbb7e05ae7019:0","entry":"018a95c548dece5b12031824f1c15da87e9c0ec4eb7d6a0f05b4cd3f3481f50adb00000000000000000000000000000000000000000000000000000000000000","key":745721686,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[171,96,8,10,196,64,209,187,183,156,201,81,138,30,72,254,183,99,75,172,154,131,87,163,235,37,74,132,210,20,185,76],"nbits":545259519,"n_headers":2},"prev_anchor":"39ada595b3e1917aaef232bf70c65d91b24ed7ab50fd7eaa3a983d5e32f3a6b8:1","entry":"018a95c548dece5b12031824f1c15da87e9c0ec4eb7d6a0f05b4cd3f3481f50adb00000000000000000000000000000000000000000000000000000000000000","key":745721686,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
 [user @ 212] propose seq 2: move in contract 10: claim request 1 unanchored / prove inclusion / refute the chain (deadline 232)
 [user @ 214] counterparty stalled since height 212; force-closing at state 1
@@ -765,19 +765,19 @@ block 233: split_1_BondToUser fc18229c9b13921a08afb49cb557a96e47dbc89b2b4289bc94
 [user @ 220] contract 10: broadcasting move_1: claim request 1 unanchored / prove inclusion / refute the chain -> state claimed (not anchored by the promised height), outcome code 1
 [user @ 221] contract 10: move_1 by user confirmed: move claim request 1 unanchored / prove inclusion / refute the chain, claimed state claimed (not anchored by the promised height), claimed outcome BondToUser
 [user @ 232] contract 10: challenge window (12 blocks) after move_1 passed; broadcasting split_BondToUser
-[user @ 233] contract 10 resolved by split_BondToUser (fc18229c9b13921a08afb49cb557a96e47dbc89b2b4289bc9456bdc813d5d225)
+[user @ 233] contract 10 resolved by split_BondToUser (eaf1f81ba55dee9daf0fd834b94e051cd26aad0cb5737cf3e65c7cc835d4ef39)
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[171,47,109,156,81,43,6,212,46,24,185,196,159,193,247,170,238,151,183,202,199,247,203,32,236,137,31,180,82,129,199,91],"nbits":545259519,"n_headers":2},"prev_anchor":"bf2bd41cb07805e7911ecc583a41a60ef4c6c4e6878dbff380bdbb7e05ae7019:0","entry":"018a95c548dece5b12031824f1c15da87e9c0ec4eb7d6a0f05b4cd3f3481f50adb00000000000000000000000000000000000000000000000000000000000000","key":745721686,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[171,96,8,10,196,64,209,187,183,156,201,81,138,30,72,254,183,99,75,172,154,131,87,163,235,37,74,132,210,20,185,76],"nbits":545259519,"n_headers":2},"prev_anchor":"39ada595b3e1917aaef232bf70c65d91b24ed7ab50fd7eaa3a983d5e32f3a6b8:1","entry":"018a95c548dece5b12031824f1c15da87e9c0ec4eb7d6a0f05b4cd3f3481f50adb00000000000000000000000000000000000000000000000000000000000000","key":745721686,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
 [hub @ 215] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [hub @ 215] contract 10 on-chain at depth 0: state unclaimed, turn Some(User), deadline 272
 [hub @ 221] contract 10: move_1 by user confirmed: move claim request 1 unanchored / prove inclusion / refute the chain, claimed state claimed (not anchored by the promised height), claimed outcome BondToUser
 [hub @ 221] contract 10: counterparty's move_1 is consistent with the program
 [hub @ 232] contract 10: challenge window (12 blocks) after move_1 passed; broadcasting split_BondToUser
-[hub @ 233] contract 10 resolved by split_BondToUser (fc18229c9b13921a08afb49cb557a96e47dbc89b2b4289bc9456bdc813d5d225)
+[hub @ 233] contract 10 resolved by split_BondToUser (eaf1f81ba55dee9daf0fd834b94e051cd26aad0cb5737cf3e65c7cc835d4ef39)
 === bob's channel ===
 --- on-chain ---
-block 208: funding 6a34c3402562494c153349f991bf8494122e522d5b90f48b4935378aec4932f3 (harness) 203 vB / 812 WU
+block 208: funding 81dab96a3437e820ae64ef96954b138ba86e4c736dfdfe50e4f88881e1e2613a (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -791,15 +791,15 @@ block 208: funding 6a34c3402562494c153349f991bf8494122e522d5b90f48b4935378aec493
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `e29f08bf5db1f851db8cba6357b46418f49cf23a41353b32324f379420f1b7dc` |
-| 208 | `bob:funding` | hub-registry | `831e929c519e30ff5c66f8447af3e49dd87ecab003193e2d45a04b56254fca28` |
-| 210 | `alice:anchor` | hub-registry | `efc543d04bb19739e1639621c1db7afc5088f4e28daab1e701691adf9f4fa968` |
-| 213 | `alice:commitment_1` | user | `9c3775842a6af9a70091c52a2a94964df17a85c47ad5de6aff4077fc5198337e` |
-| 214 | `alice:claim_to_remote` | hub | `31c45521b872d2c185959b715a49a43f3665e8a067cf42caee6d555510321cf8` |
-| 219 | `alice:claim_to_local` | user | `1a41d5c8947e62610ae3bf1310f9f4ba31c76d93fe88eacde1cd03c662fa2e3f` |
-| 219 | `alice:move_1` | user | `471a201cd8cda998dfba30be2b9d7e3ba8e5885acd26330af0e840663c7f0021` |
-| 220 | `alice:move_2` | hub | `9f5238f696c0fcbe626baa59ee43ab55be1d9e9f4f017b42bf5a338c7ff8a37d` |
-| 232 | `alice:split_2_BondToHub` | user | `e365e2f1562c65e6e8368fa3912176392e44de09ae8287cd07b61d3402190f33` |
+| 205 | `alice:funding` | hub-registry | `3011b749149bb5934c30b7e1256d0eadf176c9f3cb81b684e73042988c8b3d8c` |
+| 208 | `bob:funding` | hub-registry | `3ebaf0a0185f8b4004f225e59b9cd4504619645272d9431cade2d494eb2ef8aa` |
+| 210 | `alice:anchor` | hub-registry | `a97e29cf76edc4d0bd2c94ddb572118e3ff49df554dc32e6bd7ab69b641c1afc` |
+| 213 | `alice:commitment_1` | user | `822ef0e692d779e4b7e7fd3ba6222584d2035d06aec3032b8beae6d2a09fcf6e` |
+| 214 | `alice:claim_to_remote` | hub | `9df0da7f00f8c127effe5165ed71968971e9109431fdf17cf3ed8faba3eae88c` |
+| 219 | `alice:claim_to_local` | user | `21ef5a83b27b2f8811bbae0b5788dd024e6480101f5dc74cbc65d7bb44f65f17` |
+| 219 | `alice:move_1` | user | `d5e86ca4b38f7ddfdddccfc1ca99543813ec8616eaf32d1e0dce82c63e76bd54` |
+| 220 | `alice:move_2` | hub | `e6f15a1f3243730a54c3e68242c04735eb59291cc2e2829fa31a4de4483a804f` |
+| 232 | `alice:split_2_BondToHub` | user | `34c75f8f2bae8efb98bbe7d725d6d306a940a9baf260685b6b60dd80891c166f` |
 
 <details><summary>narrative</summary>
 
@@ -809,20 +809,20 @@ block 208: funding 6a34c3402562494c153349f991bf8494122e522d5b90f48b4935378aec493
 [world @ 210] proof data for request 1 served (entry anchored)
 --- registry ---
 [registry] promised request 1 (commit fd84974af3cd801d) for the anchor at 210
-[registry] built anchor efc543d04bb19739e1639621c1db7afc5088f4e28daab1e701691adf9f4fa968 for requests [1], root 8d0663273b85008f, to confirm at 210
+[registry] built anchor a97e29cf76edc4d0bd2c94ddb572118e3ff49df554dc32e6bd7ab69b641c1afc for requests [1], root 8d0663273b85008f, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root 8d0663273b85008f
 === alice's channel ===
 --- on-chain ---
-block 205: funding e29f08bf5db1f851db8cba6357b46418f49cf23a41353b32324f379420f1b7dc (harness) 203 vB / 812 WU
-block 210: anchor efc543d04bb19739e1639621c1db7afc5088f4e28daab1e701691adf9f4fa968 (harness) 225 vB / 900 WU
-block 213: commitment_1 9c3775842a6af9a70091c52a2a94964df17a85c47ad5de6aff4077fc5198337e (user) 240 vB / 958 WU
-block 214: claim_to_remote 31c45521b872d2c185959b715a49a43f3665e8a067cf42caee6d555510321cf8 (hub) 129 vB / 513 WU
-block 219: claim_to_local 1a41d5c8947e62610ae3bf1310f9f4ba31c76d93fe88eacde1cd03c662fa2e3f (user) 137 vB / 548 WU
-block 219: move_1 471a201cd8cda998dfba30be2b9d7e3ba8e5885acd26330af0e840663c7f0021 (user) 257 vB / 1027 WU
-block 220: move_2 9f5238f696c0fcbe626baa59ee43ab55be1d9e9f4f017b42bf5a338c7ff8a37d (hub) 4977 vB / 19905 WU
-block 232: split_2_BondToHub e365e2f1562c65e6e8368fa3912176392e44de09ae8287cd07b61d3402190f33 (user) 201 vB / 802 WU
+block 205: funding 3011b749149bb5934c30b7e1256d0eadf176c9f3cb81b684e73042988c8b3d8c (harness) 203 vB / 812 WU
+block 210: anchor a97e29cf76edc4d0bd2c94ddb572118e3ff49df554dc32e6bd7ab69b641c1afc (harness) 225 vB / 900 WU
+block 213: commitment_1 822ef0e692d779e4b7e7fd3ba6222584d2035d06aec3032b8beae6d2a09fcf6e (user) 240 vB / 958 WU
+block 214: claim_to_remote 9df0da7f00f8c127effe5165ed71968971e9109431fdf17cf3ed8faba3eae88c (hub) 129 vB / 513 WU
+block 219: claim_to_local 21ef5a83b27b2f8811bbae0b5788dd024e6480101f5dc74cbc65d7bb44f65f17 (user) 137 vB / 548 WU
+block 219: move_1 d5e86ca4b38f7ddfdddccfc1ca99543813ec8616eaf32d1e0dce82c63e76bd54 (user) 257 vB / 1027 WU
+block 220: move_2 e6f15a1f3243730a54c3e68242c04735eb59291cc2e2829fa31a4de4483a804f (hub) 4976 vB / 19904 WU
+block 232: split_2_BondToHub 34c75f8f2bae8efb98bbe7d725d6d306a940a9baf260685b6b60dd80891c166f (user) 201 vB / 802 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[10,38,239,96,16,98,78,172,230,170,46,148,19,158,109,195,224,50,215,9,114,21,9,61,91,248,40,134,158,81,195,99],"nbits":545259519,"n_headers":2},"prev_anchor":"92bff360f8ee7a1195846a8952256bf4a12e1db289ba58339cbabe9ba63b0b26:1","entry":"01fd84974af3cd801dd1b92599b8b764a10fb7d2956432357dfff1708d15e1959e00000000000000000000000000000000000000000000000000000000000000","key":2021714859,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[219,113,23,212,131,162,232,4,133,127,223,88,175,129,199,207,18,228,165,245,33,67,152,168,153,134,147,224,89,15,205,39],"nbits":545259519,"n_headers":2},"prev_anchor":"c5dcc98253e5caaa3bb6a1d4da3fb5a8cc59382d9e3694aa2977ad78fe445160:1","entry":"01fd84974af3cd801dd1b92599b8b764a10fb7d2956432357dfff1708d15e1959e00000000000000000000000000000000000000000000000000000000000000","key":2021714859,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
 [user @ 212] propose seq 2: move in contract 10: claim request 1 unanchored / prove inclusion / refute the chain (deadline 232)
 [user @ 212] draft seq 2 rejected by counterparty: I can prove request 1 is anchored; answering on-chain
@@ -835,9 +835,9 @@ block 232: split_2_BondToHub e365e2f1562c65e6e8368fa3912176392e44de09ae8287cd07b
 [user @ 220] contract 10: claimed end state 8d066327.. is correct
 [user @ 220] contract 10: counterparty's move_2 is consistent with the program
 [user @ 231] contract 10: challenge window (12 blocks) after move_2 passed; broadcasting split_BondToHub
-[user @ 232] contract 10 resolved by split_BondToHub (e365e2f1562c65e6e8368fa3912176392e44de09ae8287cd07b61d3402190f33)
+[user @ 232] contract 10 resolved by split_BondToHub (34c75f8f2bae8efb98bbe7d725d6d306a940a9baf260685b6b60dd80891c166f)
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[10,38,239,96,16,98,78,172,230,170,46,148,19,158,109,195,224,50,215,9,114,21,9,61,91,248,40,134,158,81,195,99],"nbits":545259519,"n_headers":2},"prev_anchor":"92bff360f8ee7a1195846a8952256bf4a12e1db289ba58339cbabe9ba63b0b26:1","entry":"01fd84974af3cd801dd1b92599b8b764a10fb7d2956432357dfff1708d15e1959e00000000000000000000000000000000000000000000000000000000000000","key":2021714859,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[219,113,23,212,131,162,232,4,133,127,223,88,175,129,199,207,18,228,165,245,33,67,152,168,153,134,147,224,89,15,205,39],"nbits":545259519,"n_headers":2},"prev_anchor":"c5dcc98253e5caaa3bb6a1d4da3fb5a8cc59382d9e3694aa2977ad78fe445160:1","entry":"01fd84974af3cd801dd1b92599b8b764a10fb7d2956432357dfff1708d15e1959e00000000000000000000000000000000000000000000000000000000000000","key":2021714859,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
 [hub @ 212] rejecting draft seq 2: I can prove request 1 is anchored; answering on-chain
 [hub @ 213] counterparty's commitment for state 1 confirmed with 1 contract output(s)
@@ -848,11 +848,11 @@ block 232: split_2_BondToHub e365e2f1562c65e6e8368fa3912176392e44de09ae8287cd07b
 [hub @ 220] contract 10: move_2 by hub confirmed: move claim request 1 unanchored / prove inclusion / refute the chain, claimed state hub proved inclusion, claimed outcome BondToHub
 [hub @ 220] contract 10: claimed end state 8d066327.. is correct
 [hub @ 231] contract 10: challenge window (12 blocks) after move_2 passed; broadcasting split_BondToHub
-[hub @ 232] contract 10 resolved by split_BondToHub (e365e2f1562c65e6e8368fa3912176392e44de09ae8287cd07b61d3402190f33)
+[hub @ 232] contract 10 resolved by split_BondToHub (34c75f8f2bae8efb98bbe7d725d6d306a940a9baf260685b6b60dd80891c166f)
 === bob's channel ===
 --- on-chain ---
-block 208: funding 831e929c519e30ff5c66f8447af3e49dd87ecab003193e2d45a04b56254fca28 (harness) 203 vB / 812 WU
-block 210: anchor efc543d04bb19739e1639621c1db7afc5088f4e28daab1e701691adf9f4fa968 (harness) 225 vB / 900 WU
+block 208: funding 3ebaf0a0185f8b4004f225e59b9cd4504619645272d9431cade2d494eb2ef8aa (harness) 203 vB / 812 WU
+block 210: anchor a97e29cf76edc4d0bd2c94ddb572118e3ff49df554dc32e6bd7ab69b641c1afc (harness) 225 vB / 900 WU
 --- user ---
 --- hub ---
 ```
@@ -866,11 +866,11 @@ block 210: anchor efc543d04bb19739e1639621c1db7afc5088f4e28daab1e701691adf9f4fa9
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `9edda1ea7af623d11a5315b0585d4beac97bfcca57b189e739ee946d25d34f7b` |
-| 208 | `bob:funding` | hub-registry | `8a5c555f9d17a299c44d0885a31f3b7e2d85f981917cb8cb824be34971c21a28` |
-| 210 | `alice:anchor` | hub-registry | `4a2715260901f87c8f3a8206b9a473588b595cb0f99991b8c39c7f1cb3d39f2d` |
-| 213 | `alice:anchor` | hub-registry | `1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d` |
-| 216 | `alice:anchor` | hub-registry | `afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140e0` |
+| 205 | `alice:funding` | hub-registry | `a973999949dfd7416b8fa516fe6275365d3197ebf08c972f24c1deea6eb6354c` |
+| 208 | `bob:funding` | hub-registry | `7e43b65825b39000b6b9d4020b5be55c89855890c62e622b42da492d46f233f3` |
+| 210 | `alice:anchor` | hub-registry | `33c84414a58b62593fe73f5b668b87b5b07c1db5438c6e81bc72f6dcc5ca6279` |
+| 213 | `alice:anchor` | hub-registry | `1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0` |
+| 216 | `alice:anchor` | hub-registry | `009fcc9b9d040e0cc660ecf366d9e51a9965af633d23b680c3489a915b883a51` |
 
 <details><summary>narrative</summary>
 
@@ -885,32 +885,32 @@ block 210: anchor efc543d04bb19739e1639621c1db7afc5088f4e28daab1e701691adf9f4fa9
 [world @ 216] proof data for request 3 served (entry anchored)
 --- registry ---
 [registry] promised request 1 (commit 3adf12d9b52d24d3) for the anchor at 210
-[registry] built anchor 4a2715260901f87c8f3a8206b9a473588b595cb0f99991b8c39c7f1cb3d39f2d for requests [1], root 2e6db728ab87a757, to confirm at 210
+[registry] built anchor 33c84414a58b62593fe73f5b668b87b5b07c1db5438c6e81bc72f6dcc5ca6279 for requests [1], root 2e6db728ab87a757, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root 2e6db728ab87a757
 [registry] promised request 2 (reveal alice -> f9730c30) for the anchor at 213
-[registry] built anchor 1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d for requests [2], root 49a892a95c213eb8, to confirm at 213
+[registry] built anchor 1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0 for requests [2], root 49a892a95c213eb8, to confirm at 213
 [registry] anchor confirmed at 213 carrying requests [2]; root 49a892a95c213eb8
 [registry] promised request 3 (transfer alice -> fdc23a8c (valid until 253)) for the anchor at 216
-[registry] built anchor afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140e0 for requests [3], root feb2292ee1f5857b, to confirm at 216
+[registry] built anchor 009fcc9b9d040e0cc660ecf366d9e51a9965af633d23b680c3489a915b883a51 for requests [3], root feb2292ee1f5857b, to confirm at 216
 [registry] anchor confirmed at 216 carrying requests [3]; root feb2292ee1f5857b
 === alice's channel ===
 --- on-chain ---
-block 205: funding 9edda1ea7af623d11a5315b0585d4beac97bfcca57b189e739ee946d25d34f7b (harness) 203 vB / 812 WU
-block 210: anchor 4a2715260901f87c8f3a8206b9a473588b595cb0f99991b8c39c7f1cb3d39f2d (harness) 225 vB / 900 WU
-block 213: anchor 1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d (harness) 225 vB / 900 WU
-block 216: anchor afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140e0 (harness) 225 vB / 900 WU
+block 205: funding a973999949dfd7416b8fa516fe6275365d3197ebf08c972f24c1deea6eb6354c (harness) 203 vB / 812 WU
+block 210: anchor 33c84414a58b62593fe73f5b668b87b5b07c1db5438c6e81bc72f6dcc5ca6279 (harness) 225 vB / 900 WU
+block 213: anchor 1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0 (harness) 225 vB / 900 WU
+block 216: anchor 009fcc9b9d040e0cc660ecf366d9e51a9965af633d23b680c3489a915b883a51 (harness) 225 vB / 900 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[165,229,223,138,243,33,111,157,102,252,10,129,213,121,65,126,118,64,123,84,132,122,183,249,203,155,185,138,68,98,136,43],"nbits":545259519,"n_headers":2},"prev_anchor":"428bad1910f2cfb30a17b01e94841125fa35117d16865251883b4cedd0c4a745:1","entry":"013adf12d9b52d24d32db2989e97b2533f78a673d89b6dc5dfd2080468b468851300000000000000000000000000000000000000000000000000000000000000","key":3940704183,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[171,144,239,213,241,38,240,253,243,168,134,106,182,22,58,102,91,186,56,97,237,7,65,233,165,158,70,18,193,50,20,42],"nbits":545259519,"n_headers":2},"prev_anchor":"6e9e08e8db2b63ef4e57b2cad7a190d0479367dcd13eeb989fe46d02f864d948:0","entry":"013adf12d9b52d24d32db2989e97b2533f78a673d89b6dc5dfd2080468b468851300000000000000000000000000000000000000000000000000000000000000","key":3940704183,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
-[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[59,138,214,101,224,235,54,59,172,74,236,245,231,5,205,46,52,225,89,32,245,65,189,42,175,212,147,77,102,80,209,119],"nbits":545259519,"n_headers":3},"prev_anchor":"4a2715260901f87c8f3a8206b9a473588b595cb0f99991b8c39c7f1cb3d39f2d:1","entry":"02616c6963650000000000000000000000f9730c3064740178a82db3a875004ef48c9fa1cff011a84c359fc435d2aee1bb000000000000000000000000000000","key":2887147652,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[128,99,141,109,170,9,13,109,93,140,125,72,139,9,151,13,237,39,114,145,171,86,160,222,173,114,40,136,193,224,126,28],"nbits":545259519,"n_headers":3},"prev_anchor":"33c84414a58b62593fe73f5b668b87b5b07c1db5438c6e81bc72f6dcc5ca6279:1","entry":"02616c6963650000000000000000000000f9730c3064740178a82db3a875004ef48c9fa1cff011a84c359fc435d2aee1bb000000000000000000000000000000","key":2887147652,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [user @ 210] state 2 signed by both
 [user @ 210] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 210] state 3 signed by both
 [user @ 213] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 213] state 4 signed by both
-[user @ 213] accept draft seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[203,232,102,98,251,76,204,79,161,90,151,14,179,241,178,45,171,175,124,18,141,65,198,17,81,194,228,35,145,120,153,37],"nbits":545259519,"n_headers":3},"prev_anchor":"1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 253
+[user @ 213] accept draft seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[82,246,243,170,19,216,197,109,154,26,154,177,110,50,237,69,245,174,213,67,98,209,228,91,60,161,200,155,137,16,186,53],"nbits":545259519,"n_headers":3},"prev_anchor":"1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 253
 [user @ 213] state 5 signed by both
-[user @ 213] propose seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[203,232,102,98,251,76,204,79,161,90,151,14,179,241,178,45,171,175,124,18,141,65,198,17,81,194,228,35,145,120,153,37],"nbits":545259519,"n_headers":3},"prev_anchor":"1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
+[user @ 213] propose seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[82,246,243,170,19,216,197,109,154,26,154,177,110,50,237,69,245,174,213,67,98,209,228,91,60,161,200,155,137,16,186,53],"nbits":545259519,"n_headers":3},"prev_anchor":"1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
 [user @ 213] state 6 signed by both
 [user @ 216] propose seq 7: move in contract 21: prove the entry is anchored / refute the chain (deadline 236)
 [user @ 216] state 7 signed by both
@@ -919,17 +919,17 @@ block 216: anchor afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140
 [user @ 236] propose seq 9: cancel contract 21 (fold R(s))
 [user @ 236] state 9 signed by both
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[165,229,223,138,243,33,111,157,102,252,10,129,213,121,65,126,118,64,123,84,132,122,183,249,203,155,185,138,68,98,136,43],"nbits":545259519,"n_headers":2},"prev_anchor":"428bad1910f2cfb30a17b01e94841125fa35117d16865251883b4cedd0c4a745:1","entry":"013adf12d9b52d24d32db2989e97b2533f78a673d89b6dc5dfd2080468b468851300000000000000000000000000000000000000000000000000000000000000","key":3940704183,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[171,144,239,213,241,38,240,253,243,168,134,106,182,22,58,102,91,186,56,97,237,7,65,233,165,158,70,18,193,50,20,42],"nbits":545259519,"n_headers":2},"prev_anchor":"6e9e08e8db2b63ef4e57b2cad7a190d0479367dcd13eeb989fe46d02f864d948:0","entry":"013adf12d9b52d24d32db2989e97b2533f78a673d89b6dc5dfd2080468b468851300000000000000000000000000000000000000000000000000000000000000","key":3940704183,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
-[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[59,138,214,101,224,235,54,59,172,74,236,245,231,5,205,46,52,225,89,32,245,65,189,42,175,212,147,77,102,80,209,119],"nbits":545259519,"n_headers":3},"prev_anchor":"4a2715260901f87c8f3a8206b9a473588b595cb0f99991b8c39c7f1cb3d39f2d:1","entry":"02616c6963650000000000000000000000f9730c3064740178a82db3a875004ef48c9fa1cff011a84c359fc435d2aee1bb000000000000000000000000000000","key":2887147652,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[128,99,141,109,170,9,13,109,93,140,125,72,139,9,151,13,237,39,114,145,171,86,160,222,173,114,40,136,193,224,126,28],"nbits":545259519,"n_headers":3},"prev_anchor":"33c84414a58b62593fe73f5b668b87b5b07c1db5438c6e81bc72f6dcc5ca6279:1","entry":"02616c6963650000000000000000000000f9730c3064740178a82db3a875004ef48c9fa1cff011a84c359fc435d2aee1bb000000000000000000000000000000","key":2887147652,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [hub @ 210] state 2 signed by both
 [hub @ 210] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 210] state 3 signed by both
 [hub @ 213] accept draft seq 4: cancel contract 11 (fold R(s))
 [hub @ 213] state 4 signed by both
-[hub @ 213] propose seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[203,232,102,98,251,76,204,79,161,90,151,14,179,241,178,45,171,175,124,18,141,65,198,17,81,194,228,35,145,120,153,37],"nbits":545259519,"n_headers":3},"prev_anchor":"1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 253
+[hub @ 213] propose seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[82,246,243,170,19,216,197,109,154,26,154,177,110,50,237,69,245,174,213,67,98,209,228,91,60,161,200,155,137,16,186,53],"nbits":545259519,"n_headers":3},"prev_anchor":"1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 253
 [hub @ 213] state 5 signed by both
-[hub @ 213] accept draft seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[203,232,102,98,251,76,204,79,161,90,151,14,179,241,178,45,171,175,124,18,141,65,198,17,81,194,228,35,145,120,153,37],"nbits":545259519,"n_headers":3},"prev_anchor":"1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
+[hub @ 213] accept draft seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[82,246,243,170,19,216,197,109,154,26,154,177,110,50,237,69,245,174,213,67,98,209,228,91,60,161,200,155,137,16,186,53],"nbits":545259519,"n_headers":3},"prev_anchor":"1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
 [hub @ 213] state 6 signed by both
 [hub @ 216] accept draft seq 7: move in contract 21: prove the entry is anchored / refute the chain (deadline 236)
 [hub @ 216] state 7 signed by both
@@ -939,19 +939,19 @@ block 216: anchor afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140
 [hub @ 236] state 9 signed by both
 === bob's channel ===
 --- on-chain ---
-block 208: funding 8a5c555f9d17a299c44d0885a31f3b7e2d85f981917cb8cb824be34971c21a28 (harness) 203 vB / 812 WU
-block 210: anchor 4a2715260901f87c8f3a8206b9a473588b595cb0f99991b8c39c7f1cb3d39f2d (harness) 225 vB / 900 WU
-block 213: anchor 1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d (harness) 225 vB / 900 WU
-block 216: anchor afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140e0 (harness) 225 vB / 900 WU
+block 208: funding 7e43b65825b39000b6b9d4020b5be55c89855890c62e622b42da492d46f233f3 (harness) 203 vB / 812 WU
+block 210: anchor 33c84414a58b62593fe73f5b668b87b5b07c1db5438c6e81bc72f6dcc5ca6279 (harness) 225 vB / 900 WU
+block 213: anchor 1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0 (harness) 225 vB / 900 WU
+block 216: anchor 009fcc9b9d040e0cc660ecf366d9e51a9965af633d23b680c3489a915b883a51 (harness) 225 vB / 900 WU
 --- user ---
-[user @ 213] propose seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[203,232,102,98,251,76,204,79,161,90,151,14,179,241,178,45,171,175,124,18,141,65,198,17,81,194,228,35,145,120,153,37],"nbits":545259519,"n_headers":3},"prev_anchor":"1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 253
+[user @ 213] propose seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[82,246,243,170,19,216,197,109,154,26,154,177,110,50,237,69,245,174,213,67,98,209,228,91,60,161,200,155,137,16,186,53],"nbits":545259519,"n_headers":3},"prev_anchor":"1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 253
 [user @ 213] state 1 signed by both
 [user @ 216] accept draft seq 2: move in contract 20: prove the entry is anchored / refute the chain (deadline 236)
 [user @ 216] state 2 signed by both
 [user @ 236] accept draft seq 3: cancel contract 20 (fold R(s))
 [user @ 236] state 3 signed by both
 --- hub ---
-[hub @ 213] accept draft seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[203,232,102,98,251,76,204,79,161,90,151,14,179,241,178,45,171,175,124,18,141,65,198,17,81,194,228,35,145,120,153,37],"nbits":545259519,"n_headers":3},"prev_anchor":"1328102945d056eea4d2c9807fce54694aee21099e44bcbea740f2b48592e09d:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 253
+[hub @ 213] accept draft seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[82,246,243,170,19,216,197,109,154,26,154,177,110,50,237,69,245,174,213,67,98,209,228,91,60,161,200,155,137,16,186,53],"nbits":545259519,"n_headers":3},"prev_anchor":"1bed9cf17307e3d8adae34d4c7a9faa73de684784773dfa1b160a79ec69f7eb0:1","entry":"03616c6963650000000000000000000000fdc23a8ceb811f9dd24da78a1daf306d60ec664cae214f88141f4aa487592333000000fd0000000000000000000000","key":91916010,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 253
 [hub @ 213] state 1 signed by both
 [hub @ 216] propose seq 2: move in contract 20: prove the entry is anchored / refute the chain (deadline 236)
 [hub @ 216] state 2 signed by both
@@ -968,10 +968,10 @@ block 216: anchor afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `29f7d3107734ce58f59b19412b6925499403041ba8d0ddca4557646caec3c51b` |
-| 208 | `bob:funding` | hub-registry | `65ab4a2a57233570cf47197e36f198f21e3d8eb592b42e004eb6aa974a0f13b1` |
-| 210 | `alice:anchor` | hub-registry | `fa1faa97beb4b96e28dd78f34d02c57e390708b3272388f39acc4c30cc24d62a` |
-| 213 | `alice:anchor` | hub-registry | `0a517eed13c152be501be91030854346504776a5a91adc1896f8b753ac86e892` |
+| 205 | `alice:funding` | hub-registry | `c876b7582626d9a72759606b7dc75130be5cf83a9fc2196e7784ae65839f9005` |
+| 208 | `bob:funding` | hub-registry | `8ddf369e28dd863d3203923bb01e0f0c5285816c82e8c17aa240cdddcb77f64c` |
+| 210 | `alice:anchor` | hub-registry | `e48739570292162b290b021e617dd407cbf621e4dc07340583deb25b7720031f` |
+| 213 | `alice:anchor` | hub-registry | `81c42bd5d5441551fb4e213484b014573e52aa9e3064ba483144254622cf1e70` |
 
 <details><summary>narrative</summary>
 
@@ -984,29 +984,29 @@ block 216: anchor afb4d8a3496730ae829e2783a98c16c8ad83cf7635ad1691036cda86c9a140
 [world @ 213] bob offers 0.00040000 BTC for alice, transfer valid until 228
 --- registry ---
 [registry] promised request 1 (commit 85995a637cee712d) for the anchor at 210
-[registry] built anchor fa1faa97beb4b96e28dd78f34d02c57e390708b3272388f39acc4c30cc24d62a for requests [1], root e01ac66c79bacdf4, to confirm at 210
+[registry] built anchor e48739570292162b290b021e617dd407cbf621e4dc07340583deb25b7720031f for requests [1], root e01ac66c79bacdf4, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root e01ac66c79bacdf4
 [registry] promised request 2 (reveal alice -> 1f4c0f1b) for the anchor at 213
-[registry] built anchor 0a517eed13c152be501be91030854346504776a5a91adc1896f8b753ac86e892 for requests [2], root 474007161ad95bc5, to confirm at 213
+[registry] built anchor 81c42bd5d5441551fb4e213484b014573e52aa9e3064ba483144254622cf1e70 for requests [2], root 474007161ad95bc5, to confirm at 213
 [registry] anchor confirmed at 213 carrying requests [2]; root 474007161ad95bc5
 === alice's channel ===
 --- on-chain ---
-block 205: funding 29f7d3107734ce58f59b19412b6925499403041ba8d0ddca4557646caec3c51b (harness) 203 vB / 812 WU
-block 210: anchor fa1faa97beb4b96e28dd78f34d02c57e390708b3272388f39acc4c30cc24d62a (harness) 225 vB / 900 WU
-block 213: anchor 0a517eed13c152be501be91030854346504776a5a91adc1896f8b753ac86e892 (harness) 225 vB / 900 WU
+block 205: funding c876b7582626d9a72759606b7dc75130be5cf83a9fc2196e7784ae65839f9005 (harness) 203 vB / 812 WU
+block 210: anchor e48739570292162b290b021e617dd407cbf621e4dc07340583deb25b7720031f (harness) 225 vB / 900 WU
+block 213: anchor 81c42bd5d5441551fb4e213484b014573e52aa9e3064ba483144254622cf1e70 (harness) 225 vB / 900 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[1,58,32,41,43,193,149,20,10,157,111,211,106,54,104,75,65,1,254,196,209,64,115,204,164,197,33,51,6,23,108,105],"nbits":545259519,"n_headers":2},"prev_anchor":"bb59126151704f8642e2b08fc08f734f39cf616230552590adcd90eb6525911b:0","entry":"0185995a637cee712d446fc2bcf6ab879de0fe025fbb4a4a2b36f11fb9361315a200000000000000000000000000000000000000000000000000000000000000","key":3713401723,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[176,171,110,43,177,107,124,131,28,212,48,166,144,89,103,140,127,108,163,251,64,226,20,9,80,154,243,173,98,241,231,70],"nbits":545259519,"n_headers":2},"prev_anchor":"e2ee1de85b08168feb9e9e5fb0ddf5c494cd7a8124fa2db423ee75cc0d2430cd:0","entry":"0185995a637cee712d446fc2bcf6ab879de0fe025fbb4a4a2b36f11fb9361315a200000000000000000000000000000000000000000000000000000000000000","key":3713401723,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
-[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[58,254,226,206,15,166,185,198,12,48,43,188,92,197,128,48,132,41,175,218,45,56,46,18,115,139,233,44,186,198,87,52],"nbits":545259519,"n_headers":3},"prev_anchor":"fa1faa97beb4b96e28dd78f34d02c57e390708b3272388f39acc4c30cc24d62a:1","entry":"02616c69636500000000000000000000001f4c0f1bf949be3bf3c4a4450865649140388dafb484b1fce6dd01647c19b0a6000000000000000000000000000000","key":3410281662,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[149,9,133,97,34,152,77,206,125,141,176,6,25,55,251,141,61,58,80,184,147,17,238,43,200,229,172,141,47,220,252,93],"nbits":545259519,"n_headers":3},"prev_anchor":"e48739570292162b290b021e617dd407cbf621e4dc07340583deb25b7720031f:1","entry":"02616c69636500000000000000000000001f4c0f1bf949be3bf3c4a4450865649140388dafb484b1fce6dd01647c19b0a6000000000000000000000000000000","key":3410281662,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [user @ 210] state 2 signed by both
 [user @ 210] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 210] state 3 signed by both
 [user @ 213] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 213] state 4 signed by both
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[1,58,32,41,43,193,149,20,10,157,111,211,106,54,104,75,65,1,254,196,209,64,115,204,164,197,33,51,6,23,108,105],"nbits":545259519,"n_headers":2},"prev_anchor":"bb59126151704f8642e2b08fc08f734f39cf616230552590adcd90eb6525911b:0","entry":"0185995a637cee712d446fc2bcf6ab879de0fe025fbb4a4a2b36f11fb9361315a200000000000000000000000000000000000000000000000000000000000000","key":3713401723,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[176,171,110,43,177,107,124,131,28,212,48,166,144,89,103,140,127,108,163,251,64,226,20,9,80,154,243,173,98,241,231,70],"nbits":545259519,"n_headers":2},"prev_anchor":"e2ee1de85b08168feb9e9e5fb0ddf5c494cd7a8124fa2db423ee75cc0d2430cd:0","entry":"0185995a637cee712d446fc2bcf6ab879de0fe025fbb4a4a2b36f11fb9361315a200000000000000000000000000000000000000000000000000000000000000","key":3713401723,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
-[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[58,254,226,206,15,166,185,198,12,48,43,188,92,197,128,48,132,41,175,218,45,56,46,18,115,139,233,44,186,198,87,52],"nbits":545259519,"n_headers":3},"prev_anchor":"fa1faa97beb4b96e28dd78f34d02c57e390708b3272388f39acc4c30cc24d62a:1","entry":"02616c69636500000000000000000000001f4c0f1bf949be3bf3c4a4450865649140388dafb484b1fce6dd01647c19b0a6000000000000000000000000000000","key":3410281662,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[149,9,133,97,34,152,77,206,125,141,176,6,25,55,251,141,61,58,80,184,147,17,238,43,200,229,172,141,47,220,252,93],"nbits":545259519,"n_headers":3},"prev_anchor":"e48739570292162b290b021e617dd407cbf621e4dc07340583deb25b7720031f:1","entry":"02616c69636500000000000000000000001f4c0f1bf949be3bf3c4a4450865649140388dafb484b1fce6dd01647c19b0a6000000000000000000000000000000","key":3410281662,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [hub @ 210] state 2 signed by both
 [hub @ 210] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 210] state 3 signed by both
@@ -1014,9 +1014,9 @@ block 213: anchor 0a517eed13c152be501be91030854346504776a5a91adc1896f8b753ac86e8
 [hub @ 213] state 4 signed by both
 === bob's channel ===
 --- on-chain ---
-block 208: funding 65ab4a2a57233570cf47197e36f198f21e3d8eb592b42e004eb6aa974a0f13b1 (harness) 203 vB / 812 WU
-block 210: anchor fa1faa97beb4b96e28dd78f34d02c57e390708b3272388f39acc4c30cc24d62a (harness) 225 vB / 900 WU
-block 213: anchor 0a517eed13c152be501be91030854346504776a5a91adc1896f8b753ac86e892 (harness) 225 vB / 900 WU
+block 208: funding 8ddf369e28dd863d3203923bb01e0f0c5285816c82e8c17aa240cdddcb77f64c (harness) 203 vB / 812 WU
+block 210: anchor e48739570292162b290b021e617dd407cbf621e4dc07340583deb25b7720031f (harness) 225 vB / 900 WU
+block 213: anchor 81c42bd5d5441551fb4e213484b014573e52aa9e3064ba483144254622cf1e70 (harness) 225 vB / 900 WU
 --- user ---
 --- hub ---
 ```
@@ -1030,10 +1030,10 @@ block 213: anchor 0a517eed13c152be501be91030854346504776a5a91adc1896f8b753ac86e8
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `74cf6abfa0a00bbc3291a81862f41b2b37d25c151840276d8b3bfa023c38569c` |
-| 208 | `bob:funding` | hub-registry | `96b6f2dcc8fb82110c1286900983df8c219e40cbddb57329d6b0856cb22112b4` |
-| 210 | `alice:anchor` | hub-registry | `5f53299b55962704364e54573500dc6419bd4e12fda80d018a5f37a489bd0215` |
-| 213 | `alice:anchor` | hub-registry | `e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a` |
+| 205 | `alice:funding` | hub-registry | `d067f1a8ea1b1dbd439e511cf8c5abb56ac0330d38783c088f6da1d3b07c9a7d` |
+| 208 | `bob:funding` | hub-registry | `70fcbce74d828364c6a5a0e8b7cefb40f9f1676fc5bbf0268951c0739bed11e2` |
+| 210 | `alice:anchor` | hub-registry | `150325c9823ae1ad1a2c80336e6477f1df9d628b5405afa0700be7478e3c24f9` |
+| 213 | `alice:anchor` | hub-registry | `ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001` |
 
 <details><summary>narrative</summary>
 
@@ -1047,30 +1047,30 @@ block 213: anchor 0a517eed13c152be501be91030854346504776a5a91adc1896f8b753ac86e8
 [world @ 213] alice signed transfer alice -> K_B valid until 243 (request 3, anchor promised at 216); leg 1 (20), leg 2 (21) and transfer bond (22) opened
 --- registry ---
 [registry] promised request 1 (commit 2d1397d4be7c39d2) for the anchor at 210
-[registry] built anchor 5f53299b55962704364e54573500dc6419bd4e12fda80d018a5f37a489bd0215 for requests [1], root 5d8ff79937e168a3, to confirm at 210
+[registry] built anchor 150325c9823ae1ad1a2c80336e6477f1df9d628b5405afa0700be7478e3c24f9 for requests [1], root 5d8ff79937e168a3, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root 5d8ff79937e168a3
 [registry] promised request 2 (reveal alice -> a508c433) for the anchor at 213
-[registry] built anchor e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a for requests [2], root 062795a93635b3da, to confirm at 213
+[registry] built anchor ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001 for requests [2], root 062795a93635b3da, to confirm at 213
 [registry] anchor confirmed at 213 carrying requests [2]; root 062795a93635b3da
 [registry] promised request 3 (transfer alice -> b544afb7 (valid until 243)) for the anchor at 216
 [registry] FAULT: not anchoring (an anchor was promised at 216)
 === alice's channel ===
 --- on-chain ---
-block 205: funding 74cf6abfa0a00bbc3291a81862f41b2b37d25c151840276d8b3bfa023c38569c (harness) 203 vB / 812 WU
-block 210: anchor 5f53299b55962704364e54573500dc6419bd4e12fda80d018a5f37a489bd0215 (harness) 225 vB / 900 WU
-block 213: anchor e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a (harness) 225 vB / 900 WU
+block 205: funding d067f1a8ea1b1dbd439e511cf8c5abb56ac0330d38783c088f6da1d3b07c9a7d (harness) 203 vB / 812 WU
+block 210: anchor 150325c9823ae1ad1a2c80336e6477f1df9d628b5405afa0700be7478e3c24f9 (harness) 225 vB / 900 WU
+block 213: anchor ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001 (harness) 225 vB / 900 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[177,26,206,68,27,11,47,131,221,37,253,116,227,247,180,100,40,104,232,59,186,228,27,174,43,48,169,237,106,237,104,48],"nbits":545259519,"n_headers":2},"prev_anchor":"f7a20d7215f9aba5bd37f971caf2c05d04d6bd9e7276c77676cc9e335e54e457:1","entry":"012d1397d4be7c39d24d8e259a76519e5c7b1f526a711a87c7ee7c8ec59199d31400000000000000000000000000000000000000000000000000000000000000","key":2043309702,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[123,8,155,190,240,50,228,154,116,186,14,42,174,108,7,173,122,142,59,49,250,186,82,226,143,99,253,125,113,132,179,96],"nbits":545259519,"n_headers":2},"prev_anchor":"52975b35a444be969e7368f822338ba6f40991e8628bca5dbe96dd3d057cb378:1","entry":"012d1397d4be7c39d24d8e259a76519e5c7b1f526a711a87c7ee7c8ec59199d31400000000000000000000000000000000000000000000000000000000000000","key":2043309702,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
-[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[39,2,139,214,22,172,20,242,24,165,187,158,234,146,221,48,239,225,83,183,232,241,150,185,186,205,239,179,205,75,30,96],"nbits":545259519,"n_headers":3},"prev_anchor":"5f53299b55962704364e54573500dc6419bd4e12fda80d018a5f37a489bd0215:1","entry":"02616c6963650000000000000000000000a508c43389f0036c00f3ab87f61fcc338396a64dd2bf1d0716d45928fb95f17e000000000000000000000000000000","key":2617317035,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[181,165,251,75,14,29,217,200,187,140,5,212,13,240,192,147,25,30,236,199,209,10,90,135,135,183,120,102,244,42,149,95],"nbits":545259519,"n_headers":3},"prev_anchor":"150325c9823ae1ad1a2c80336e6477f1df9d628b5405afa0700be7478e3c24f9:1","entry":"02616c6963650000000000000000000000a508c43389f0036c00f3ab87f61fcc338396a64dd2bf1d0716d45928fb95f17e000000000000000000000000000000","key":2617317035,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [user @ 210] state 2 signed by both
 [user @ 210] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 210] state 3 signed by both
 [user @ 213] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 213] state 4 signed by both
-[user @ 213] accept draft seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[242,148,129,220,186,10,200,118,211,171,168,232,230,207,84,82,23,137,49,246,77,169,20,100,212,205,33,33,170,100,112,117],"nbits":545259519,"n_headers":3},"prev_anchor":"e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 243
+[user @ 213] accept draft seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[118,209,31,102,127,178,85,123,47,177,209,202,235,22,230,121,227,194,204,159,117,182,125,118,74,198,8,154,221,125,60,25],"nbits":545259519,"n_headers":3},"prev_anchor":"ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 243
 [user @ 213] state 5 signed by both
-[user @ 213] propose seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[242,148,129,220,186,10,200,118,211,171,168,232,230,207,84,82,23,137,49,246,77,169,20,100,212,205,33,33,170,100,112,117],"nbits":545259519,"n_headers":3},"prev_anchor":"e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
+[user @ 213] propose seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[118,209,31,102,127,178,85,123,47,177,209,202,235,22,230,121,227,194,204,159,117,182,125,118,74,198,8,154,221,125,60,25],"nbits":545259519,"n_headers":3},"prev_anchor":"ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
 [user @ 213] state 6 signed by both
 [user @ 218] propose seq 7: move in contract 22: claim request 3 unanchored / prove inclusion / refute the chain (deadline 238)
 [user @ 218] state 7 signed by both
@@ -1079,17 +1079,17 @@ block 213: anchor e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e449
 [user @ 243] accept draft seq 9: cancel contract 21 (fold R(s))
 [user @ 243] state 9 signed by both
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[177,26,206,68,27,11,47,131,221,37,253,116,227,247,180,100,40,104,232,59,186,228,27,174,43,48,169,237,106,237,104,48],"nbits":545259519,"n_headers":2},"prev_anchor":"f7a20d7215f9aba5bd37f971caf2c05d04d6bd9e7276c77676cc9e335e54e457:1","entry":"012d1397d4be7c39d24d8e259a76519e5c7b1f526a711a87c7ee7c8ec59199d31400000000000000000000000000000000000000000000000000000000000000","key":2043309702,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[123,8,155,190,240,50,228,154,116,186,14,42,174,108,7,173,122,142,59,49,250,186,82,226,143,99,253,125,113,132,179,96],"nbits":545259519,"n_headers":2},"prev_anchor":"52975b35a444be969e7368f822338ba6f40991e8628bca5dbe96dd3d057cb378:1","entry":"012d1397d4be7c39d24d8e259a76519e5c7b1f526a711a87c7ee7c8ec59199d31400000000000000000000000000000000000000000000000000000000000000","key":2043309702,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
-[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[39,2,139,214,22,172,20,242,24,165,187,158,234,146,221,48,239,225,83,183,232,241,150,185,186,205,239,179,205,75,30,96],"nbits":545259519,"n_headers":3},"prev_anchor":"5f53299b55962704364e54573500dc6419bd4e12fda80d018a5f37a489bd0215:1","entry":"02616c6963650000000000000000000000a508c43389f0036c00f3ab87f61fcc338396a64dd2bf1d0716d45928fb95f17e000000000000000000000000000000","key":2617317035,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[181,165,251,75,14,29,217,200,187,140,5,212,13,240,192,147,25,30,236,199,209,10,90,135,135,183,120,102,244,42,149,95],"nbits":545259519,"n_headers":3},"prev_anchor":"150325c9823ae1ad1a2c80336e6477f1df9d628b5405afa0700be7478e3c24f9:1","entry":"02616c6963650000000000000000000000a508c43389f0036c00f3ab87f61fcc338396a64dd2bf1d0716d45928fb95f17e000000000000000000000000000000","key":2617317035,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [hub @ 210] state 2 signed by both
 [hub @ 210] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 210] state 3 signed by both
 [hub @ 213] accept draft seq 4: cancel contract 11 (fold R(s))
 [hub @ 213] state 4 signed by both
-[hub @ 213] propose seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[242,148,129,220,186,10,200,118,211,171,168,232,230,207,84,82,23,137,49,246,77,169,20,100,212,205,33,33,170,100,112,117],"nbits":545259519,"n_headers":3},"prev_anchor":"e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 243
+[hub @ 213] propose seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[118,209,31,102,127,178,85,123,47,177,209,202,235,22,230,121,227,194,204,159,117,182,125,118,74,198,8,154,221,125,60,25],"nbits":545259519,"n_headers":3},"prev_anchor":"ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 243
 [hub @ 213] state 5 signed by both
-[hub @ 213] accept draft seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[242,148,129,220,186,10,200,118,211,171,168,232,230,207,84,82,23,137,49,246,77,169,20,100,212,205,33,33,170,100,112,117],"nbits":545259519,"n_headers":3},"prev_anchor":"e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
+[hub @ 213] accept draft seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[118,209,31,102,127,178,85,123,47,177,209,202,235,22,230,121,227,194,204,159,117,182,125,118,74,198,8,154,221,125,60,25],"nbits":545259519,"n_headers":3},"prev_anchor":"ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
 [hub @ 213] state 6 signed by both
 [hub @ 218] accept draft seq 7: move in contract 22: claim request 3 unanchored / prove inclusion / refute the chain (deadline 238)
 [hub @ 218] state 7 signed by both
@@ -1099,16 +1099,16 @@ block 213: anchor e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e449
 [hub @ 243] state 9 signed by both
 === bob's channel ===
 --- on-chain ---
-block 208: funding 96b6f2dcc8fb82110c1286900983df8c219e40cbddb57329d6b0856cb22112b4 (harness) 203 vB / 812 WU
-block 210: anchor 5f53299b55962704364e54573500dc6419bd4e12fda80d018a5f37a489bd0215 (harness) 225 vB / 900 WU
-block 213: anchor e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a (harness) 225 vB / 900 WU
+block 208: funding 70fcbce74d828364c6a5a0e8b7cefb40f9f1676fc5bbf0268951c0739bed11e2 (harness) 203 vB / 812 WU
+block 210: anchor 150325c9823ae1ad1a2c80336e6477f1df9d628b5405afa0700be7478e3c24f9 (harness) 225 vB / 900 WU
+block 213: anchor ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001 (harness) 225 vB / 900 WU
 --- user ---
-[user @ 213] propose seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[242,148,129,220,186,10,200,118,211,171,168,232,230,207,84,82,23,137,49,246,77,169,20,100,212,205,33,33,170,100,112,117],"nbits":545259519,"n_headers":3},"prev_anchor":"e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 243
+[user @ 213] propose seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[118,209,31,102,127,178,85,123,47,177,209,202,235,22,230,121,227,194,204,159,117,182,125,118,74,198,8,154,221,125,60,25],"nbits":545259519,"n_headers":3},"prev_anchor":"ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 243
 [user @ 213] state 1 signed by both
 [user @ 243] propose seq 2: cancel contract 20 (fold R(s))
 [user @ 243] state 2 signed by both
 --- hub ---
-[hub @ 213] accept draft seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[242,148,129,220,186,10,200,118,211,171,168,232,230,207,84,82,23,137,49,246,77,169,20,100,212,205,33,33,170,100,112,117],"nbits":545259519,"n_headers":3},"prev_anchor":"e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e4494a:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 243
+[hub @ 213] accept draft seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[118,209,31,102,127,178,85,123,47,177,209,202,235,22,230,121,227,194,204,159,117,182,125,118,74,198,8,154,221,125,60,25],"nbits":545259519,"n_headers":3},"prev_anchor":"ad3dd2841bf27d74f542e11ab4d0a810ee60f2520c32747a38980ae4140ef001:1","entry":"03616c6963650000000000000000000000b544afb765826c155c912626efb2f19c251cdbb9ddaf087d94f84278d65efd1e000000f30000000000000000000000","key":2535425743,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 243
 [hub @ 213] state 1 signed by both
 [hub @ 243] accept draft seq 2: cancel contract 20 (fold R(s))
 [hub @ 243] state 2 signed by both
@@ -1123,22 +1123,22 @@ block 213: anchor e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e449
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `cc086fea07ff71c37108044e7fb081b2e36dc093c57c69dc419b090fdb3ea2ad` |
-| 208 | `bob:funding` | hub-registry | `f37f1ebecdc7bb6974f2505c063df352683c963b744419f7b1dd42bfb02dc3ab` |
-| 210 | `alice:anchor` | hub-registry | `4dda252657594ab7bc167816765c6ff590508f6ce3f9c891f933c7f7c44dce7e` |
-| 213 | `alice:anchor` | hub-registry | `d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58` |
-| 216 | `alice:anchor` | hub-registry | `11d8c19d06ffc70ce5b9ab5bc086e9eb8585875c82a156965fb1d00b27b8b253` |
-| 217 | `alice:commitment_6` | user | `0d8ba41be2313be52c828270b86bebf2459fa6cadeca33aec04bf8bebfd82a03` |
-| 218 | `alice:claim_to_remote` | hub | `18519489296cf1e58aa4cc2c37b6e2d7a68f7cbfdec82b8ac146bff3ce3ec899` |
-| 219 | `bob:commitment_1` | hub | `c85392bae63a9c48a048a8b228be73961b23fff15f338286e238effc7ba1d9db` |
-| 220 | `bob:claim_to_remote` | user | `7a88081269bb84da2c07b1c5e0d7179fbbcb54e78e97576aaa06b324ccf3cca9` |
-| 223 | `alice:claim_to_local` | user | `36f2e4bd68e78d90e46507936e2efbfb374c18e23759a66d001d04e3f3e140d6` |
-| 223 | `alice:move_1` | user | `3d5ee98dc617463e65f6a0bdb68f44e8182d88470b1ee5679b59feeef6856518` |
-| 225 | `bob:claim_to_local` | hub | `e3aa05cad2749bf5ec081f3335c61f70d0c626fd8e3f4de66d214c8e310cb453` |
-| 225 | `bob:move_1` | hub | `ebae777479bf0fab9a912863cbc3e41a8d55085c505ab94fefeb87505f6d7465` |
-| 235 | `alice:split_1_Paid` | user | `4ad2b8f93bd2bd48145b89e26ee550d32f711d9d091104822931752d4ece5df6` |
-| 237 | `bob:split_1_Paid` | user | `d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861b81654fe` |
-| 279 | `alice:settle` | user | `2eac31223e7fb38ef767de3b60872657791627f1916fc64949c1ddce455dcfe9` |
+| 205 | `alice:funding` | hub-registry | `b701d2459a571da460c7b1e82a7e4036ff7d67c106071a252457c4dce22a37fa` |
+| 208 | `bob:funding` | hub-registry | `ae65a964532046fbdd0a8caa3d8e8a89cad05ae760705ba86041edc68f5ac687` |
+| 210 | `alice:anchor` | hub-registry | `1b1b9bf8f6657d2eb01dbc37ee7ac564313cf3d0af43d31474fa2b87af213274` |
+| 213 | `alice:anchor` | hub-registry | `86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669` |
+| 216 | `alice:anchor` | hub-registry | `6e6fecbb22b009c6b21e1a63b66172518c24610fd3a6c219045a533a0e5288a3` |
+| 217 | `alice:commitment_6` | user | `714cbfbb7fbef644a34560a7ce54e7a1e8dbd50fc4a85f5ab818e330bf683a3e` |
+| 218 | `alice:claim_to_remote` | hub | `7a9a591a2b3348f84fb18fb38b37ec70b9cce4043eda99067245a207212983b3` |
+| 219 | `bob:commitment_1` | hub | `a461e07e84bf34b404530dd062662545a7831e111a431cb45e0bb5c53df52760` |
+| 220 | `bob:claim_to_remote` | user | `d4ab4ec89d7f71c3c08cff3636a78ba78223c3915dfa913bc40e5a60973249db` |
+| 223 | `alice:claim_to_local` | user | `feb66c8bda228084b84a17cc9ee5a3173d3e53e33bb0a1c057e8fe688a17cbf6` |
+| 223 | `alice:move_1` | user | `e113cce5757962d491de19b4343176c4eb21e54d0d20529648f40cc7ab85d1c0` |
+| 225 | `bob:claim_to_local` | hub | `c70202dc9be1c49921bdab17db7d65d419d0b276e2e513ecd56ea4d8cfa7f1e6` |
+| 225 | `bob:move_1` | hub | `76c5fa2a79e32e1af6ea6011ceaaf30eb05852a0a3699c230274dacbf385568c` |
+| 235 | `alice:split_1_Paid` | user | `805191f647c8f80a88702f1f1f10bf11d3110808f6a67fa4e39b2fe916b2089e` |
+| 237 | `bob:split_1_Paid` | user | `ce4a1487cc5d4c88156674ad302b55ba0a64f2009cc0b4c0047d496ffa6b9343` |
+| 279 | `alice:settle` | user | `1c0bfc0c6701c70c269e9b966a777c3b26f2059ae7d3875008c8be6db91007af` |
 
 <details><summary>narrative</summary>
 
@@ -1153,38 +1153,38 @@ block 213: anchor e9addcfa8dd0dd969ed3cad54ec7bbe8e6cc9146e92f032678159ed2e4e449
 [world @ 216] proof data for request 3 served (entry anchored)
 --- registry ---
 [registry] promised request 1 (commit 60b6eb17bebef664) for the anchor at 210
-[registry] built anchor 4dda252657594ab7bc167816765c6ff590508f6ce3f9c891f933c7f7c44dce7e for requests [1], root 66823cb33433070f, to confirm at 210
+[registry] built anchor 1b1b9bf8f6657d2eb01dbc37ee7ac564313cf3d0af43d31474fa2b87af213274 for requests [1], root 66823cb33433070f, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root 66823cb33433070f
 [registry] promised request 2 (reveal alice -> 3f126721) for the anchor at 213
-[registry] built anchor d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58 for requests [2], root 7e6c68defd6d2503, to confirm at 213
+[registry] built anchor 86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669 for requests [2], root 7e6c68defd6d2503, to confirm at 213
 [registry] anchor confirmed at 213 carrying requests [2]; root 7e6c68defd6d2503
 [registry] promised request 3 (transfer alice -> cbd87d30 (valid until 283)) for the anchor at 216
-[registry] built anchor 11d8c19d06ffc70ce5b9ab5bc086e9eb8585875c82a156965fb1d00b27b8b253 for requests [3], root 6261f1409dc6d192, to confirm at 216
+[registry] built anchor 6e6fecbb22b009c6b21e1a63b66172518c24610fd3a6c219045a533a0e5288a3 for requests [3], root 6261f1409dc6d192, to confirm at 216
 [registry] anchor confirmed at 216 carrying requests [3]; root 6261f1409dc6d192
 === alice's channel ===
 --- on-chain ---
-block 205: funding cc086fea07ff71c37108044e7fb081b2e36dc093c57c69dc419b090fdb3ea2ad (harness) 203 vB / 812 WU
-block 210: anchor 4dda252657594ab7bc167816765c6ff590508f6ce3f9c891f933c7f7c44dce7e (harness) 225 vB / 900 WU
-block 213: anchor d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58 (harness) 225 vB / 900 WU
-block 216: anchor 11d8c19d06ffc70ce5b9ab5bc086e9eb8585875c82a156965fb1d00b27b8b253 (harness) 225 vB / 900 WU
-block 217: commitment_6 0d8ba41be2313be52c828270b86bebf2459fa6cadeca33aec04bf8bebfd82a03 (user) 283 vB / 1130 WU
-block 218: claim_to_remote 18519489296cf1e58aa4cc2c37b6e2d7a68f7cbfdec82b8ac146bff3ce3ec899 (hub) 129 vB / 513 WU
-block 223: claim_to_local 36f2e4bd68e78d90e46507936e2efbfb374c18e23759a66d001d04e3f3e140d6 (user) 137 vB / 548 WU
-block 223: move_1 3d5ee98dc617463e65f6a0bdb68f44e8182d88470b1ee5679b59feeef6856518 (user) 4969 vB / 19873 WU
-block 235: split_1_Paid 4ad2b8f93bd2bd48145b89e26ee550d32f711d9d091104822931752d4ece5df6 (user) 193 vB / 770 WU
-block 279: settle 2eac31223e7fb38ef767de3b60872657791627f1916fc64949c1ddce455dcfe9 (user) 172 vB / 686 WU
+block 205: funding b701d2459a571da460c7b1e82a7e4036ff7d67c106071a252457c4dce22a37fa (harness) 203 vB / 812 WU
+block 210: anchor 1b1b9bf8f6657d2eb01dbc37ee7ac564313cf3d0af43d31474fa2b87af213274 (harness) 225 vB / 900 WU
+block 213: anchor 86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669 (harness) 225 vB / 900 WU
+block 216: anchor 6e6fecbb22b009c6b21e1a63b66172518c24610fd3a6c219045a533a0e5288a3 (harness) 225 vB / 900 WU
+block 217: commitment_6 714cbfbb7fbef644a34560a7ce54e7a1e8dbd50fc4a85f5ab818e330bf683a3e (user) 283 vB / 1130 WU
+block 218: claim_to_remote 7a9a591a2b3348f84fb18fb38b37ec70b9cce4043eda99067245a207212983b3 (hub) 129 vB / 513 WU
+block 223: claim_to_local feb66c8bda228084b84a17cc9ee5a3173d3e53e33bb0a1c057e8fe688a17cbf6 (user) 137 vB / 548 WU
+block 223: move_1 e113cce5757962d491de19b4343176c4eb21e54d0d20529648f40cc7ab85d1c0 (user) 4969 vB / 19876 WU
+block 235: split_1_Paid 805191f647c8f80a88702f1f1f10bf11d3110808f6a67fa4e39b2fe916b2089e (user) 193 vB / 770 WU
+block 279: settle 1c0bfc0c6701c70c269e9b966a777c3b26f2059ae7d3875008c8be6db91007af (user) 172 vB / 686 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[31,145,141,143,45,58,146,81,51,254,172,66,55,180,237,169,4,38,100,86,22,205,4,14,196,192,169,138,154,91,85,50],"nbits":545259519,"n_headers":2},"prev_anchor":"44cab40a97ac99211f0de077e0f9d7241c13402d33740ad03a913edf84fdc0d8:1","entry":"0160b6eb17bebef66488eb43c2e1dfa1258e8c865c10420d4218a399fbe811ce6400000000000000000000000000000000000000000000000000000000000000","key":2187921866,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[201,19,38,90,159,3,13,243,58,53,29,171,136,106,139,147,225,121,64,139,91,31,172,24,141,155,114,119,64,163,156,110],"nbits":545259519,"n_headers":2},"prev_anchor":"92f91f5a80fd23bbc3c37d5f168e56ed46e5971d2babec29857a188af0375682:1","entry":"0160b6eb17bebef66488eb43c2e1dfa1258e8c865c10420d4218a399fbe811ce6400000000000000000000000000000000000000000000000000000000000000","key":2187921866,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
-[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[31,104,145,118,165,25,149,228,176,133,142,20,204,247,141,79,1,252,59,77,116,200,102,254,127,32,170,52,235,135,155,75],"nbits":545259519,"n_headers":3},"prev_anchor":"4dda252657594ab7bc167816765c6ff590508f6ce3f9c891f933c7f7c44dce7e:1","entry":"02616c69636500000000000000000000003f126721e1b1f3b99b3017c15bda596fe1067ffcb2c6cbd38c2c72390af29d11000000000000000000000000000000","key":390509532,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[196,250,207,213,61,188,174,68,105,249,42,167,248,149,97,215,177,138,247,250,120,98,1,105,183,31,173,240,18,187,63,104],"nbits":545259519,"n_headers":3},"prev_anchor":"1b1b9bf8f6657d2eb01dbc37ee7ac564313cf3d0af43d31474fa2b87af213274:1","entry":"02616c69636500000000000000000000003f126721e1b1f3b99b3017c15bda596fe1067ffcb2c6cbd38c2c72390af29d11000000000000000000000000000000","key":390509532,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [user @ 210] state 2 signed by both
 [user @ 210] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 210] state 3 signed by both
 [user @ 213] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 213] state 4 signed by both
-[user @ 213] accept draft seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[137,39,88,235,165,2,120,108,69,77,192,131,241,34,107,243,111,41,230,134,1,122,157,250,204,12,108,78,238,82,69,92],"nbits":545259519,"n_headers":3},"prev_anchor":"d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 283
+[user @ 213] accept draft seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[121,204,197,187,211,43,116,42,61,116,199,137,81,142,129,243,1,198,240,41,35,36,142,209,185,206,100,40,26,77,220,93],"nbits":545259519,"n_headers":3},"prev_anchor":"86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 283
 [user @ 213] state 5 signed by both
-[user @ 213] propose seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[137,39,88,235,165,2,120,108,69,77,192,131,241,34,107,243,111,41,230,134,1,122,157,250,204,12,108,78,238,82,69,92],"nbits":545259519,"n_headers":3},"prev_anchor":"d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
+[user @ 213] propose seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[121,204,197,187,211,43,116,42,61,116,199,137,81,142,129,243,1,198,240,41,35,36,142,209,185,206,100,40,26,77,220,93],"nbits":545259519,"n_headers":3},"prev_anchor":"86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
 [user @ 213] state 6 signed by both
 [user @ 216] propose seq 7: move in contract 21: prove the entry is anchored / refute the chain (deadline 236)
 [user @ 216] draft seq 7 rejected by counterparty: hub refuses to pay Alice
@@ -1196,21 +1196,21 @@ block 279: settle 2eac31223e7fb38ef767de3b60872657791627f1916fc64949c1ddce455dcf
 [user @ 223] contract 21: move_1 by user confirmed: move prove the entry is anchored / refute the chain, claimed state Paid, claimed outcome Paid
 [user @ 223] contract 21: claimed end state 6261f140.. is correct
 [user @ 234] contract 21: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[user @ 235] contract 21 resolved by split_Paid (4ad2b8f93bd2bd48145b89e26ee550d32f711d9d091104822931752d4ece5df6)
+[user @ 235] contract 21 resolved by split_Paid (805191f647c8f80a88702f1f1f10bf11d3110808f6a67fa4e39b2fe916b2089e)
 [user @ 278] contract 22: deadline 278 passed with no move; broadcasting settle (R(s) = BondToHub)
-[user @ 279] contract 22 resolved by settle (2eac31223e7fb38ef767de3b60872657791627f1916fc64949c1ddce455dcfe9)
+[user @ 279] contract 22 resolved by settle (1c0bfc0c6701c70c269e9b966a777c3b26f2059ae7d3875008c8be6db91007af)
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[31,145,141,143,45,58,146,81,51,254,172,66,55,180,237,169,4,38,100,86,22,205,4,14,196,192,169,138,154,91,85,50],"nbits":545259519,"n_headers":2},"prev_anchor":"44cab40a97ac99211f0de077e0f9d7241c13402d33740ad03a913edf84fdc0d8:1","entry":"0160b6eb17bebef66488eb43c2e1dfa1258e8c865c10420d4218a399fbe811ce6400000000000000000000000000000000000000000000000000000000000000","key":2187921866,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[201,19,38,90,159,3,13,243,58,53,29,171,136,106,139,147,225,121,64,139,91,31,172,24,141,155,114,119,64,163,156,110],"nbits":545259519,"n_headers":2},"prev_anchor":"92f91f5a80fd23bbc3c37d5f168e56ed46e5971d2babec29857a188af0375682:1","entry":"0160b6eb17bebef66488eb43c2e1dfa1258e8c865c10420d4218a399fbe811ce6400000000000000000000000000000000000000000000000000000000000000","key":2187921866,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
-[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[31,104,145,118,165,25,149,228,176,133,142,20,204,247,141,79,1,252,59,77,116,200,102,254,127,32,170,52,235,135,155,75],"nbits":545259519,"n_headers":3},"prev_anchor":"4dda252657594ab7bc167816765c6ff590508f6ce3f9c891f933c7f7c44dce7e:1","entry":"02616c69636500000000000000000000003f126721e1b1f3b99b3017c15bda596fe1067ffcb2c6cbd38c2c72390af29d11000000000000000000000000000000","key":390509532,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[196,250,207,213,61,188,174,68,105,249,42,167,248,149,97,215,177,138,247,250,120,98,1,105,183,31,173,240,18,187,63,104],"nbits":545259519,"n_headers":3},"prev_anchor":"1b1b9bf8f6657d2eb01dbc37ee7ac564313cf3d0af43d31474fa2b87af213274:1","entry":"02616c69636500000000000000000000003f126721e1b1f3b99b3017c15bda596fe1067ffcb2c6cbd38c2c72390af29d11000000000000000000000000000000","key":390509532,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [hub @ 210] state 2 signed by both
 [hub @ 210] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 210] state 3 signed by both
 [hub @ 213] accept draft seq 4: cancel contract 11 (fold R(s))
 [hub @ 213] state 4 signed by both
-[hub @ 213] propose seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[137,39,88,235,165,2,120,108,69,77,192,131,241,34,107,243,111,41,230,134,1,122,157,250,204,12,108,78,238,82,69,92],"nbits":545259519,"n_headers":3},"prev_anchor":"d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 283
+[hub @ 213] propose seq 5: open contract 21 (anchorpay:{"prover":"User","shape":{"chain":{"checkpoint":[121,204,197,187,211,43,116,42,61,116,199,137,81,142,129,243,1,198,240,41,35,36,142,209,185,206,100,40,26,77,220,93],"nbits":545259519,"n_headers":3},"prev_anchor":"86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 283
 [hub @ 213] state 5 signed by both
-[hub @ 213] accept draft seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[137,39,88,235,165,2,120,108,69,77,192,131,241,34,107,243,111,41,230,134,1,122,157,250,204,12,108,78,238,82,69,92],"nbits":545259519,"n_headers":3},"prev_anchor":"d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
+[hub @ 213] accept draft seq 6: open contract 22 (nreg:{"req_id":3,"claim_from":218,"shape":{"chain":{"checkpoint":[121,204,197,187,211,43,116,42,61,116,199,137,81,142,129,243,1,198,240,41,35,36,142,209,185,206,100,40,26,77,220,93],"nbits":545259519,"n_headers":3},"prev_anchor":"86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0 BTC/0.00040000 BTC deadline 278
 [hub @ 213] state 6 signed by both
 [hub @ 216] rejecting draft seq 7: hub refuses to pay Alice
 [hub @ 217] counterparty's commitment for state 6 confirmed with 2 contract output(s)
@@ -1220,22 +1220,22 @@ block 279: settle 2eac31223e7fb38ef767de3b60872657791627f1916fc64949c1ddce455dcf
 [hub @ 223] contract 21: claimed end state 6261f140.. is correct
 [hub @ 223] contract 21: counterparty's move_1 is consistent with the program
 [hub @ 234] contract 21: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[hub @ 235] contract 21 resolved by split_Paid (4ad2b8f93bd2bd48145b89e26ee550d32f711d9d091104822931752d4ece5df6)
+[hub @ 235] contract 21 resolved by split_Paid (805191f647c8f80a88702f1f1f10bf11d3110808f6a67fa4e39b2fe916b2089e)
 [hub @ 278] contract 22: deadline 278 passed with no move; broadcasting settle (R(s) = BondToHub)
-[hub @ 279] contract 22 resolved by settle (2eac31223e7fb38ef767de3b60872657791627f1916fc64949c1ddce455dcfe9)
+[hub @ 279] contract 22 resolved by settle (1c0bfc0c6701c70c269e9b966a777c3b26f2059ae7d3875008c8be6db91007af)
 === bob's channel ===
 --- on-chain ---
-block 208: funding f37f1ebecdc7bb6974f2505c063df352683c963b744419f7b1dd42bfb02dc3ab (harness) 203 vB / 812 WU
-block 210: anchor 4dda252657594ab7bc167816765c6ff590508f6ce3f9c891f933c7f7c44dce7e (harness) 225 vB / 900 WU
-block 213: anchor d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58 (harness) 225 vB / 900 WU
-block 216: anchor 11d8c19d06ffc70ce5b9ab5bc086e9eb8585875c82a156965fb1d00b27b8b253 (harness) 225 vB / 900 WU
-block 219: commitment_1 c85392bae63a9c48a048a8b228be73961b23fff15f338286e238effc7ba1d9db (hub) 240 vB / 958 WU
-block 220: claim_to_remote 7a88081269bb84da2c07b1c5e0d7179fbbcb54e78e97576aaa06b324ccf3cca9 (user) 129 vB / 513 WU
-block 225: claim_to_local e3aa05cad2749bf5ec081f3335c61f70d0c626fd8e3f4de66d214c8e310cb453 (hub) 137 vB / 548 WU
-block 225: move_1 ebae777479bf0fab9a912863cbc3e41a8d55085c505ab94fefeb87505f6d7465 (hub) 4969 vB / 19873 WU
-block 237: split_1_Paid d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861b81654fe (user) 201 vB / 802 WU
+block 208: funding ae65a964532046fbdd0a8caa3d8e8a89cad05ae760705ba86041edc68f5ac687 (harness) 203 vB / 812 WU
+block 210: anchor 1b1b9bf8f6657d2eb01dbc37ee7ac564313cf3d0af43d31474fa2b87af213274 (harness) 225 vB / 900 WU
+block 213: anchor 86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669 (harness) 225 vB / 900 WU
+block 216: anchor 6e6fecbb22b009c6b21e1a63b66172518c24610fd3a6c219045a533a0e5288a3 (harness) 225 vB / 900 WU
+block 219: commitment_1 a461e07e84bf34b404530dd062662545a7831e111a431cb45e0bb5c53df52760 (hub) 240 vB / 958 WU
+block 220: claim_to_remote d4ab4ec89d7f71c3c08cff3636a78ba78223c3915dfa913bc40e5a60973249db (user) 129 vB / 513 WU
+block 225: claim_to_local c70202dc9be1c49921bdab17db7d65d419d0b276e2e513ecd56ea4d8cfa7f1e6 (hub) 137 vB / 548 WU
+block 225: move_1 76c5fa2a79e32e1af6ea6011ceaaf30eb05852a0a3699c230274dacbf385568c (hub) 4969 vB / 19876 WU
+block 237: split_1_Paid ce4a1487cc5d4c88156674ad302b55ba0a64f2009cc0b4c0047d496ffa6b9343 (user) 201 vB / 802 WU
 --- user ---
-[user @ 213] propose seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[137,39,88,235,165,2,120,108,69,77,192,131,241,34,107,243,111,41,230,134,1,122,157,250,204,12,108,78,238,82,69,92],"nbits":545259519,"n_headers":3},"prev_anchor":"d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 283
+[user @ 213] propose seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[121,204,197,187,211,43,116,42,61,116,199,137,81,142,129,243,1,198,240,41,35,36,142,209,185,206,100,40,26,77,220,93],"nbits":545259519,"n_headers":3},"prev_anchor":"86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 283
 [user @ 213] state 1 signed by both
 [user @ 219] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [user @ 219] contract 20 on-chain at depth 0: state Init, turn Some(Hub), deadline 283
@@ -1243,9 +1243,9 @@ block 237: split_1_Paid d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861
 [user @ 225] contract 20: claimed end state 6261f140.. is correct
 [user @ 225] contract 20: counterparty's move_1 is consistent with the program
 [user @ 236] contract 20: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[user @ 237] contract 20 resolved by split_Paid (d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861b81654fe)
+[user @ 237] contract 20 resolved by split_Paid (ce4a1487cc5d4c88156674ad302b55ba0a64f2009cc0b4c0047d496ffa6b9343)
 --- hub ---
-[hub @ 213] accept draft seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[137,39,88,235,165,2,120,108,69,77,192,131,241,34,107,243,111,41,230,134,1,122,157,250,204,12,108,78,238,82,69,92],"nbits":545259519,"n_headers":3},"prev_anchor":"d168240afa12d759e2126b7bdc9701b5ce1faede47896ab5e7b2f39756f5ce58:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 283
+[hub @ 213] accept draft seq 1: open contract 20 (anchorpay:{"prover":"Hub","shape":{"chain":{"checkpoint":[121,204,197,187,211,43,116,42,61,116,199,137,81,142,129,243,1,198,240,41,35,36,142,209,185,206,100,40,26,77,220,93],"nbits":545259519,"n_headers":3},"prev_anchor":"86b1959a6ee273cd820ab280897979ad9e7d79ab29d09957735f19442dd19669:1","entry":"03616c6963650000000000000000000000cbd87d300a39d70c14aeb746e4d1438d8e291d7a0127452c0ce1eb1f5c54d7120000011b0000000000000000000000","key":2513024300,"merkle_sides":[true]},"slot":"req3"}) stakes 0.00040000 BTC/0 BTC deadline 283
 [hub @ 213] state 1 signed by both
 [hub @ 216] propose seq 2: move in contract 20: prove the entry is anchored / refute the chain (deadline 236)
 [hub @ 218] counterparty stalled since height 216; force-closing at state 1
@@ -1255,7 +1255,7 @@ block 237: split_1_Paid d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861
 [hub @ 225] contract 20: move_1 by hub confirmed: move prove the entry is anchored / refute the chain, claimed state Paid, claimed outcome Paid
 [hub @ 225] contract 20: claimed end state 6261f140.. is correct
 [hub @ 236] contract 20: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[hub @ 237] contract 20 resolved by split_Paid (d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861b81654fe)
+[hub @ 237] contract 20 resolved by split_Paid (ce4a1487cc5d4c88156674ad302b55ba0a64f2009cc0b4c0047d496ffa6b9343)
 ```
 </details>
 
@@ -1263,37 +1263,37 @@ block 237: split_1_Paid d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861
 
 **Expected:** Alice claims the reveal bond; the hub's proof is rejected off-chain, goes on-chain (move_2) and is disproved by bisection at the ledger-root check; bond to Alice; the auditor reports the omission too
 
-**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 117862 sat, hub 59000 sat
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 117861 sat, hub 59000 sat
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `6647549d1939a7c3cabce189b2e5b6f9a0792ded6c93cdeb3f9d66d7ecc61b4a` |
-| 208 | `bob:funding` | hub-registry | `7bc7e3046b1b2020dc8b795522984341c8e07b648bbdf941a6e9e3cbced98105` |
-| 210 | `alice:anchor` | hub-registry | `cb4b53e6745d9b20c90ef7a1e7227e5eb94427bc4bad42a57aa5eea2b2b5cca7` |
-| 213 | `alice:anchor` | hub-registry | `6e8f946e2a1f57b6e584089ccd06a83a45a6816da9ea2b8693dd682d8bd09536` |
-| 216 | `alice:commitment_3` | user | `16e3c4707e0eac569339d0ad571b05adc115dcbcd074e3ff76e52748535a43fb` |
-| 217 | `alice:claim_to_remote` | hub | `ac647f41a034fe113d4b463f2be490d754ad6a767ebe8304008cf229f97d50b2` |
-| 222 | `alice:claim_to_local` | user | `99c35962b2019459f9e02dc21afe398f4f0676d7ad3fea6f15505277b9e5b5d2` |
-| 222 | `alice:move_1` | user | `5ea745466484e8d182568e69b73c0fe6a59a6ff77168a83b71ec1ef3edbab04d` |
-| 223 | `alice:move_2` | hub | `03b0221ce8def30dc16eaadea09d4045a82b99f82099fb7399590b622b506eb6` |
-| 224 | `alice:d2/dispute` | user | `7ced4c48de25d44b1d7b9549f32f47ef76100da1617fbc41b71ad199c1b00481` |
-| 225 | `alice:p_round_1` | hub | `cd407ca002f7eb277683d512bc32e2623af1bb91c0bc6750dd575a73854cd772` |
-| 226 | `alice:q_round_1` | user | `110202aaa54f25a0b2e3057a8062f9ecad346a232f210027029aeee7ed043fd6` |
-| 227 | `alice:p_round_2` | hub | `e07e9956b1d1fc2dc927ebfdf7b3a370dae14b3f76fa6c1e149b492dc4b152ec` |
-| 228 | `alice:q_round_2` | user | `c1ef8b46a4ad20ae77bd274b3550cd52e9cd75ac95d9e1bfd45da03c3b677951` |
-| 229 | `alice:p_round_3` | hub | `f7f103e554ea4e83dec9deff765433b5fdfa32c3826fe73aa061e34195cc48d5` |
-| 230 | `alice:q_round_3` | user | `d904bc350144d08d65757c5fd4b21ed7edb78e549d0213bdca7aa1a1374f256c` |
-| 231 | `alice:p_round_4` | hub | `2b9e92bbc1234d850e9b9cd9454c6cb4fdcb8387af4d12f33523382115147ad0` |
-| 232 | `alice:q_round_4` | user | `042497be65d7ce916e4cda3e9adfe394aaa6e8458d3c94adb92d5998a80aea3b` |
-| 233 | `alice:p_round_5` | hub | `eec85395210f5ea9f8f7f52c88506b1e22032f4efc81802c41dc949488d4afa7` |
-| 234 | `alice:q_round_5` | user | `ae07e846a001b7d835ed8d3269717c2c10ea4f53b72d0d96047a99a6b6b87eac` |
-| 235 | `alice:p_round_6` | hub | `825e26ad221068cb1a7bb4eefb4051962663b16eb5b2df71e60a930f0188c3a8` |
-| 236 | `alice:q_round_6` | user | `a76fdb6e66335ab614a06edaf444d350954244b418a34c4b4847c8e3a5ed57ee` |
-| 237 | `alice:p_round_7` | hub | `fde146843151b84cb4fa47b5cd54e96e2fe5cd0cce8d04dbbf96b39791779992` |
-| 238 | `alice:q_round_7_check` | user | `81370a79b555adf8f4f44bd1cf70c670985cc9c39d2515dfae7c716400bf2e71` |
-| 239 | `alice:c_re_cur` | hub | `738f6aaa16f429f1791e8b0340c632faad84c15ca85d4556565a3cf1e12be151` |
-| 240 | `alice:c_re_next` | hub | `78d1a5c094be4e53fa6434340889ccd96c1dd749aaeaf4141e683bd39ec2536d` |
-| 241 | `alice:simple_ledger_root_abeda329` | user | `831d233f19c8947b9e78396690d1eca71ec09fbf638255f9f281560e25e037a1` |
+| 205 | `alice:funding` | hub-registry | `97ed05acd3925e7be1fb48667347414dfb34125f9b3e1bbe117e80f8027aa215` |
+| 208 | `bob:funding` | hub-registry | `755092f61c50cbf05ff6e49bd8628b33cee12eb9b9d252dff474b88050219709` |
+| 210 | `alice:anchor` | hub-registry | `e3c0ece95bbe8a3a6118e405852c7a9aa60c91409065aad305ca40fc303a67d1` |
+| 213 | `alice:anchor` | hub-registry | `d83508f3939ff8560a6b0606a172cb341550f4b0bf3862ec6d4d01910dfed51a` |
+| 216 | `alice:commitment_3` | user | `e8adc6fcb8850bfa4b2d60391ad4d473706f7aefa87c011689bfd21cd418e29d` |
+| 217 | `alice:claim_to_remote` | hub | `dd253a3ab8e2238a3c2bfc2705f754bc75ebc40ad66d9fcd14ce4dcc5b667749` |
+| 222 | `alice:claim_to_local` | user | `cbca9becda142a116f5cf35de39795dd09680e4824acd1c76846f97f16f63d00` |
+| 222 | `alice:move_1` | user | `94bf756c58eaf136e091514e89c3d2d57c532e9289ea78201eb9b6555c26f0f0` |
+| 223 | `alice:move_2` | hub | `2d78454db3c662fd1fe2369100fa59af66c5848f0e5db23c4cd0cafaf6232092` |
+| 224 | `alice:d2/dispute` | user | `f5a524097d24375ea4c08a05e2e1160a40911f9d156b73fcb7f0043712c889ed` |
+| 225 | `alice:p_round_1` | hub | `07b5e35f3a7f4032e2a258356375a138914afc02ec39f52b9c08b107d66b2082` |
+| 226 | `alice:q_round_1` | user | `0b6d0efe55020b9a9fe0b7f5e76488655f193ea27b08371b5a4bcf580de18641` |
+| 227 | `alice:p_round_2` | hub | `e89cf84260adb833e390413d9c2a8f6a79807596532873b190a569f2c6f2c627` |
+| 228 | `alice:q_round_2` | user | `c68650020520a2e5a1c43052e19f5b05d6182464e7de8d77406b06a0f2ef99af` |
+| 229 | `alice:p_round_3` | hub | `057300a7169d91b39bb0fdd05668c0272daf1decbc35cf4f277047ed5840c306` |
+| 230 | `alice:q_round_3` | user | `705c70a9fb3b1435f3575c265da5bf941da679ef17b72c9bc34d9c2b123bdf73` |
+| 231 | `alice:p_round_4` | hub | `3657fe30de61a02e529cfd5d6ad6896301b65d0d82025c1b3a5d33c073b751c9` |
+| 232 | `alice:q_round_4` | user | `185539d667200adb779b6a65f007d94468b12861250d14f81f83b25840d2125e` |
+| 233 | `alice:p_round_5` | hub | `1cf1121f43af53b74faf579948a645c5826d6d3a70b98f4915facf3ba98ff109` |
+| 234 | `alice:q_round_5` | user | `c4bb92fcc9a34c5cf444a4b90f82129d4568465ba08bf40310545b149e45b252` |
+| 235 | `alice:p_round_6` | hub | `ff463eb8e23679ff29c01848e0d3238977c7a82723037ba32b4e0fbf86ba5d82` |
+| 236 | `alice:q_round_6` | user | `f48d77cf5b840274996c25f5f188d98182206cc346012e5007d638c08dbbbaf4` |
+| 237 | `alice:p_round_7` | hub | `6d216abaf65a913bdb2fd7645c7a18c46208cd6750ed30d48990831bf820ce3a` |
+| 238 | `alice:q_round_7_check` | user | `246ba96e0e1003803471ea03832784cf310eb62262fb1df80c55d665e6792c78` |
+| 239 | `alice:c_re_cur` | hub | `ad5fb022792ac4ca0fdb786ba81ce34f1e7418b657b38058f349f31686fe4926` |
+| 240 | `alice:c_re_next` | hub | `7b4cf73e1774cd21000f1b467d438ba51b8450e5b7c3a3d1c99a2c9cc01e89dd` |
+| 241 | `alice:simple_ledger_root_abeda329` | user | `c601ddbc8eaf2efcca45706a5b469780f0be7d544f4f303cf83705b6620abea3` |
 
 <details><summary>narrative</summary>
 
@@ -1305,43 +1305,43 @@ block 237: split_1_Paid d3b57588a5e005f163cba0c6c145db280df22e4418082516c170f861
 [world @ 213] proof data for request 2 served (entry NOT in the anchored ledger)
 --- registry ---
 [registry] promised request 1 (commit ca1b5d11ab9d070d) for the anchor at 210
-[registry] built anchor cb4b53e6745d9b20c90ef7a1e7227e5eb94427bc4bad42a57aa5eea2b2b5cca7 for requests [1], root f7ce4183645a6041, to confirm at 210
+[registry] built anchor e3c0ece95bbe8a3a6118e405852c7a9aa60c91409065aad305ca40fc303a67d1 for requests [1], root f7ce4183645a6041, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root f7ce4183645a6041
 [registry] promised request 2 (reveal alice -> 51d26296) for the anchor at 213 — and will OMIT it
-[registry] built anchor 6e8f946e2a1f57b6e584089ccd06a83a45a6816da9ea2b8693dd682d8bd09536 for requests [], root f7ce4183645a6041, to confirm at 213
+[registry] built anchor d83508f3939ff8560a6b0606a172cb341550f4b0bf3862ec6d4d01910dfed51a for requests [], root f7ce4183645a6041, to confirm at 213
 [registry] anchor confirmed at 213 carrying requests []; root f7ce4183645a6041
 === alice's channel ===
 --- on-chain ---
-block 205: funding 6647549d1939a7c3cabce189b2e5b6f9a0792ded6c93cdeb3f9d66d7ecc61b4a (harness) 203 vB / 812 WU
-block 210: anchor cb4b53e6745d9b20c90ef7a1e7227e5eb94427bc4bad42a57aa5eea2b2b5cca7 (harness) 225 vB / 900 WU
-block 213: anchor 6e8f946e2a1f57b6e584089ccd06a83a45a6816da9ea2b8693dd682d8bd09536 (harness) 225 vB / 900 WU
-block 216: commitment_3 16e3c4707e0eac569339d0ad571b05adc115dcbcd074e3ff76e52748535a43fb (user) 240 vB / 958 WU
-block 217: claim_to_remote ac647f41a034fe113d4b463f2be490d754ad6a767ebe8304008cf229f97d50b2 (hub) 129 vB / 513 WU
-block 222: claim_to_local 99c35962b2019459f9e02dc21afe398f4f0676d7ad3fea6f15505277b9e5b5d2 (user) 137 vB / 548 WU
-block 222: move_1 5ea745466484e8d182568e69b73c0fe6a59a6ff77168a83b71ec1ef3edbab04d (user) 257 vB / 1027 WU
-block 223: move_2 03b0221ce8def30dc16eaadea09d4045a82b99f82099fb7399590b622b506eb6 (hub) 4977 vB / 19907 WU
-block 224: d2/dispute 7ced4c48de25d44b1d7b9549f32f47ef76100da1617fbc41b71ad199c1b00481 (user) 178 vB / 710 WU
-block 225: p_round_1 cd407ca002f7eb277683d512bc32e2623af1bb91c0bc6750dd575a73854cd772 (hub) 4868 vB / 19472 WU
-block 226: q_round_1 110202aaa54f25a0b2e3057a8062f9ecad346a232f210027029aeee7ed043fd6 (user) 181 vB / 721 WU
-block 227: p_round_2 e07e9956b1d1fc2dc927ebfdf7b3a370dae14b3f76fa6c1e149b492dc4b152ec (hub) 4869 vB / 19473 WU
-block 228: q_round_2 c1ef8b46a4ad20ae77bd274b3550cd52e9cd75ac95d9e1bfd45da03c3b677951 (user) 181 vB / 721 WU
-block 229: p_round_3 f7f103e554ea4e83dec9deff765433b5fdfa32c3826fe73aa061e34195cc48d5 (hub) 4868 vB / 19471 WU
-block 230: q_round_3 d904bc350144d08d65757c5fd4b21ed7edb78e549d0213bdca7aa1a1374f256c (user) 181 vB / 721 WU
-block 231: p_round_4 2b9e92bbc1234d850e9b9cd9454c6cb4fdcb8387af4d12f33523382115147ad0 (hub) 4869 vB / 19473 WU
-block 232: q_round_4 042497be65d7ce916e4cda3e9adfe394aaa6e8458d3c94adb92d5998a80aea3b (user) 181 vB / 721 WU
-block 233: p_round_5 eec85395210f5ea9f8f7f52c88506b1e22032f4efc81802c41dc949488d4afa7 (hub) 4869 vB / 19473 WU
-block 234: q_round_5 ae07e846a001b7d835ed8d3269717c2c10ea4f53b72d0d96047a99a6b6b87eac (user) 181 vB / 721 WU
-block 235: p_round_6 825e26ad221068cb1a7bb4eefb4051962663b16eb5b2df71e60a930f0188c3a8 (hub) 4868 vB / 19472 WU
-block 236: q_round_6 a76fdb6e66335ab614a06edaf444d350954244b418a34c4b4847c8e3a5ed57ee (user) 181 vB / 721 WU
-block 237: p_round_7 fde146843151b84cb4fa47b5cd54e96e2fe5cd0cce8d04dbbf96b39791779992 (hub) 4869 vB / 19473 WU
-block 238: q_round_7_check 81370a79b555adf8f4f44bd1cf70c670985cc9c39d2515dfae7c716400bf2e71 (user) 189 vB / 754 WU
-block 239: c_re_cur 738f6aaa16f429f1791e8b0340c632faad84c15ca85d4556565a3cf1e12be151 (hub) 4869 vB / 19473 WU
-block 240: c_re_next 78d1a5c094be4e53fa6434340889ccd96c1dd749aaeaf4141e683bd39ec2536d (hub) 4869 vB / 19473 WU
-block 241: simple_ledger_root_abeda329 831d233f19c8947b9e78396690d1eca71ec09fbf638255f9f281560e25e037a1 (user) 10389 vB / 41554 WU
+block 205: funding 97ed05acd3925e7be1fb48667347414dfb34125f9b3e1bbe117e80f8027aa215 (harness) 203 vB / 812 WU
+block 210: anchor e3c0ece95bbe8a3a6118e405852c7a9aa60c91409065aad305ca40fc303a67d1 (harness) 225 vB / 900 WU
+block 213: anchor d83508f3939ff8560a6b0606a172cb341550f4b0bf3862ec6d4d01910dfed51a (harness) 225 vB / 900 WU
+block 216: commitment_3 e8adc6fcb8850bfa4b2d60391ad4d473706f7aefa87c011689bfd21cd418e29d (user) 240 vB / 958 WU
+block 217: claim_to_remote dd253a3ab8e2238a3c2bfc2705f754bc75ebc40ad66d9fcd14ce4dcc5b667749 (hub) 129 vB / 513 WU
+block 222: claim_to_local cbca9becda142a116f5cf35de39795dd09680e4824acd1c76846f97f16f63d00 (user) 137 vB / 548 WU
+block 222: move_1 94bf756c58eaf136e091514e89c3d2d57c532e9289ea78201eb9b6555c26f0f0 (user) 257 vB / 1027 WU
+block 223: move_2 2d78454db3c662fd1fe2369100fa59af66c5848f0e5db23c4cd0cafaf6232092 (hub) 4978 vB / 19910 WU
+block 224: d2/dispute f5a524097d24375ea4c08a05e2e1160a40911f9d156b73fcb7f0043712c889ed (user) 178 vB / 710 WU
+block 225: p_round_1 07b5e35f3a7f4032e2a258356375a138914afc02ec39f52b9c08b107d66b2082 (hub) 4869 vB / 19475 WU
+block 226: q_round_1 0b6d0efe55020b9a9fe0b7f5e76488655f193ea27b08371b5a4bcf580de18641 (user) 181 vB / 721 WU
+block 227: p_round_2 e89cf84260adb833e390413d9c2a8f6a79807596532873b190a569f2c6f2c627 (hub) 4869 vB / 19476 WU
+block 228: q_round_2 c68650020520a2e5a1c43052e19f5b05d6182464e7de8d77406b06a0f2ef99af (user) 181 vB / 721 WU
+block 229: p_round_3 057300a7169d91b39bb0fdd05668c0272daf1decbc35cf4f277047ed5840c306 (hub) 4869 vB / 19474 WU
+block 230: q_round_3 705c70a9fb3b1435f3575c265da5bf941da679ef17b72c9bc34d9c2b123bdf73 (user) 181 vB / 721 WU
+block 231: p_round_4 3657fe30de61a02e529cfd5d6ad6896301b65d0d82025c1b3a5d33c073b751c9 (hub) 4869 vB / 19476 WU
+block 232: q_round_4 185539d667200adb779b6a65f007d94468b12861250d14f81f83b25840d2125e (user) 181 vB / 721 WU
+block 233: p_round_5 1cf1121f43af53b74faf579948a645c5826d6d3a70b98f4915facf3ba98ff109 (hub) 4869 vB / 19476 WU
+block 234: q_round_5 c4bb92fcc9a34c5cf444a4b90f82129d4568465ba08bf40310545b149e45b252 (user) 181 vB / 721 WU
+block 235: p_round_6 ff463eb8e23679ff29c01848e0d3238977c7a82723037ba32b4e0fbf86ba5d82 (hub) 4869 vB / 19475 WU
+block 236: q_round_6 f48d77cf5b840274996c25f5f188d98182206cc346012e5007d638c08dbbbaf4 (user) 181 vB / 721 WU
+block 237: p_round_7 6d216abaf65a913bdb2fd7645c7a18c46208cd6750ed30d48990831bf820ce3a (hub) 4869 vB / 19476 WU
+block 238: q_round_7_check 246ba96e0e1003803471ea03832784cf310eb62262fb1df80c55d665e6792c78 (user) 189 vB / 754 WU
+block 239: c_re_cur ad5fb022792ac4ca0fdb786ba81ce34f1e7418b657b38058f349f31686fe4926 (hub) 4869 vB / 19476 WU
+block 240: c_re_next 7b4cf73e1774cd21000f1b467d438ba51b8450e5b7c3a3d1c99a2c9cc01e89dd (hub) 4869 vB / 19476 WU
+block 241: simple_ledger_root_abeda329 c601ddbc8eaf2efcca45706a5b469780f0be7d544f4f303cf83705b6620abea3 (user) 10390 vB / 41560 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[84,50,78,33,46,199,202,0,72,236,165,25,149,74,132,20,13,119,223,182,95,15,151,201,209,170,155,93,93,253,178,125],"nbits":545259519,"n_headers":2},"prev_anchor":"112a1ea8e7354407b4df19380cb08d986b4807925e682862e12b2ff6b5c762a3:1","entry":"01ca1b5d11ab9d070de9f8950603209c7544bace34975fb541fbd48dfd6863930700000000000000000000000000000000000000000000000000000000000000","key":3898987409,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[5,140,3,123,101,229,244,35,82,200,12,81,103,115,122,108,25,16,252,127,65,2,36,15,8,117,200,102,16,96,190,79],"nbits":545259519,"n_headers":2},"prev_anchor":"05e723a7f2f68cb797d79d8fcb3f56d75f66227c47d4d58f2bb2afcdf63db974:0","entry":"01ca1b5d11ab9d070de9f8950603209c7544bace34975fb541fbd48dfd6863930700000000000000000000000000000000000000000000000000000000000000","key":3898987409,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
-[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[104,243,225,190,237,144,200,207,47,230,141,212,17,198,76,253,83,176,95,37,27,127,194,201,242,173,196,192,107,148,54,7],"nbits":545259519,"n_headers":3},"prev_anchor":"cb4b53e6745d9b20c90ef7a1e7227e5eb94427bc4bad42a57aa5eea2b2b5cca7:1","entry":"02616c696365000000000000000000000051d26296fd1c6db88a3487a72ed494ef0cf68453ad750f78f8a57e1f5401e4dc000000000000000000000000000000","key":2798328546,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[user @ 210] propose seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[239,152,24,73,215,210,255,245,205,0,117,143,135,138,209,5,131,64,2,39,176,123,138,127,17,140,254,136,43,33,13,29],"nbits":545259519,"n_headers":3},"prev_anchor":"e3c0ece95bbe8a3a6118e405852c7a9aa60c91409065aad305ca40fc303a67d1:1","entry":"02616c696365000000000000000000000051d26296fd1c6db88a3487a72ed494ef0cf68453ad750f78f8a57e1f5401e4dc000000000000000000000000000000","key":2798328546,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [user @ 210] state 2 signed by both
 [user @ 210] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 210] state 3 signed by both
@@ -1381,12 +1381,12 @@ block 241: simple_ledger_root_abeda329 831d233f19c8947b9e78396690d1eca71ec09fbf6
 [user @ 239] contract 11: prover re-committed the step's input state
 [user @ 240] contract 11: prover re-committed the step's output state
 [user @ 240] contract 11: step 87 (ledger_root) is wrong
-[user @ 240] contract 11: broadcasting simple_ledger_root_abeda329 (41176 B witness, 10389 vB)
-[user @ 241] contract 11: disproved by simple_ledger_root_abeda329 (831d233f19c8947b9e78396690d1eca71ec09fbf638255f9f281560e25e037a1)
+[user @ 240] contract 11: broadcasting simple_ledger_root_abeda329 (41182 B witness, 10390 vB)
+[user @ 241] contract 11: disproved by simple_ledger_root_abeda329 (c601ddbc8eaf2efcca45706a5b469780f0be7d544f4f303cf83705b6620abea3)
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[84,50,78,33,46,199,202,0,72,236,165,25,149,74,132,20,13,119,223,182,95,15,151,201,209,170,155,93,93,253,178,125],"nbits":545259519,"n_headers":2},"prev_anchor":"112a1ea8e7354407b4df19380cb08d986b4807925e682862e12b2ff6b5c762a3:1","entry":"01ca1b5d11ab9d070de9f8950603209c7544bace34975fb541fbd48dfd6863930700000000000000000000000000000000000000000000000000000000000000","key":3898987409,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[5,140,3,123,101,229,244,35,82,200,12,81,103,115,122,108,25,16,252,127,65,2,36,15,8,117,200,102,16,96,190,79],"nbits":545259519,"n_headers":2},"prev_anchor":"05e723a7f2f68cb797d79d8fcb3f56d75f66227c47d4d58f2bb2afcdf63db974:0","entry":"01ca1b5d11ab9d070de9f8950603209c7544bace34975fb541fbd48dfd6863930700000000000000000000000000000000000000000000000000000000000000","key":3898987409,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
-[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[104,243,225,190,237,144,200,207,47,230,141,212,17,198,76,253,83,176,95,37,27,127,194,201,242,173,196,192,107,148,54,7],"nbits":545259519,"n_headers":3},"prev_anchor":"cb4b53e6745d9b20c90ef7a1e7227e5eb94427bc4bad42a57aa5eea2b2b5cca7:1","entry":"02616c696365000000000000000000000051d26296fd1c6db88a3487a72ed494ef0cf68453ad750f78f8a57e1f5401e4dc000000000000000000000000000000","key":2798328546,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
+[hub @ 210] accept draft seq 2: open contract 11 (nreg:{"req_id":2,"claim_from":215,"shape":{"chain":{"checkpoint":[239,152,24,73,215,210,255,245,205,0,117,143,135,138,209,5,131,64,2,39,176,123,138,127,17,140,254,136,43,33,13,29],"nbits":545259519,"n_headers":3},"prev_anchor":"e3c0ece95bbe8a3a6118e405852c7a9aa60c91409065aad305ca40fc303a67d1:1","entry":"02616c696365000000000000000000000051d26296fd1c6db88a3487a72ed494ef0cf68453ad750f78f8a57e1f5401e4dc000000000000000000000000000000","key":2798328546,"merkle_sides":[true]},"slot":"req2"}) stakes 0 BTC/0.00040000 BTC deadline 275
 [hub @ 210] state 2 signed by both
 [hub @ 210] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 210] state 3 signed by both
@@ -1425,12 +1425,12 @@ block 241: simple_ledger_root_abeda329 831d233f19c8947b9e78396690d1eca71ec09fbf6
 [hub @ 239] contract 11: prover re-committed the step's input state
 [hub @ 239] contract 11: re-committing the output state of step 87
 [hub @ 240] contract 11: prover re-committed the step's output state
-[hub @ 241] contract 11: disproved by simple_ledger_root_abeda329 (831d233f19c8947b9e78396690d1eca71ec09fbf638255f9f281560e25e037a1)
+[hub @ 241] contract 11: disproved by simple_ledger_root_abeda329 (c601ddbc8eaf2efcca45706a5b469780f0be7d544f4f303cf83705b6620abea3)
 === bob's channel ===
 --- on-chain ---
-block 208: funding 7bc7e3046b1b2020dc8b795522984341c8e07b648bbdf941a6e9e3cbced98105 (harness) 203 vB / 812 WU
-block 210: anchor cb4b53e6745d9b20c90ef7a1e7227e5eb94427bc4bad42a57aa5eea2b2b5cca7 (harness) 225 vB / 900 WU
-block 213: anchor 6e8f946e2a1f57b6e584089ccd06a83a45a6816da9ea2b8693dd682d8bd09536 (harness) 225 vB / 900 WU
+block 208: funding 755092f61c50cbf05ff6e49bd8628b33cee12eb9b9d252dff474b88050219709 (harness) 203 vB / 812 WU
+block 210: anchor e3c0ece95bbe8a3a6118e405852c7a9aa60c91409065aad305ca40fc303a67d1 (harness) 225 vB / 900 WU
+block 213: anchor d83508f3939ff8560a6b0606a172cb341550f4b0bf3862ec6d4d01910dfed51a (harness) 225 vB / 900 WU
 --- user ---
 --- hub ---
 === auditor ===
@@ -1446,15 +1446,15 @@ promise 2 (reveal alice -> 51d26296) named the anchor at 213 but the ledger anch
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 205 | `alice:funding` | hub-registry | `9a2e4bdf955456321dc3c894e08db899d7d69945f423f4befeebb1379bc46d7c` |
-| 208 | `bob:funding` | hub-registry | `3157c1a6d46de6a71882d529aff4222efe90acfaf90852a49dcca7379be39f66` |
-| 213 | `alice:commitment_1` | user | `919852f693e853b8f434e0714e51e8624b15c1ff11ec049051332c7063880c8f` |
-| 214 | `alice:claim_to_remote` | hub | `7b8181cac009d7354455e25a9b578fdc8d0af6942b42338d02f3bc7abc3a0520` |
-| 219 | `alice:claim_to_local` | user | `efa4ae27dacdba16badc42de9c14d4d07a926625d12d03a2cfe2172479576ef0` |
-| 219 | `alice:move_1` | user | `15eaceb8fade935f7726b910b9a96a08bdd61dde24128b70c4615ca1f66a824a` |
-| 220 | `alice:move_2` | hub | `c61d345dd0759febfc008d0badbe7d3479fab096ae6514793285cd6c424eeca7` |
-| 221 | `alice:move_3` | user | `8d1bd975aab2ea9d96aaf791870b2368ff67150873a64530e2da3f51fe155737` |
-| 233 | `alice:split_3_BondToUser` | user | `aa2f164f172230243be6d4435edce768d350c999f51c7689b455592c32988bda` |
+| 205 | `alice:funding` | hub-registry | `28cc9a75f7eb0c1dc6d2f10ef7ac0e6dfa7e3a604db5f7ad0da6815ebc2aaea9` |
+| 208 | `bob:funding` | hub-registry | `42c2f7239d7af3d2172f995cd5df76d09d88ee04448fcce5acf7952a7ee039cd` |
+| 213 | `alice:commitment_1` | user | `b505675fcf4a8352268f2f8e13c7c167fe46c8b4f1b92ed13cf1accedc410f23` |
+| 214 | `alice:claim_to_remote` | hub | `fe98dfffa4332770a44cfab3b628dd82a681385519620c8bec7deb5949ac2a9a` |
+| 219 | `alice:claim_to_local` | user | `e53d474e2fefe41629406ce3632a561339365795a370eae535f4940cdb9685f5` |
+| 219 | `alice:move_1` | user | `eee210fd7642c601121a47d19f6123f57c6f44a7dc1a3c784d3d1e35a4f3cc7b` |
+| 220 | `alice:move_2` | hub | `42fd5168b76cbeb449e21adc4f1e7d40c507a3891b2c509e7a31dd9e7a7cb61e` |
+| 221 | `alice:move_3` | user | `0e6b7edfe0022367b1cc334a9dbcb3e2725515664651f36b2fe726e81119040d` |
+| 233 | `alice:split_3_BondToUser` | user | `3f7796a1d1571c2157ac71b928e314e265ac23b8d932b45efc6f48f637ad853a` |
 
 <details><summary>narrative</summary>
 
@@ -1462,24 +1462,24 @@ promise 2 (reveal alice -> 51d26296) named the anchor at 213 but the ledger anch
 --- world ---
 [world @ 208] alice sent commit (request 1, anchor promised at 210) and opened bond contract 10
 [world @ 210] proof data for request 1 served (entry anchored on the hub's fork only)
-[world @ 210] hub mined its anchor on a PRIVATE FORK at 210 (4ef9c74fd7b9e09269585cbc3f2c7a4ad999f5ebb6dc9cef85c516227e7823b9)
+[world @ 210] hub mined its anchor on a PRIVATE FORK at 210 (4b080897a5d0e4f569de7e0293792a158c9b30a75f272bb814deef76238d1591)
 [world @ 211] the real chain is heavier than the hub's fork: refutation data served for req1
 --- registry ---
 [registry] promised request 1 (commit a7c96e8a75569def) for the anchor at 210
-[registry] built anchor 323e3b955bb75d4c1efa98a0daa810678c975b677c5fd5518fc5912ac3fe9c10 for requests [1], root 7d89151c19d35eaf, to confirm at 210
+[registry] built anchor 693589ed3c99313f6fc2ac7d31d3985c3c2fdfb97656a5850a90a77aeb61e4bf for requests [1], root 7d89151c19d35eaf, to confirm at 210
 [registry] anchor confirmed at 210 carrying requests [1]; root 7d89151c19d35eaf
 === alice's channel ===
 --- on-chain ---
-block 205: funding 9a2e4bdf955456321dc3c894e08db899d7d69945f423f4befeebb1379bc46d7c (harness) 203 vB / 812 WU
-block 213: commitment_1 919852f693e853b8f434e0714e51e8624b15c1ff11ec049051332c7063880c8f (user) 240 vB / 958 WU
-block 214: claim_to_remote 7b8181cac009d7354455e25a9b578fdc8d0af6942b42338d02f3bc7abc3a0520 (hub) 129 vB / 513 WU
-block 219: claim_to_local efa4ae27dacdba16badc42de9c14d4d07a926625d12d03a2cfe2172479576ef0 (user) 137 vB / 548 WU
-block 219: move_1 15eaceb8fade935f7726b910b9a96a08bdd61dde24128b70c4615ca1f66a824a (user) 265 vB / 1059 WU
-block 220: move_2 c61d345dd0759febfc008d0badbe7d3479fab096ae6514793285cd6c424eeca7 (hub) 4977 vB / 19907 WU
-block 221: move_3 8d1bd975aab2ea9d96aaf791870b2368ff67150873a64530e2da3f51fe155737 (user) 4961 vB / 19844 WU
-block 233: split_3_BondToUser aa2f164f172230243be6d4435edce768d350c999f51c7689b455592c32988bda (user) 193 vB / 770 WU
+block 205: funding 28cc9a75f7eb0c1dc6d2f10ef7ac0e6dfa7e3a604db5f7ad0da6815ebc2aaea9 (harness) 203 vB / 812 WU
+block 213: commitment_1 b505675fcf4a8352268f2f8e13c7c167fe46c8b4f1b92ed13cf1accedc410f23 (user) 240 vB / 958 WU
+block 214: claim_to_remote fe98dfffa4332770a44cfab3b628dd82a681385519620c8bec7deb5949ac2a9a (hub) 129 vB / 513 WU
+block 219: claim_to_local e53d474e2fefe41629406ce3632a561339365795a370eae535f4940cdb9685f5 (user) 137 vB / 548 WU
+block 219: move_1 eee210fd7642c601121a47d19f6123f57c6f44a7dc1a3c784d3d1e35a4f3cc7b (user) 265 vB / 1059 WU
+block 220: move_2 42fd5168b76cbeb449e21adc4f1e7d40c507a3891b2c509e7a31dd9e7a7cb61e (hub) 4977 vB / 19907 WU
+block 221: move_3 0e6b7edfe0022367b1cc334a9dbcb3e2725515664651f36b2fe726e81119040d (user) 4962 vB / 19845 WU
+block 233: split_3_BondToUser 3f7796a1d1571c2157ac71b928e314e265ac23b8d932b45efc6f48f637ad853a (user) 193 vB / 770 WU
 --- user ---
-[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[87,202,102,112,43,201,20,27,200,72,94,180,72,19,90,246,15,75,0,128,13,71,67,147,36,201,147,92,221,235,172,104],"nbits":545259519,"n_headers":2},"prev_anchor":"0161e56d4171a8670d7e38ed407d7b2cd7e09fa7d48a5907dabc90c59e204b32:0","entry":"01a7c96e8a75569defe3d295bd3ab1f589c2c05db9af8a7c3d314cad8da3d7df5a00000000000000000000000000000000000000000000000000000000000000","key":983000769,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[user @ 208] propose seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[39,145,183,210,108,123,124,67,112,48,236,101,103,52,168,211,114,236,248,176,43,167,14,112,0,253,215,202,205,160,15,11],"nbits":545259519,"n_headers":2},"prev_anchor":"75311c51cf7b8887460c68bce35a3774bfa607b81b3eade0d41c6caf6aa2d7a4:0","entry":"01a7c96e8a75569defe3d295bd3ab1f589c2c05db9af8a7c3d314cad8da3d7df5a00000000000000000000000000000000000000000000000000000000000000","key":983000769,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [user @ 208] state 1 signed by both
 [user @ 212] propose seq 2: move in contract 10: claim request 1 unanchored / prove inclusion / refute the chain (deadline 232)
 [user @ 212] draft seq 2 rejected by counterparty: I can prove request 1 is anchored; answering on-chain
@@ -1493,11 +1493,11 @@ block 233: split_3_BondToUser aa2f164f172230243be6d4435edce768d350c999f51c7689b4
 [user @ 220] contract 10: counterparty's move_2 is consistent with the program
 [user @ 220] contract 10: broadcasting move_3: claim request 1 unanchored / prove inclusion / refute the chain -> state user refuted the hub's chain, outcome code 1
 [user @ 221] contract 10: move_3 by user confirmed: move claim request 1 unanchored / prove inclusion / refute the chain, claimed state user refuted the hub's chain, claimed outcome BondToUser
-[user @ 221] contract 10: claimed end state 644e8cfa.. is correct
+[user @ 221] contract 10: claimed end state 7afda389.. is correct
 [user @ 232] contract 10: challenge window (12 blocks) after move_3 passed; broadcasting split_BondToUser
-[user @ 233] contract 10 resolved by split_BondToUser (aa2f164f172230243be6d4435edce768d350c999f51c7689b455592c32988bda)
+[user @ 233] contract 10 resolved by split_BondToUser (3f7796a1d1571c2157ac71b928e314e265ac23b8d932b45efc6f48f637ad853a)
 --- hub ---
-[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[87,202,102,112,43,201,20,27,200,72,94,180,72,19,90,246,15,75,0,128,13,71,67,147,36,201,147,92,221,235,172,104],"nbits":545259519,"n_headers":2},"prev_anchor":"0161e56d4171a8670d7e38ed407d7b2cd7e09fa7d48a5907dabc90c59e204b32:0","entry":"01a7c96e8a75569defe3d295bd3ab1f589c2c05db9af8a7c3d314cad8da3d7df5a00000000000000000000000000000000000000000000000000000000000000","key":983000769,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
+[hub @ 208] accept draft seq 1: open contract 10 (nreg:{"req_id":1,"claim_from":212,"shape":{"chain":{"checkpoint":[39,145,183,210,108,123,124,67,112,48,236,101,103,52,168,211,114,236,248,176,43,167,14,112,0,253,215,202,205,160,15,11],"nbits":545259519,"n_headers":2},"prev_anchor":"75311c51cf7b8887460c68bce35a3774bfa607b81b3eade0d41c6caf6aa2d7a4:0","entry":"01a7c96e8a75569defe3d295bd3ab1f589c2c05db9af8a7c3d314cad8da3d7df5a00000000000000000000000000000000000000000000000000000000000000","key":983000769,"merkle_sides":[true]},"slot":"req1"}) stakes 0 BTC/0.00040000 BTC deadline 272
 [hub @ 208] state 1 signed by both
 [hub @ 212] rejecting draft seq 2: I can prove request 1 is anchored; answering on-chain
 [hub @ 213] counterparty's commitment for state 1 confirmed with 1 contract output(s)
@@ -1508,13 +1508,13 @@ block 233: split_3_BondToUser aa2f164f172230243be6d4435edce768d350c999f51c7689b4
 [hub @ 220] contract 10: move_2 by hub confirmed: move claim request 1 unanchored / prove inclusion / refute the chain, claimed state hub proved inclusion, claimed outcome BondToHub
 [hub @ 220] contract 10: claimed end state 7d89151c.. is correct
 [hub @ 221] contract 10: move_3 by user confirmed: move claim request 1 unanchored / prove inclusion / refute the chain, claimed state user refuted the hub's chain, claimed outcome BondToUser
-[hub @ 221] contract 10: claimed end state 644e8cfa.. is correct
+[hub @ 221] contract 10: claimed end state 7afda389.. is correct
 [hub @ 221] contract 10: counterparty's move_3 is consistent with the program
 [hub @ 232] contract 10: challenge window (12 blocks) after move_3 passed; broadcasting split_BondToUser
-[hub @ 233] contract 10 resolved by split_BondToUser (aa2f164f172230243be6d4435edce768d350c999f51c7689b455592c32988bda)
+[hub @ 233] contract 10 resolved by split_BondToUser (3f7796a1d1571c2157ac71b928e314e265ac23b8d932b45efc6f48f637ad853a)
 === bob's channel ===
 --- on-chain ---
-block 208: funding 3157c1a6d46de6a71882d529aff4222efe90acfaf90852a49dcca7379be39f66 (harness) 203 vB / 812 WU
+block 208: funding 42c2f7239d7af3d2172f995cd5df76d09d88ee04448fcce5acf7952a7ee039cd (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -1528,8 +1528,8 @@ block 208: funding 3157c1a6d46de6a71882d529aff4222efe90acfaf90852a49dcca7379be39
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `a9dfd2ff53da82a1083b6124ce59c47be4a13fb4ac80ff9f5e571e7b34f3ba78` |
-| 207 | `bob:funding` | hub-registry | `18fc55428a64796eb072b02ff3f5edf4a42ff3ffd20041ad4215fbcc394231b4` |
+| 204 | `alice:funding` | hub-registry | `40f982f201bbf54961f2808d2f91cd6da1ba32845b5dbe7e4ab454b5eec4d926` |
+| 207 | `bob:funding` | hub-registry | `30495722a3978e72de3803e45cc57ddf217f8f2dab93b41e53f9ea9aaec496b4` |
 
 <details><summary>narrative</summary>
 
@@ -1549,20 +1549,20 @@ block 208: funding 3157c1a6d46de6a71882d529aff4222efe90acfaf90852a49dcca7379be39
 [fc-registry] request 2 confirmed at fact-chain height 2
 === alice's channel ===
 --- on-chain ---
-block 204: funding a9dfd2ff53da82a1083b6124ce59c47be4a13fb4ac80ff9f5e571e7b34f3ba78 (harness) 203 vB / 812 WU
+block 204: funding 40f982f201bbf54961f2808d2f91cd6da1ba32845b5dbe7e4ab454b5eec4d926 (harness) 203 vB / 812 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
-[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[5,28,232,236,56,165,58,241,142,153,40,246,99,232,220,3,27,45,78,87],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[6,252,20,57,51,0,157,23,97,190,19,174,58,143,98,63,120,158,10,245],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [user @ 208] state 2 signed by both
 [user @ 208] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 208] state 3 signed by both
 [user @ 209] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 209] state 4 signed by both
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
-[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[5,28,232,236,56,165,58,241,142,153,40,246,99,232,220,3,27,45,78,87],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[6,252,20,57,51,0,157,23,97,190,19,174,58,143,98,63,120,158,10,245],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [hub @ 208] state 2 signed by both
 [hub @ 208] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 208] state 3 signed by both
@@ -1570,7 +1570,7 @@ block 204: funding a9dfd2ff53da82a1083b6124ce59c47be4a13fb4ac80ff9f5e571e7b34f3b
 [hub @ 209] state 4 signed by both
 === bob's channel ===
 --- on-chain ---
-block 207: funding 18fc55428a64796eb072b02ff3f5edf4a42ff3ffd20041ad4215fbcc394231b4 (harness) 203 vB / 812 WU
+block 207: funding 30495722a3978e72de3803e45cc57ddf217f8f2dab93b41e53f9ea9aaec496b4 (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -1584,13 +1584,13 @@ block 207: funding 18fc55428a64796eb072b02ff3f5edf4a42ff3ffd20041ad4215fbcc39423
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `4c38fabc64704a2f4f17a94160bfd756f4d810d9ed5b264e0fc65ddfc7236121` |
-| 207 | `bob:funding` | hub-registry | `4d6511dd41707ace64adef60c24f04fc9a759aa2ab4dc2b5797f6c627df02b9d` |
-| 312 | `alice:commitment_1` | user | `3ada0debc7a6d9bab4929e7adfeeed8497b36d53e272e350cfd080987027a2aa` |
-| 313 | `alice:claim_to_remote` | hub | `d6e5cb8d3133646b1180be15fb4bafd04093893e938e92d620d4714ada68a8e1` |
-| 318 | `alice:claim_to_local` | user | `1b59b278ca6c354f1b15c2896720cd820261907aff12f47e65db155164f0ded1` |
-| 318 | `alice:move_1` | user | `1d4547791029c13771452465e8c1e8c204abaf96a28512fdfa168cc8f8bdce30` |
-| 330 | `alice:split_1_BondToUser` | user | `dad6add878ebdc90b8208e316885d50a8d237f19a90b8935a2c0f37d3fe5e45d` |
+| 204 | `alice:funding` | hub-registry | `f5e135ca6e38bcb1e7ee6a22f303037eb35c9c881ff3663bc75ba544a62ca088` |
+| 207 | `bob:funding` | hub-registry | `4465d06c1e551c244a2868bad08d0f3249e6ff86fc66d17bd546f0d16cc5dba7` |
+| 312 | `alice:commitment_1` | user | `6ff696cbc53f478a119e48ab1110b7fe57246654d72be0b6a620349c9175de2f` |
+| 313 | `alice:claim_to_remote` | hub | `5336b1984c64b91b802046f681387ba3dd297ea89a7656af21db85084d5daa51` |
+| 318 | `alice:claim_to_local` | user | `1d82d78fd9dce18cbd2b2f0b709adc5957d0aabd0ff9a90b095fb7f33e38ed17` |
+| 318 | `alice:move_1` | user | `ba65ebc8c372dbb90764078cd016af7250ca85ce101a07ecce27f597403cbe81` |
+| 330 | `alice:split_1_BondToUser` | user | `2e9ac0b35531b257e72f2fbbcfeeb5de3f134c4bac1e06ab6d8fc6eb4bb449c5` |
 
 <details><summary>narrative</summary>
 
@@ -1601,14 +1601,14 @@ block 207: funding 18fc55428a64796eb072b02ff3f5edf4a42ff3ffd20041ad4215fbcc39423
 [fc-registry] promised request 1 (commit 5763337540132e93) for fact-chain height <= 307 — and will NOT submit it
 === alice's channel ===
 --- on-chain ---
-block 204: funding 4c38fabc64704a2f4f17a94160bfd756f4d810d9ed5b264e0fc65ddfc7236121 (harness) 203 vB / 812 WU
-block 312: commitment_1 3ada0debc7a6d9bab4929e7adfeeed8497b36d53e272e350cfd080987027a2aa (user) 240 vB / 958 WU
-block 313: claim_to_remote d6e5cb8d3133646b1180be15fb4bafd04093893e938e92d620d4714ada68a8e1 (hub) 129 vB / 513 WU
-block 318: claim_to_local 1b59b278ca6c354f1b15c2896720cd820261907aff12f47e65db155164f0ded1 (user) 137 vB / 548 WU
-block 318: move_1 1d4547791029c13771452465e8c1e8c204abaf96a28512fdfa168cc8f8bdce30 (user) 265 vB / 1059 WU
-block 330: split_1_BondToUser dad6add878ebdc90b8208e316885d50a8d237f19a90b8935a2c0f37d3fe5e45d (user) 193 vB / 770 WU
+block 204: funding f5e135ca6e38bcb1e7ee6a22f303037eb35c9c881ff3663bc75ba544a62ca088 (harness) 203 vB / 812 WU
+block 312: commitment_1 6ff696cbc53f478a119e48ab1110b7fe57246654d72be0b6a620349c9175de2f (user) 240 vB / 958 WU
+block 313: claim_to_remote 5336b1984c64b91b802046f681387ba3dd297ea89a7656af21db85084d5daa51 (hub) 129 vB / 513 WU
+block 318: claim_to_local 1d82d78fd9dce18cbd2b2f0b709adc5957d0aabd0ff9a90b095fb7f33e38ed17 (user) 137 vB / 548 WU
+block 318: move_1 ba65ebc8c372dbb90764078cd016af7250ca85ce101a07ecce27f597403cbe81 (user) 265 vB / 1059 WU
+block 330: split_1_BondToUser 2e9ac0b35531b257e72f2fbbcfeeb5de3f134c4bac1e06ab6d8fc6eb4bb449c5 (user) 193 vB / 770 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
 [user @ 309] propose seq 2: move in contract 10: claim request 1 / prove inclusion / refute chain (deadline 329)
 [user @ 311] counterparty stalled since height 309; force-closing at state 1
@@ -1617,19 +1617,19 @@ block 330: split_1_BondToUser dad6add878ebdc90b8208e316885d50a8d237f19a90b8935a2
 [user @ 317] contract 10: broadcasting move_1: claim request 1 / prove inclusion / refute chain -> state claimed (not included by h_max), outcome code 1
 [user @ 318] contract 10: move_1 by user confirmed: move claim request 1 / prove inclusion / refute chain, claimed state claimed (not included by h_max), claimed outcome BondToUser
 [user @ 329] contract 10: challenge window (12 blocks) after move_1 passed; broadcasting split_BondToUser
-[user @ 330] contract 10 resolved by split_BondToUser (dad6add878ebdc90b8208e316885d50a8d237f19a90b8935a2c0f37d3fe5e45d)
+[user @ 330] contract 10 resolved by split_BondToUser (2e9ac0b35531b257e72f2fbbcfeeb5de3f134c4bac1e06ab6d8fc6eb4bb449c5)
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
 [hub @ 312] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [hub @ 312] contract 10 on-chain at depth 0: state unclaimed, turn Some(User), deadline 369
 [hub @ 318] contract 10: move_1 by user confirmed: move claim request 1 / prove inclusion / refute chain, claimed state claimed (not included by h_max), claimed outcome BondToUser
 [hub @ 318] contract 10: counterparty's move_1 is consistent with the program
 [hub @ 329] contract 10: challenge window (12 blocks) after move_1 passed; broadcasting split_BondToUser
-[hub @ 330] contract 10 resolved by split_BondToUser (dad6add878ebdc90b8208e316885d50a8d237f19a90b8935a2c0f37d3fe5e45d)
+[hub @ 330] contract 10 resolved by split_BondToUser (2e9ac0b35531b257e72f2fbbcfeeb5de3f134c4bac1e06ab6d8fc6eb4bb449c5)
 === bob's channel ===
 --- on-chain ---
-block 207: funding 4d6511dd41707ace64adef60c24f04fc9a759aa2ab4dc2b5797f6c627df02b9d (harness) 203 vB / 812 WU
+block 207: funding 4465d06c1e551c244a2868bad08d0f3249e6ff86fc66d17bd546f0d16cc5dba7 (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -1643,13 +1643,13 @@ block 207: funding 4d6511dd41707ace64adef60c24f04fc9a759aa2ab4dc2b5797f6c627df02
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `47659bf8b9f4864919a6cda12ded62fe46725bb79d34472cd125010db4f74d1d` |
-| 207 | `bob:funding` | hub-registry | `be99746162bfcbf8c9ca7fb20380e539fae0602cdf256a42b23c1b7e7dd5e475` |
-| 312 | `alice:commitment_2` | hub | `df34b7b620a0802a035be7c1a82b67357b874741f488774b78f814a55dc50b43` |
-| 313 | `alice:claim_to_remote` | user | `560c4813ea6e873ba07fd560a1cfca4470ced586b499dd9f3a5737d6a65d197c` |
-| 318 | `alice:claim_to_local` | hub | `d13895049a8aafe977192d6cecffbe44430aabf349618da00d2cc0f11b73cccc` |
-| 318 | `alice:move_1` | hub | `a58cc951e9668871bfcc8f3ef5c29878a803aa909bebce9a2c2c0285b5859b7c` |
-| 330 | `alice:split_1_BondToHub` | user | `796d3fdd013d28564ca8458da0cf6c9ced5706f4a63edc598dc5ee3bdee5674a` |
+| 204 | `alice:funding` | hub-registry | `73c03e978434aa39f25e18e36e004785e5a4e728c96667fa7d280c144d1917bc` |
+| 207 | `bob:funding` | hub-registry | `c3195ec27bb8c0bdc34eefa7f4b23e98a47ba9ef09fbc06f1840cdd72601436d` |
+| 312 | `alice:commitment_2` | hub | `9b3ad7519dcb6d903509ece0dfca8184a4e340c86931014ca857d0699f2723b8` |
+| 313 | `alice:claim_to_remote` | user | `eab94b59f2ca46ce29a5a14ad0aa109f01b918377c8b9f462c79f581c865910b` |
+| 318 | `alice:claim_to_local` | hub | `f7ad51fe776b8f87fd5a274a7ed475e30d28734f9a31e5d889c7ea36e9096f94` |
+| 318 | `alice:move_1` | hub | `aa6f98cf799354b92e57fb3c8fad640c9bd3b07f5b0e1cee2cb3915151160fdc` |
+| 330 | `alice:split_1_BondToHub` | user | `d5aefb1b90fc60ed29f1f3cd5ca3567a95cf26b7eb4e8c06ec564254440a0ab8` |
 
 <details><summary>narrative</summary>
 
@@ -1663,26 +1663,26 @@ block 207: funding 4d6511dd41707ace64adef60c24f04fc9a759aa2ab4dc2b5797f6c627df02
 [fc-registry] request 1 confirmed at fact-chain height 1
 === alice's channel ===
 --- on-chain ---
-block 204: funding 47659bf8b9f4864919a6cda12ded62fe46725bb79d34472cd125010db4f74d1d (harness) 203 vB / 812 WU
-block 312: commitment_2 df34b7b620a0802a035be7c1a82b67357b874741f488774b78f814a55dc50b43 (hub) 240 vB / 958 WU
-block 313: claim_to_remote 560c4813ea6e873ba07fd560a1cfca4470ced586b499dd9f3a5737d6a65d197c (user) 129 vB / 513 WU
-block 318: claim_to_local d13895049a8aafe977192d6cecffbe44430aabf349618da00d2cc0f11b73cccc (hub) 137 vB / 548 WU
-block 318: move_1 a58cc951e9668871bfcc8f3ef5c29878a803aa909bebce9a2c2c0285b5859b7c (hub) 1306 vB / 5221 WU
-block 330: split_1_BondToHub 796d3fdd013d28564ca8458da0cf6c9ced5706f4a63edc598dc5ee3bdee5674a (user) 201 vB / 802 WU
+block 204: funding 73c03e978434aa39f25e18e36e004785e5a4e728c96667fa7d280c144d1917bc (harness) 203 vB / 812 WU
+block 312: commitment_2 9b3ad7519dcb6d903509ece0dfca8184a4e340c86931014ca857d0699f2723b8 (hub) 240 vB / 958 WU
+block 313: claim_to_remote eab94b59f2ca46ce29a5a14ad0aa109f01b918377c8b9f462c79f581c865910b (user) 129 vB / 513 WU
+block 318: claim_to_local f7ad51fe776b8f87fd5a274a7ed475e30d28734f9a31e5d889c7ea36e9096f94 (hub) 137 vB / 548 WU
+block 318: move_1 aa6f98cf799354b92e57fb3c8fad640c9bd3b07f5b0e1cee2cb3915151160fdc (hub) 1306 vB / 5222 WU
+block 330: split_1_BondToHub d5aefb1b90fc60ed29f1f3cd5ca3567a95cf26b7eb4e8c06ec564254440a0ab8 (user) 201 vB / 802 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
 [user @ 309] propose seq 2: move in contract 10: claim request 1 / prove inclusion / refute chain (deadline 329)
 [user @ 309] state 2 signed by both
 [user @ 312] counterparty's commitment for state 2 confirmed with 1 contract output(s)
 [user @ 312] contract 10 on-chain at depth 0: state claimed (not included by h_max), turn Some(Hub), deadline 329
 [user @ 318] contract 10: move_1 by hub confirmed: move claim request 1 / prove inclusion / refute chain, claimed state hub proved inclusion, claimed outcome BondToHub
-[user @ 318] contract 10: claimed end state 05ced289.. is correct
+[user @ 318] contract 10: claimed end state 0682078b.. is correct
 [user @ 318] contract 10: counterparty's move_1 is consistent with the program
 [user @ 329] contract 10: challenge window (12 blocks) after move_1 passed; broadcasting split_BondToHub
-[user @ 330] contract 10 resolved by split_BondToHub (796d3fdd013d28564ca8458da0cf6c9ced5706f4a63edc598dc5ee3bdee5674a)
+[user @ 330] contract 10 resolved by split_BondToHub (d5aefb1b90fc60ed29f1f3cd5ca3567a95cf26b7eb4e8c06ec564254440a0ab8)
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
 [hub @ 309] accept draft seq 2: move in contract 10: claim request 1 / prove inclusion / refute chain (deadline 329)
 [hub @ 309] state 2 signed by both
@@ -1692,12 +1692,12 @@ block 330: split_1_BondToHub 796d3fdd013d28564ca8458da0cf6c9ced5706f4a63edc598dc
 [hub @ 312] contract 10 on-chain at depth 0: state claimed (not included by h_max), turn Some(Hub), deadline 329
 [hub @ 317] contract 10: broadcasting move_1: claim request 1 / prove inclusion / refute chain -> state hub proved inclusion, outcome code 0
 [hub @ 318] contract 10: move_1 by hub confirmed: move claim request 1 / prove inclusion / refute chain, claimed state hub proved inclusion, claimed outcome BondToHub
-[hub @ 318] contract 10: claimed end state 05ced289.. is correct
+[hub @ 318] contract 10: claimed end state 0682078b.. is correct
 [hub @ 329] contract 10: challenge window (12 blocks) after move_1 passed; broadcasting split_BondToHub
-[hub @ 330] contract 10 resolved by split_BondToHub (796d3fdd013d28564ca8458da0cf6c9ced5706f4a63edc598dc5ee3bdee5674a)
+[hub @ 330] contract 10 resolved by split_BondToHub (d5aefb1b90fc60ed29f1f3cd5ca3567a95cf26b7eb4e8c06ec564254440a0ab8)
 === bob's channel ===
 --- on-chain ---
-block 207: funding be99746162bfcbf8c9ca7fb20380e539fae0602cdf256a42b23c1b7e7dd5e475 (harness) 203 vB / 812 WU
+block 207: funding c3195ec27bb8c0bdc34eefa7f4b23e98a47ba9ef09fbc06f1840cdd72601436d (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -1711,8 +1711,8 @@ block 207: funding be99746162bfcbf8c9ca7fb20380e539fae0602cdf256a42b23c1b7e7dd5e
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `d77ffc07d9e2cfbabc015bd19fa832087803780ce03667e38e4ab6940f04fd47` |
-| 207 | `bob:funding` | hub-registry | `cd0c75ca6504a3149d5eaa06d333e7d2b2b40285ca26f64628bbb20fee0ecdd2` |
+| 204 | `alice:funding` | hub-registry | `1f4673e36bac2da483398a81a313ecf85a9430b4de0bb30ae7be508eeef32fdf` |
+| 207 | `bob:funding` | hub-registry | `0325ca3a2bfdefd097dd44cc0306b7d52efa5cbeddf2bd41a060c5088060c80a` |
 
 <details><summary>narrative</summary>
 
@@ -1740,19 +1740,19 @@ block 207: funding be99746162bfcbf8c9ca7fb20380e539fae0602cdf256a42b23c1b7e7dd5e
 [fc-registry] request 3 confirmed at fact-chain height 3
 === alice's channel ===
 --- on-chain ---
-block 204: funding d77ffc07d9e2cfbabc015bd19fa832087803780ce03667e38e4ab6940f04fd47 (harness) 203 vB / 812 WU
+block 204: funding 1f4673e36bac2da483398a81a313ecf85a9430b4de0bb30ae7be508eeef32fdf (harness) 203 vB / 812 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
-[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[5,162,201,250,169,161,89,32,158,132,146,86,138,122,86,188,21,46,185,168],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[6,158,12,44,158,12,252,190,153,137,51,60,242,19,153,127,137,142,153,234],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [user @ 208] state 2 signed by both
 [user @ 208] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 208] state 3 signed by both
 [user @ 209] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 209] state 4 signed by both
-[user @ 209] accept draft seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[2,235,239,212,240,236,113,159,122,200,23,234,204,188,203,74,47,95,144,105],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 249
+[user @ 209] accept draft seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[1,88,197,237,84,147,13,152,243,171,117,82,206,166,88,110,12,49,180,156],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 249
 [user @ 209] state 5 signed by both
-[user @ 209] propose seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[2,235,239,212,240,236,113,159,122,200,23,234,204,188,203,74,47,95,144,105],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
+[user @ 209] propose seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[1,88,197,237,84,147,13,152,243,171,117,82,206,166,88,110,12,49,180,156],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
 [user @ 209] state 6 signed by both
 [user @ 210] propose seq 7: move in contract 21: prove inclusion on fact chain / refute chain (deadline 230)
 [user @ 210] state 7 signed by both
@@ -1761,17 +1761,17 @@ block 204: funding d77ffc07d9e2cfbabc015bd19fa832087803780ce03667e38e4ab6940f04f
 [user @ 230] propose seq 9: cancel contract 21 (fold R(s))
 [user @ 230] state 9 signed by both
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
-[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[5,162,201,250,169,161,89,32,158,132,146,86,138,122,86,188,21,46,185,168],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[6,158,12,44,158,12,252,190,153,137,51,60,242,19,153,127,137,142,153,234],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [hub @ 208] state 2 signed by both
 [hub @ 208] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 208] state 3 signed by both
 [hub @ 209] accept draft seq 4: cancel contract 11 (fold R(s))
 [hub @ 209] state 4 signed by both
-[hub @ 209] propose seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[2,235,239,212,240,236,113,159,122,200,23,234,204,188,203,74,47,95,144,105],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 249
+[hub @ 209] propose seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[1,88,197,237,84,147,13,152,243,171,117,82,206,166,88,110,12,49,180,156],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 249
 [hub @ 209] state 5 signed by both
-[hub @ 209] accept draft seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[2,235,239,212,240,236,113,159,122,200,23,234,204,188,203,74,47,95,144,105],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
+[hub @ 209] accept draft seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[1,88,197,237,84,147,13,152,243,171,117,82,206,166,88,110,12,49,180,156],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
 [hub @ 209] state 6 signed by both
 [hub @ 210] accept draft seq 7: move in contract 21: prove inclusion on fact chain / refute chain (deadline 230)
 [hub @ 210] state 7 signed by both
@@ -1781,16 +1781,16 @@ block 204: funding d77ffc07d9e2cfbabc015bd19fa832087803780ce03667e38e4ab6940f04f
 [hub @ 230] state 9 signed by both
 === bob's channel ===
 --- on-chain ---
-block 207: funding cd0c75ca6504a3149d5eaa06d333e7d2b2b40285ca26f64628bbb20fee0ecdd2 (harness) 203 vB / 812 WU
+block 207: funding 0325ca3a2bfdefd097dd44cc0306b7d52efa5cbeddf2bd41a060c5088060c80a (harness) 203 vB / 812 WU
 --- user ---
-[user @ 209] propose seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[2,235,239,212,240,236,113,159,122,200,23,234,204,188,203,74,47,95,144,105],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 249
+[user @ 209] propose seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[1,88,197,237,84,147,13,152,243,171,117,82,206,166,88,110,12,49,180,156],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 249
 [user @ 209] state 1 signed by both
 [user @ 210] accept draft seq 2: move in contract 20: prove inclusion on fact chain / refute chain (deadline 230)
 [user @ 210] state 2 signed by both
 [user @ 230] accept draft seq 3: cancel contract 20 (fold R(s))
 [user @ 230] state 3 signed by both
 --- hub ---
-[hub @ 209] accept draft seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[2,235,239,212,240,236,113,159,122,200,23,234,204,188,203,74,47,95,144,105],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 249
+[hub @ 209] accept draft seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[1,88,197,237,84,147,13,152,243,171,117,82,206,166,88,110,12,49,180,156],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 249
 [hub @ 209] state 1 signed by both
 [hub @ 210] propose seq 2: move in contract 20: prove inclusion on fact chain / refute chain (deadline 230)
 [hub @ 210] state 2 signed by both
@@ -1807,8 +1807,8 @@ block 207: funding cd0c75ca6504a3149d5eaa06d333e7d2b2b40285ca26f64628bbb20fee0ec
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `e11c05f72fed871497342a234734fe72c49eec431a31fb12ae6695e5e7fb2bba` |
-| 207 | `bob:funding` | hub-registry | `c5367ebf20d8573221b1fc43728616b0d9d0d5bf1136236be00313040795a994` |
+| 204 | `alice:funding` | hub-registry | `f9119a592f0c6e1b55b539baa28f459d5af581d8524b37c2ad8bf5e28246c3bc` |
+| 207 | `bob:funding` | hub-registry | `9eac463b17a954ec830f0659fd6c45ea2ba4355040593311d3d01742dbf3908a` |
 
 <details><summary>narrative</summary>
 
@@ -1829,20 +1829,20 @@ block 207: funding cd0c75ca6504a3149d5eaa06d333e7d2b2b40285ca26f64628bbb20fee0ec
 [fc-registry] request 2 confirmed at fact-chain height 2
 === alice's channel ===
 --- on-chain ---
-block 204: funding e11c05f72fed871497342a234734fe72c49eec431a31fb12ae6695e5e7fb2bba (harness) 203 vB / 812 WU
+block 204: funding f9119a592f0c6e1b55b539baa28f459d5af581d8524b37c2ad8bf5e28246c3bc (harness) 203 vB / 812 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
-[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[3,23,194,12,118,205,21,215,117,1,108,17,182,84,73,95,142,63,56,158],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[7,103,80,213,11,80,138,240,197,82,107,96,165,207,146,210,233,102,30,241],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [user @ 208] state 2 signed by both
 [user @ 208] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 208] state 3 signed by both
 [user @ 209] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 209] state 4 signed by both
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
-[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[3,23,194,12,118,205,21,215,117,1,108,17,182,84,73,95,142,63,56,158],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[7,103,80,213,11,80,138,240,197,82,107,96,165,207,146,210,233,102,30,241],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [hub @ 208] state 2 signed by both
 [hub @ 208] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 208] state 3 signed by both
@@ -1850,7 +1850,7 @@ block 204: funding e11c05f72fed871497342a234734fe72c49eec431a31fb12ae6695e5e7fb2
 [hub @ 209] state 4 signed by both
 === bob's channel ===
 --- on-chain ---
-block 207: funding c5367ebf20d8573221b1fc43728616b0d9d0d5bf1136236be00313040795a994 (harness) 203 vB / 812 WU
+block 207: funding 9eac463b17a954ec830f0659fd6c45ea2ba4355040593311d3d01742dbf3908a (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -1864,8 +1864,8 @@ block 207: funding c5367ebf20d8573221b1fc43728616b0d9d0d5bf1136236be00313040795a
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `01e5e37791f97224228dc41809fa71b6a988c6d9f8117a8f638532b3c8643e2e` |
-| 207 | `bob:funding` | hub-registry | `f6d7bed9887fe4af904afdb46618600dcab31862cac2fe1b3544049a6794e949` |
+| 204 | `alice:funding` | hub-registry | `f5d3900a8d382fa379a9ab30dfb643dda9dc92f2b499e21826c2e7f4587dbff2` |
+| 207 | `bob:funding` | hub-registry | `d58af1b2c6c4905e04ee7a88ce73bf4d62a24c376af104de79b7e3215e797bd3` |
 
 <details><summary>narrative</summary>
 
@@ -1888,19 +1888,19 @@ block 207: funding c5367ebf20d8573221b1fc43728616b0d9d0d5bf1136236be00313040795a
 [fc-registry] promised request 3 (transfer alice -> 1112d2ba (valid until 239)) for fact-chain height <= 309 — and will NOT submit it
 === alice's channel ===
 --- on-chain ---
-block 204: funding 01e5e37791f97224228dc41809fa71b6a988c6d9f8117a8f638532b3c8643e2e (harness) 203 vB / 812 WU
+block 204: funding f5d3900a8d382fa379a9ab30dfb643dda9dc92f2b499e21826c2e7f4587dbff2 (harness) 203 vB / 812 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
-[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[2,116,215,234,64,118,230,20,26,49,208,241,97,27,10,77,96,70,123,142],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[6,42,81,61,20,151,55,119,211,21,176,96,14,34,113,50,224,41,204,67],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [user @ 208] state 2 signed by both
 [user @ 208] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 208] state 3 signed by both
 [user @ 209] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 209] state 4 signed by both
-[user @ 209] accept draft seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[4,68,30,201,219,151,211,37,71,42,3,46,116,225,82,148,173,214,14,133],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 239
+[user @ 209] accept draft seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[3,86,22,30,224,244,61,59,54,247,178,108,129,175,14,103,108,3,231,26],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 239
 [user @ 209] state 5 signed by both
-[user @ 209] propose seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[4,68,30,201,219,151,211,37,71,42,3,46,116,225,82,148,173,214,14,133],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
+[user @ 209] propose seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[3,86,22,30,224,244,61,59,54,247,178,108,129,175,14,103,108,3,231,26],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
 [user @ 209] state 6 signed by both
 [user @ 239] accept draft seq 7: cancel contract 21 (fold R(s))
 [user @ 239] state 7 signed by both
@@ -1909,17 +1909,17 @@ block 204: funding 01e5e37791f97224228dc41809fa71b6a988c6d9f8117a8f638532b3c8643
 [user @ 331] propose seq 9: cancel contract 22 (fold R(s))
 [user @ 331] state 9 signed by both
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
-[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[2,116,215,234,64,118,230,20,26,49,208,241,97,27,10,77,96,70,123,142],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[6,42,81,61,20,151,55,119,211,21,176,96,14,34,113,50,224,41,204,67],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [hub @ 208] state 2 signed by both
 [hub @ 208] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 208] state 3 signed by both
 [hub @ 209] accept draft seq 4: cancel contract 11 (fold R(s))
 [hub @ 209] state 4 signed by both
-[hub @ 209] propose seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[4,68,30,201,219,151,211,37,71,42,3,46,116,225,82,148,173,214,14,133],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 239
+[hub @ 209] propose seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[3,86,22,30,224,244,61,59,54,247,178,108,129,175,14,103,108,3,231,26],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 239
 [hub @ 209] state 5 signed by both
-[hub @ 209] accept draft seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[4,68,30,201,219,151,211,37,71,42,3,46,116,225,82,148,173,214,14,133],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
+[hub @ 209] accept draft seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[3,86,22,30,224,244,61,59,54,247,178,108,129,175,14,103,108,3,231,26],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
 [hub @ 209] state 6 signed by both
 [hub @ 239] propose seq 7: cancel contract 21 (fold R(s))
 [hub @ 239] state 7 signed by both
@@ -1929,14 +1929,14 @@ block 204: funding 01e5e37791f97224228dc41809fa71b6a988c6d9f8117a8f638532b3c8643
 [hub @ 331] state 9 signed by both
 === bob's channel ===
 --- on-chain ---
-block 207: funding f6d7bed9887fe4af904afdb46618600dcab31862cac2fe1b3544049a6794e949 (harness) 203 vB / 812 WU
+block 207: funding d58af1b2c6c4905e04ee7a88ce73bf4d62a24c376af104de79b7e3215e797bd3 (harness) 203 vB / 812 WU
 --- user ---
-[user @ 209] propose seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[4,68,30,201,219,151,211,37,71,42,3,46,116,225,82,148,173,214,14,133],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 239
+[user @ 209] propose seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[3,86,22,30,224,244,61,59,54,247,178,108,129,175,14,103,108,3,231,26],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 239
 [user @ 209] state 1 signed by both
 [user @ 239] propose seq 2: cancel contract 20 (fold R(s))
 [user @ 239] state 2 signed by both
 --- hub ---
-[hub @ 209] accept draft seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[4,68,30,201,219,151,211,37,71,42,3,46,116,225,82,148,173,214,14,133],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 239
+[hub @ 209] accept draft seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[3,86,22,30,224,244,61,59,54,247,178,108,129,175,14,103,108,3,231,26],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 239
 [hub @ 209] state 1 signed by both
 [hub @ 239] accept draft seq 2: cancel contract 20 (fold R(s))
 [hub @ 239] state 2 signed by both
@@ -1951,18 +1951,18 @@ block 207: funding f6d7bed9887fe4af904afdb46618600dcab31862cac2fe1b3544049a6794e
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `b78f06230e7baee04caae55fa91a0102f41c3920e6d4aefdc9fb0be944c32891` |
-| 207 | `bob:funding` | hub-registry | `4436b363dcb9bdb861707689130903355840f8488270f37b7b214a8c9452fb95` |
-| 211 | `alice:commitment_6` | user | `c9d3210eecae6f3a1ad6412fd00f30bad6442b3a6b9708436d4a0a1d83b32680` |
-| 212 | `alice:claim_to_remote` | hub | `d7f3b0d3b099fab9a9be6082fffbade6ad674ec33ed82d8274769ce8350ec766` |
-| 213 | `bob:commitment_1` | hub | `8aa925c1018ede2afa2f9db1cb3e072d9df766464099478630d872a0735386e1` |
-| 214 | `bob:claim_to_remote` | user | `aedb5c84d40fec0c900a362a8dbf2f4ec3cf2abc48b092cc506a244d77cbf563` |
-| 217 | `alice:claim_to_local` | user | `94eed72d485ac11d5ace266657e9861ec30ff8d375b6a749238d98aeb699c58a` |
-| 217 | `alice:move_1` | user | `60de342d815930dcf444cf090434c89ad8ccdaefe8aa63ea277db4eb89aef4e3` |
-| 219 | `bob:claim_to_local` | hub | `688b56a1e37bd7bd6e86d9406f74c9891711d194c5d199626693a7a87aacf61c` |
-| 219 | `bob:move_1` | hub | `625a398790756ace7c1686df186f422dc82ddbad6c646fc7aa9c4e2b30a47d27` |
-| 229 | `alice:split_1_Paid` | user | `6674b5e420b89e611aa36ccfafad4fe5c17574f2f23d8d95761ec2922d5d9b87` |
-| 231 | `bob:split_1_Paid` | user | `e11deedb2e1d5995e076515f5ce8b8f064d501e0cbed82b1090832a9b1bc9b93` |
+| 204 | `alice:funding` | hub-registry | `84e0b2b27dacb822ddeea4b70bf644dd655f9f1bd18a01626590a55eb8b28af4` |
+| 207 | `bob:funding` | hub-registry | `9069d697f50301289593b56796c281e72a65f588a7b05587b7d194cc57b2a68b` |
+| 211 | `alice:commitment_6` | user | `eaad72bb5c9da6adc5e51ab0ab0ac4de8316ccc11f17d31ec4da9b4f53eca60e` |
+| 212 | `alice:claim_to_remote` | hub | `9870aa266b47fa0c1e02f0fbc4969a71509e3f1eeb0393831d691585fe7eee9d` |
+| 213 | `bob:commitment_1` | hub | `cd6b3624cd156d18cc983df05d5b2adcbe43b82bf1e8e8c62d9f720b200ad6dc` |
+| 214 | `bob:claim_to_remote` | user | `e9b434805593be49460e8e5fcfa36ecd0bab0605f15ba1e01b946785ff520964` |
+| 217 | `alice:claim_to_local` | user | `290df51830e825063bebbc5525d3bbc653e03952d7e515b2e09a33182a9ac5ab` |
+| 217 | `alice:move_1` | user | `19d091e38fc4893936afd099c9cae05ca87922b293ed0167a117078ad478bcd9` |
+| 219 | `bob:claim_to_local` | hub | `dafbdb2644db8c67f450715a9c2e01be843bd0728592bec60b66368b3f5f2fb7` |
+| 219 | `bob:move_1` | hub | `03ce73f849d6c9d0f62079c6b6e0ad3d65914c80a4c15c1919fe0fa605d675eb` |
+| 229 | `alice:split_1_Paid` | user | `bc8596a45006712ff919ca0db75398cb5784637f6e8fef641d44ba8ad26c8f03` |
+| 231 | `bob:split_1_Paid` | user | `6f12371e2b37b2bfc6587257f0c866e5f15a63dead7b3a0d1fda99d06629c7cf` |
 
 <details><summary>narrative</summary>
 
@@ -1990,24 +1990,24 @@ block 207: funding f6d7bed9887fe4af904afdb46618600dcab31862cac2fe1b3544049a6794e
 [fc-registry] request 3 confirmed at fact-chain height 3
 === alice's channel ===
 --- on-chain ---
-block 204: funding b78f06230e7baee04caae55fa91a0102f41c3920e6d4aefdc9fb0be944c32891 (harness) 203 vB / 812 WU
-block 211: commitment_6 c9d3210eecae6f3a1ad6412fd00f30bad6442b3a6b9708436d4a0a1d83b32680 (user) 283 vB / 1130 WU
-block 212: claim_to_remote d7f3b0d3b099fab9a9be6082fffbade6ad674ec33ed82d8274769ce8350ec766 (hub) 129 vB / 513 WU
-block 217: claim_to_local 94eed72d485ac11d5ace266657e9861ec30ff8d375b6a749238d98aeb699c58a (user) 137 vB / 548 WU
-block 217: move_1 60de342d815930dcf444cf090434c89ad8ccdaefe8aa63ea277db4eb89aef4e3 (user) 256 vB / 1022 WU
-block 229: split_1_Paid 6674b5e420b89e611aa36ccfafad4fe5c17574f2f23d8d95761ec2922d5d9b87 (user) 193 vB / 770 WU
+block 204: funding 84e0b2b27dacb822ddeea4b70bf644dd655f9f1bd18a01626590a55eb8b28af4 (harness) 203 vB / 812 WU
+block 211: commitment_6 eaad72bb5c9da6adc5e51ab0ab0ac4de8316ccc11f17d31ec4da9b4f53eca60e (user) 283 vB / 1130 WU
+block 212: claim_to_remote 9870aa266b47fa0c1e02f0fbc4969a71509e3f1eeb0393831d691585fe7eee9d (hub) 129 vB / 513 WU
+block 217: claim_to_local 290df51830e825063bebbc5525d3bbc653e03952d7e515b2e09a33182a9ac5ab (user) 137 vB / 548 WU
+block 217: move_1 19d091e38fc4893936afd099c9cae05ca87922b293ed0167a117078ad478bcd9 (user) 256 vB / 1022 WU
+block 229: split_1_Paid bc8596a45006712ff919ca0db75398cb5784637f6e8fef641d44ba8ad26c8f03 (user) 193 vB / 770 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
-[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[5,99,129,230,115,183,31,88,64,103,205,53,100,130,209,140,170,35,23,101],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[user @ 208] propose seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[2,244,228,121,60,161,97,178,133,170,176,20,102,104,34,35,2,97,196,151],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [user @ 208] state 2 signed by both
 [user @ 208] propose seq 3: cancel contract 10 (fold R(s))
 [user @ 208] state 3 signed by both
 [user @ 209] propose seq 4: cancel contract 11 (fold R(s))
 [user @ 209] state 4 signed by both
-[user @ 209] accept draft seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[2,80,141,181,9,124,80,248,179,24,53,67,199,238,13,157,106,214,103,81],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 279
+[user @ 209] accept draft seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[3,68,171,192,67,157,28,41,26,102,84,34,241,165,142,171,253,23,94,137],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 279
 [user @ 209] state 5 signed by both
-[user @ 209] propose seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[2,80,141,181,9,124,80,248,179,24,53,67,199,238,13,157,106,214,103,81],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
+[user @ 209] propose seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[3,68,171,192,67,157,28,41,26,102,84,34,241,165,142,171,253,23,94,137],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
 [user @ 209] state 6 signed by both
 [user @ 210] propose seq 7: move in contract 21: prove inclusion on fact chain / refute chain (deadline 230)
 [user @ 210] draft seq 7 rejected by counterparty: hub refuses to pay Alice
@@ -2018,19 +2018,19 @@ block 229: split_1_Paid 6674b5e420b89e611aa36ccfafad4fe5c17574f2f23d8d95761ec292
 [user @ 216] contract 21: broadcasting move_1: prove inclusion on fact chain / refute chain -> state Paid, outcome code 1
 [user @ 217] contract 21: move_1 by user confirmed: move prove inclusion on fact chain / refute chain, claimed state Paid, claimed outcome Paid
 [user @ 228] contract 21: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[user @ 229] contract 21 resolved by split_Paid (6674b5e420b89e611aa36ccfafad4fe5c17574f2f23d8d95761ec2922d5d9b87)
+[user @ 229] contract 21 resolved by split_Paid (bc8596a45006712ff919ca0db75398cb5784637f6e8fef641d44ba8ad26c8f03)
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
-[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[5,99,129,230,115,183,31,88,64,103,205,53,100,130,209,140,170,35,23,101],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
+[hub @ 208] accept draft seq 2: open contract 11 (nreg-fc:{"req_id":2,"claim_from":310,"checkpoint":[2,244,228,121,60,161,97,178,133,170,176,20,102,104,34,35,2,97,196,151],"checkpoint_height":1,"h_max":308}) stakes 0 BTC/0.00040000 BTC deadline 370
 [hub @ 208] state 2 signed by both
 [hub @ 208] accept draft seq 3: cancel contract 10 (fold R(s))
 [hub @ 208] state 3 signed by both
 [hub @ 209] accept draft seq 4: cancel contract 11 (fold R(s))
 [hub @ 209] state 4 signed by both
-[hub @ 209] propose seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[2,80,141,181,9,124,80,248,179,24,53,67,199,238,13,157,106,214,103,81],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 279
+[hub @ 209] propose seq 5: open contract 21 (anchorpay-fc:{"prover":"User","checkpoint":[3,68,171,192,67,157,28,41,26,102,84,34,241,165,142,171,253,23,94,137],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 279
 [hub @ 209] state 5 signed by both
-[hub @ 209] accept draft seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[2,80,141,181,9,124,80,248,179,24,53,67,199,238,13,157,106,214,103,81],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
+[hub @ 209] accept draft seq 6: open contract 22 (nreg-fc:{"req_id":3,"claim_from":311,"checkpoint":[3,68,171,192,67,157,28,41,26,102,84,34,241,165,142,171,253,23,94,137],"checkpoint_height":2,"h_max":309}) stakes 0 BTC/0.00040000 BTC deadline 371
 [hub @ 209] state 6 signed by both
 [hub @ 210] rejecting draft seq 7: hub refuses to pay Alice
 [hub @ 211] counterparty's commitment for state 6 confirmed with 2 contract output(s)
@@ -2039,26 +2039,26 @@ block 229: split_1_Paid 6674b5e420b89e611aa36ccfafad4fe5c17574f2f23d8d95761ec292
 [hub @ 217] contract 21: move_1 by user confirmed: move prove inclusion on fact chain / refute chain, claimed state Paid, claimed outcome Paid
 [hub @ 217] contract 21: counterparty's move_1 is consistent with the program
 [hub @ 228] contract 21: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[hub @ 229] contract 21 resolved by split_Paid (6674b5e420b89e611aa36ccfafad4fe5c17574f2f23d8d95761ec2922d5d9b87)
+[hub @ 229] contract 21 resolved by split_Paid (bc8596a45006712ff919ca0db75398cb5784637f6e8fef641d44ba8ad26c8f03)
 === bob's channel ===
 --- on-chain ---
-block 207: funding 4436b363dcb9bdb861707689130903355840f8488270f37b7b214a8c9452fb95 (harness) 203 vB / 812 WU
-block 213: commitment_1 8aa925c1018ede2afa2f9db1cb3e072d9df766464099478630d872a0735386e1 (hub) 240 vB / 958 WU
-block 214: claim_to_remote aedb5c84d40fec0c900a362a8dbf2f4ec3cf2abc48b092cc506a244d77cbf563 (user) 129 vB / 513 WU
-block 219: claim_to_local 688b56a1e37bd7bd6e86d9406f74c9891711d194c5d199626693a7a87aacf61c (hub) 137 vB / 548 WU
-block 219: move_1 625a398790756ace7c1686df186f422dc82ddbad6c646fc7aa9c4e2b30a47d27 (hub) 256 vB / 1022 WU
-block 231: split_1_Paid e11deedb2e1d5995e076515f5ce8b8f064d501e0cbed82b1090832a9b1bc9b93 (user) 193 vB / 770 WU
+block 207: funding 9069d697f50301289593b56796c281e72a65f588a7b05587b7d194cc57b2a68b (harness) 203 vB / 812 WU
+block 213: commitment_1 cd6b3624cd156d18cc983df05d5b2adcbe43b82bf1e8e8c62d9f720b200ad6dc (hub) 240 vB / 958 WU
+block 214: claim_to_remote e9b434805593be49460e8e5fcfa36ecd0bab0605f15ba1e01b946785ff520964 (user) 129 vB / 513 WU
+block 219: claim_to_local dafbdb2644db8c67f450715a9c2e01be843bd0728592bec60b66368b3f5f2fb7 (hub) 137 vB / 548 WU
+block 219: move_1 03ce73f849d6c9d0f62079c6b6e0ad3d65914c80a4c15c1919fe0fa605d675eb (hub) 256 vB / 1022 WU
+block 231: split_1_Paid 6f12371e2b37b2bfc6587257f0c866e5f15a63dead7b3a0d1fda99d06629c7cf (user) 193 vB / 770 WU
 --- user ---
-[user @ 209] propose seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[2,80,141,181,9,124,80,248,179,24,53,67,199,238,13,157,106,214,103,81],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 279
+[user @ 209] propose seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[3,68,171,192,67,157,28,41,26,102,84,34,241,165,142,171,253,23,94,137],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 279
 [user @ 209] state 1 signed by both
 [user @ 213] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [user @ 213] contract 20 on-chain at depth 0: state Init, turn Some(Hub), deadline 279
 [user @ 219] contract 20: move_1 by hub confirmed: move prove inclusion on fact chain / refute chain, claimed state Paid, claimed outcome Paid
 [user @ 219] contract 20: counterparty's move_1 is consistent with the program
 [user @ 230] contract 20: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[user @ 231] contract 20 resolved by split_Paid (e11deedb2e1d5995e076515f5ce8b8f064d501e0cbed82b1090832a9b1bc9b93)
+[user @ 231] contract 20 resolved by split_Paid (6f12371e2b37b2bfc6587257f0c866e5f15a63dead7b3a0d1fda99d06629c7cf)
 --- hub ---
-[hub @ 209] accept draft seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[2,80,141,181,9,124,80,248,179,24,53,67,199,238,13,157,106,214,103,81],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 279
+[hub @ 209] accept draft seq 1: open contract 20 (anchorpay-fc:{"prover":"Hub","checkpoint":[3,68,171,192,67,157,28,41,26,102,84,34,241,165,142,171,253,23,94,137],"checkpoint_height":2,"h_max":309}) stakes 0.00040000 BTC/0 BTC deadline 279
 [hub @ 209] state 1 signed by both
 [hub @ 210] propose seq 2: move in contract 20: prove inclusion on fact chain / refute chain (deadline 230)
 [hub @ 212] counterparty stalled since height 210; force-closing at state 1
@@ -2067,7 +2067,7 @@ block 231: split_1_Paid e11deedb2e1d5995e076515f5ce8b8f064d501e0cbed82b1090832a9
 [hub @ 218] contract 20: broadcasting move_1: prove inclusion on fact chain / refute chain -> state Paid, outcome code 1
 [hub @ 219] contract 20: move_1 by hub confirmed: move prove inclusion on fact chain / refute chain, claimed state Paid, claimed outcome Paid
 [hub @ 230] contract 20: challenge window (12 blocks) after move_1 passed; broadcasting split_Paid
-[hub @ 231] contract 20 resolved by split_Paid (e11deedb2e1d5995e076515f5ce8b8f064d501e0cbed82b1090832a9b1bc9b93)
+[hub @ 231] contract 20 resolved by split_Paid (6f12371e2b37b2bfc6587257f0c866e5f15a63dead7b3a0d1fda99d06629c7cf)
 ```
 </details>
 
@@ -2079,22 +2079,22 @@ block 231: split_1_Paid e11deedb2e1d5995e076515f5ce8b8f064d501e0cbed82b1090832a9
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `251823e75f83080a7b5c0096578d6061d37e7dc628614487d6f1563043c6b981` |
-| 207 | `bob:funding` | hub-registry | `76ced5b356bbcba60325eb2268bd299fd89f7bd75b374b6619a384f8ed3a4680` |
-| 312 | `alice:commitment_2` | hub | `3c3080d654e3d68088ba588c10f8c2f100596c404952777f1c46e9ed4b76d4f8` |
-| 313 | `alice:claim_to_remote` | user | `0f539131babcabb8f93eb2c6d5b1fad09cc2dfd72d84c178f1af027b22b4f736` |
-| 318 | `alice:claim_to_local` | hub | `8a04b0ddaa0be1690db215d6bd0dc734b5b4c8ef839636f35ade378be1e97dd7` |
-| 318 | `alice:move_1` | hub | `137630ad3e6848ea7641b40557c7955ed0e20560a7558d1a17e1654ed35dc26d` |
-| 319 | `alice:d1/dispute` | user | `1e30bf4ae2e51bf86212cfd660f2221ed995c06a6efe57177ca9b4ae854952d8` |
-| 320 | `alice:p_round_1` | hub | `470c9cea28b42a315b899c1ecb470f158756eeaec0ed735265657bb433e79b8a` |
-| 321 | `alice:q_round_1` | user | `c8dfea0002dab31df46bbd302fd1726dcc9675a67fbcb1f7ab3bf5db8e8e8a44` |
-| 322 | `alice:p_round_2` | hub | `85e1995abb75e6b0f396baf8a5e6d2b3ab7e77c8ee5893955be732890e866731` |
-| 323 | `alice:q_round_2` | user | `a6d7d8f1e3057afd1f7b14249d0903f2f16f4faf42c4ec1a1fb368b1e2ba8348` |
-| 324 | `alice:p_round_3` | hub | `fcbb2cc1c6646dd43c43c9bc9876db78d457beef18b7b6911a7b5244d651fe56` |
-| 325 | `alice:q_round_3_check` | user | `5e9b2c45517bc71858fcddd9c0051682d1c8b7baeec996e763aa72c409da6e46` |
-| 326 | `alice:c_re_cur` | hub | `dbd0d116666176653d8baf1bded48f7bd0694b3fa426b4474f9cb764d0e61719` |
-| 327 | `alice:c_re_next` | hub | `c0a95d5fc6cd74a07da00cb31a7ca6b1f3d76a8d3869fd6013d0d4fac6b870db` |
-| 328 | `alice:simple_nop_c36031ca` | user | `656ea71a37f6e735d670d8d11013a1067b57ee565a3edf1c52c591dcf411e417` |
+| 204 | `alice:funding` | hub-registry | `98f7c9870b77bb25ab16d3bbb3b81f5e44a51deb8cb089ad421054f717fc0f54` |
+| 207 | `bob:funding` | hub-registry | `fe75369e312902baadefa163f86ce1a141537766b5c8a6535e1b2e90911f8d3f` |
+| 312 | `alice:commitment_2` | hub | `f1e0d7a5314fdd6f23ea46bd0cee8918382196794996e8c9a6d3e199cf7d1f56` |
+| 313 | `alice:claim_to_remote` | user | `647066bc5019dd4c8a5be20f1ab88c6453f8feb842939844c3f34dc88469af03` |
+| 318 | `alice:claim_to_local` | hub | `a0c1e471f9292c6f7c063349639d38c51026ac4c914582bc2a5f28079fcc30e2` |
+| 318 | `alice:move_1` | hub | `49b603878d51ec25711817aa309409c6e85f100fa30362a60df67ee6d61b8571` |
+| 319 | `alice:d1/dispute` | user | `5534486160c8f8e064bfac78d351e12bf07daf2f54902f8438540e68ab245402` |
+| 320 | `alice:p_round_1` | hub | `ccdba7339b15b809944a86407e291daf24acb729d1c6b8a1afdb1da126a86173` |
+| 321 | `alice:q_round_1` | user | `28525622f8e4693482bfa2bfb5b69c0d76e20984f3519e7dde9b3f66cddfe5e8` |
+| 322 | `alice:p_round_2` | hub | `2fa48349ba925f8128cd23aa763a944e2fe40eafd6d8f39bec99ba70244cab1a` |
+| 323 | `alice:q_round_2` | user | `c82b0ca96d2da57206bccd37029b704ffd47acdd70b8a58f5ee25646193d2a6f` |
+| 324 | `alice:p_round_3` | hub | `584797de7b733954aa7cb6c6df4918c2b917321e4231aedb1bc9bbcbf6727243` |
+| 325 | `alice:q_round_3_check` | user | `f149134d881fbf31e21bb1c0ee811653b55a7eb46e8aadb7651797d47cfad322` |
+| 326 | `alice:c_re_cur` | hub | `dd5e2c713bfc20cf40eeb1d9278f76c43e8f73a3bb7fe89626b89f93ebdb8e3f` |
+| 327 | `alice:c_re_next` | hub | `16156772d1fbc67fc60793624ba9c331e65a430523cd79abc0412d13606e8474` |
+| 328 | `alice:simple_nop_c36031ca` | user | `502ffcfefd072bd4f01e4065d49025ca5d8a74fd9837860d90f7038e060d1f1c` |
 
 <details><summary>narrative</summary>
 
@@ -2108,30 +2108,30 @@ block 231: split_1_Paid e11deedb2e1d5995e076515f5ce8b8f064d501e0cbed82b1090832a9
 [fc-registry] request 1 confirmed at fact-chain height 1
 === alice's channel ===
 --- on-chain ---
-block 204: funding 251823e75f83080a7b5c0096578d6061d37e7dc628614487d6f1563043c6b981 (harness) 203 vB / 812 WU
-block 312: commitment_2 3c3080d654e3d68088ba588c10f8c2f100596c404952777f1c46e9ed4b76d4f8 (hub) 240 vB / 958 WU
-block 313: claim_to_remote 0f539131babcabb8f93eb2c6d5b1fad09cc2dfd72d84c178f1af027b22b4f736 (user) 129 vB / 513 WU
-block 318: claim_to_local 8a04b0ddaa0be1690db215d6bd0dc734b5b4c8ef839636f35ade378be1e97dd7 (hub) 137 vB / 548 WU
-block 318: move_1 137630ad3e6848ea7641b40557c7955ed0e20560a7558d1a17e1654ed35dc26d (hub) 1297 vB / 5187 WU
-block 319: d1/dispute 1e30bf4ae2e51bf86212cfd660f2221ed995c06a6efe57177ca9b4ae854952d8 (user) 178 vB / 710 WU
-block 320: p_round_1 470c9cea28b42a315b899c1ecb470f158756eeaec0ed735265657bb433e79b8a (hub) 1203 vB / 4812 WU
-block 321: q_round_1 c8dfea0002dab31df46bbd302fd1726dcc9675a67fbcb1f7ab3bf5db8e8e8a44 (user) 181 vB / 721 WU
-block 322: p_round_2 85e1995abb75e6b0f396baf8a5e6d2b3ab7e77c8ee5893955be732890e866731 (hub) 1203 vB / 4809 WU
-block 323: q_round_2 a6d7d8f1e3057afd1f7b14249d0903f2f16f4faf42c4ec1a1fb368b1e2ba8348 (user) 181 vB / 721 WU
-block 324: p_round_3 fcbb2cc1c6646dd43c43c9bc9876db78d457beef18b7b6911a7b5244d651fe56 (hub) 1203 vB / 4810 WU
-block 325: q_round_3_check 5e9b2c45517bc71858fcddd9c0051682d1c8b7baeec996e763aa72c409da6e46 (user) 189 vB / 754 WU
-block 326: c_re_cur dbd0d116666176653d8baf1bded48f7bd0694b3fa426b4474f9cb764d0e61719 (hub) 1203 vB / 4810 WU
-block 327: c_re_next c0a95d5fc6cd74a07da00cb31a7ca6b1f3d76a8d3869fd6013d0d4fac6b870db (hub) 1203 vB / 4809 WU
-block 328: simple_nop_c36031ca 656ea71a37f6e735d670d8d11013a1067b57ee565a3edf1c52c591dcf411e417 (user) 2357 vB / 9428 WU
+block 204: funding 98f7c9870b77bb25ab16d3bbb3b81f5e44a51deb8cb089ad421054f717fc0f54 (harness) 203 vB / 812 WU
+block 312: commitment_2 f1e0d7a5314fdd6f23ea46bd0cee8918382196794996e8c9a6d3e199cf7d1f56 (hub) 240 vB / 958 WU
+block 313: claim_to_remote 647066bc5019dd4c8a5be20f1ab88c6453f8feb842939844c3f34dc88469af03 (user) 129 vB / 513 WU
+block 318: claim_to_local a0c1e471f9292c6f7c063349639d38c51026ac4c914582bc2a5f28079fcc30e2 (hub) 137 vB / 548 WU
+block 318: move_1 49b603878d51ec25711817aa309409c6e85f100fa30362a60df67ee6d61b8571 (hub) 1298 vB / 5189 WU
+block 319: d1/dispute 5534486160c8f8e064bfac78d351e12bf07daf2f54902f8438540e68ab245402 (user) 178 vB / 710 WU
+block 320: p_round_1 ccdba7339b15b809944a86407e291daf24acb729d1c6b8a1afdb1da126a86173 (hub) 1203 vB / 4812 WU
+block 321: q_round_1 28525622f8e4693482bfa2bfb5b69c0d76e20984f3519e7dde9b3f66cddfe5e8 (user) 181 vB / 721 WU
+block 322: p_round_2 2fa48349ba925f8128cd23aa763a944e2fe40eafd6d8f39bec99ba70244cab1a (hub) 1204 vB / 4813 WU
+block 323: q_round_2 c82b0ca96d2da57206bccd37029b704ffd47acdd70b8a58f5ee25646193d2a6f (user) 181 vB / 721 WU
+block 324: p_round_3 584797de7b733954aa7cb6c6df4918c2b917321e4231aedb1bc9bbcbf6727243 (hub) 1203 vB / 4811 WU
+block 325: q_round_3_check f149134d881fbf31e21bb1c0ee811653b55a7eb46e8aadb7651797d47cfad322 (user) 189 vB / 754 WU
+block 326: c_re_cur dd5e2c713bfc20cf40eeb1d9278f76c43e8f73a3bb7fe89626b89f93ebdb8e3f (hub) 1203 vB / 4811 WU
+block 327: c_re_next 16156772d1fbc67fc60793624ba9c331e65a430523cd79abc0412d13606e8474 (hub) 1203 vB / 4811 WU
+block 328: simple_nop_c36031ca 502ffcfefd072bd4f01e4065d49025ca5d8a74fd9837860d90f7038e060d1f1c (user) 2350 vB / 9399 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
 [user @ 309] propose seq 2: move in contract 10: claim request 1 / prove inclusion / refute chain (deadline 329)
 [user @ 309] state 2 signed by both
 [user @ 312] counterparty's commitment for state 2 confirmed with 1 contract output(s)
 [user @ 312] contract 10 on-chain at depth 0: state claimed (not included by h_max), turn Some(Hub), deadline 329
 [user @ 318] contract 10: move_1 by hub confirmed: move claim request 1 / prove inclusion / refute chain, claimed state hub proved inclusion, claimed outcome BondToHub
-[user @ 318] contract 10: claimed end state 018ee410.. is WRONG
+[user @ 318] contract 10: claimed end state 05a43bf5.. is WRONG
 [user @ 318] contract 10: disputing the claim
 [user @ 319] contract 10: dispute opened at depth 1; waiting for the prover's round 1
 [user @ 320] contract 10: prover's round 1 commitments confirmed
@@ -2147,10 +2147,10 @@ block 328: simple_nop_c36031ca 656ea71a37f6e735d670d8d11013a1067b57ee565a3edf1c5
 [user @ 326] contract 10: prover re-committed the step's input state
 [user @ 327] contract 10: prover re-committed the step's output state
 [user @ 327] contract 10: step 7 (nop) is wrong
-[user @ 327] contract 10: broadcasting simple_nop_c36031ca (9050 B witness, 2357 vB)
-[user @ 328] contract 10: disproved by simple_nop_c36031ca (656ea71a37f6e735d670d8d11013a1067b57ee565a3edf1c52c591dcf411e417)
+[user @ 327] contract 10: broadcasting simple_nop_c36031ca (9021 B witness, 2350 vB)
+[user @ 328] contract 10: disproved by simple_nop_c36031ca (502ffcfefd072bd4f01e4065d49025ca5d8a74fd9837860d90f7038e060d1f1c)
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
 [hub @ 309] accept draft seq 2: move in contract 10: claim request 1 / prove inclusion / refute chain (deadline 329)
 [hub @ 309] state 2 signed by both
@@ -2161,7 +2161,7 @@ block 328: simple_nop_c36031ca 656ea71a37f6e735d670d8d11013a1067b57ee565a3edf1c5
 [hub @ 317] contract 10: CHEATING: claiming a false end state
 [hub @ 317] contract 10: broadcasting move_1: claim request 1 / prove inclusion / refute chain -> state hub proved inclusion, outcome code 0
 [hub @ 318] contract 10: move_1 by hub confirmed: move claim request 1 / prove inclusion / refute chain, claimed state hub proved inclusion, claimed outcome BondToHub
-[hub @ 318] contract 10: claimed end state 018ee410.. is WRONG
+[hub @ 318] contract 10: claimed end state 05a43bf5.. is WRONG
 [hub @ 319] contract 10: dispute opened at depth 1; waiting for the prover's round 1
 [hub @ 319] contract 10: answering dispute round 1 with states at steps [4]
 [hub @ 320] contract 10: prover's round 1 commitments confirmed
@@ -2177,10 +2177,10 @@ block 328: simple_nop_c36031ca 656ea71a37f6e735d670d8d11013a1067b57ee565a3edf1c5
 [hub @ 326] contract 10: prover re-committed the step's input state
 [hub @ 326] contract 10: re-committing the output state of step 7
 [hub @ 327] contract 10: prover re-committed the step's output state
-[hub @ 328] contract 10: disproved by simple_nop_c36031ca (656ea71a37f6e735d670d8d11013a1067b57ee565a3edf1c52c591dcf411e417)
+[hub @ 328] contract 10: disproved by simple_nop_c36031ca (502ffcfefd072bd4f01e4065d49025ca5d8a74fd9837860d90f7038e060d1f1c)
 === bob's channel ===
 --- on-chain ---
-block 207: funding 76ced5b356bbcba60325eb2268bd299fd89f7bd75b374b6619a384f8ed3a4680 (harness) 203 vB / 812 WU
+block 207: funding fe75369e312902baadefa163f86ce1a141537766b5c8a6535e1b2e90911f8d3f (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -2194,14 +2194,14 @@ block 207: funding 76ced5b356bbcba60325eb2268bd299fd89f7bd75b374b6619a384f8ed3a4
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `alice:funding` | hub-registry | `236e4eec2948530de223643fcbbece5d63b5c29aec6bdb7acc341dacc559e232` |
-| 207 | `bob:funding` | hub-registry | `cfec92dce5870c73c345ac9d997d53d741d9fdc4d3a0ca8902f2f47d22359b72` |
-| 312 | `alice:commitment_2` | hub | `a8775682b95b63e30716ce4127b1d645c7f019a6a9239803bc571c1ce9554629` |
-| 313 | `alice:claim_to_remote` | user | `dbdf3a10ee8f9421752c5d69c40f1237a4b27d2dca16c61b5ea8c3066fe69a57` |
-| 318 | `alice:claim_to_local` | hub | `cb2e6d64be60319330376e8586fdf6a8a2edceca665cc778b558f5af3ba84223` |
-| 318 | `alice:move_1` | hub | `f3efbfe52538500e8ccd5bcedf325daa16e69cfb0bd65246aca40512354a2497` |
-| 319 | `alice:move_2` | user | `606c21a2a7645c475239e09538e606d3449fcba000562ed6b0cf5dcdbe351ca1` |
-| 331 | `alice:split_2_BondToUser` | user | `7a6ccadc4dc815b18bfe4f4b022a8fbe2f193662705d67c71c0b2e9c2229291d` |
+| 204 | `alice:funding` | hub-registry | `bad3e359dcf992c38d5930fdba0cdd22ec176e2a310ba624b689df73f62882b9` |
+| 207 | `bob:funding` | hub-registry | `af59e5e166cdd5717f24f2480cf1db261f19bf6723be099b9236d2b77cf04a4f` |
+| 312 | `alice:commitment_2` | hub | `3125cecb960b7ad503020226428292878fcb922000ae91477db926b3eac820a9` |
+| 313 | `alice:claim_to_remote` | user | `58c2c58923cd4f2dbcd3f6501d7b41601cd6867555ffa913723281b1213a2cf5` |
+| 318 | `alice:claim_to_local` | hub | `68cbc74727ab4647d39e697897b9cc95ccb64862197f1d98a6edf99c6e97eda0` |
+| 318 | `alice:move_1` | hub | `84acf1594061bdba001a3a9ced6d44b8abc83a21dc06989d1b79b54333214d2f` |
+| 319 | `alice:move_2` | user | `ae09630dc29c53f364b99bb68b02bb42d137b0b50282c4f917367491727221b3` |
+| 331 | `alice:split_2_BondToUser` | user | `e90dff3949be95d67ec16902ca99c9d18ddad74d7ee2e1e36299af4a250249c8` |
 
 <details><summary>narrative</summary>
 
@@ -2216,30 +2216,30 @@ block 207: funding 76ced5b356bbcba60325eb2268bd299fd89f7bd75b374b6619a384f8ed3a4
 [fc-registry] request 1 confirmed at fact-chain height 1
 === alice's channel ===
 --- on-chain ---
-block 204: funding 236e4eec2948530de223643fcbbece5d63b5c29aec6bdb7acc341dacc559e232 (harness) 203 vB / 812 WU
-block 312: commitment_2 a8775682b95b63e30716ce4127b1d645c7f019a6a9239803bc571c1ce9554629 (hub) 240 vB / 958 WU
-block 313: claim_to_remote dbdf3a10ee8f9421752c5d69c40f1237a4b27d2dca16c61b5ea8c3066fe69a57 (user) 129 vB / 513 WU
-block 318: claim_to_local cb2e6d64be60319330376e8586fdf6a8a2edceca665cc778b558f5af3ba84223 (hub) 137 vB / 548 WU
-block 318: move_1 f3efbfe52538500e8ccd5bcedf325daa16e69cfb0bd65246aca40512354a2497 (hub) 1305 vB / 5219 WU
-block 319: move_2 606c21a2a7645c475239e09538e606d3449fcba000562ed6b0cf5dcdbe351ca1 (user) 1304 vB / 5213 WU
-block 331: split_2_BondToUser 7a6ccadc4dc815b18bfe4f4b022a8fbe2f193662705d67c71c0b2e9c2229291d (user) 193 vB / 770 WU
+block 204: funding bad3e359dcf992c38d5930fdba0cdd22ec176e2a310ba624b689df73f62882b9 (harness) 203 vB / 812 WU
+block 312: commitment_2 3125cecb960b7ad503020226428292878fcb922000ae91477db926b3eac820a9 (hub) 240 vB / 958 WU
+block 313: claim_to_remote 58c2c58923cd4f2dbcd3f6501d7b41601cd6867555ffa913723281b1213a2cf5 (user) 129 vB / 513 WU
+block 318: claim_to_local 68cbc74727ab4647d39e697897b9cc95ccb64862197f1d98a6edf99c6e97eda0 (hub) 137 vB / 548 WU
+block 318: move_1 84acf1594061bdba001a3a9ced6d44b8abc83a21dc06989d1b79b54333214d2f (hub) 1305 vB / 5219 WU
+block 319: move_2 ae09630dc29c53f364b99bb68b02bb42d137b0b50282c4f917367491727221b3 (user) 1304 vB / 5214 WU
+block 331: split_2_BondToUser e90dff3949be95d67ec16902ca99c9d18ddad74d7ee2e1e36299af4a250249c8 (user) 193 vB / 770 WU
 --- user ---
-[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[user @ 207] propose seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [user @ 207] state 1 signed by both
 [user @ 309] propose seq 2: move in contract 10: claim request 1 / prove inclusion / refute chain (deadline 329)
 [user @ 309] state 2 signed by both
 [user @ 312] counterparty's commitment for state 2 confirmed with 1 contract output(s)
 [user @ 312] contract 10 on-chain at depth 0: state claimed (not included by h_max), turn Some(Hub), deadline 329
 [user @ 318] contract 10: move_1 by hub confirmed: move claim request 1 / prove inclusion / refute chain, claimed state hub proved inclusion, claimed outcome BondToHub
-[user @ 318] contract 10: claimed end state 06362d80.. is correct
+[user @ 318] contract 10: claimed end state 02ee5593.. is correct
 [user @ 318] contract 10: counterparty's move_1 is consistent with the program
 [user @ 318] contract 10: broadcasting move_2: claim request 1 / prove inclusion / refute chain -> state user refuted with heavier chain, outcome code 1
 [user @ 319] contract 10: move_2 by user confirmed: move claim request 1 / prove inclusion / refute chain, claimed state user refuted with heavier chain, claimed outcome BondToUser
-[user @ 319] contract 10: claimed end state cdf98b21.. is correct
+[user @ 319] contract 10: claimed end state d0d57c9a.. is correct
 [user @ 330] contract 10: challenge window (12 blocks) after move_2 passed; broadcasting split_BondToUser
-[user @ 331] contract 10 resolved by split_BondToUser (7a6ccadc4dc815b18bfe4f4b022a8fbe2f193662705d67c71c0b2e9c2229291d)
+[user @ 331] contract 10 resolved by split_BondToUser (e90dff3949be95d67ec16902ca99c9d18ddad74d7ee2e1e36299af4a250249c8)
 --- hub ---
-[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
+[hub @ 207] accept draft seq 1: open contract 10 (nreg-fc:{"req_id":1,"claim_from":309,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"checkpoint_height":0,"h_max":307}) stakes 0 BTC/0.00040000 BTC deadline 369
 [hub @ 207] state 1 signed by both
 [hub @ 309] accept draft seq 2: move in contract 10: claim request 1 / prove inclusion / refute chain (deadline 329)
 [hub @ 309] state 2 signed by both
@@ -2249,15 +2249,15 @@ block 331: split_2_BondToUser 7a6ccadc4dc815b18bfe4f4b022a8fbe2f193662705d67c71c
 [hub @ 312] contract 10 on-chain at depth 0: state claimed (not included by h_max), turn Some(Hub), deadline 329
 [hub @ 317] contract 10: broadcasting move_1: claim request 1 / prove inclusion / refute chain -> state hub proved inclusion, outcome code 0
 [hub @ 318] contract 10: move_1 by hub confirmed: move claim request 1 / prove inclusion / refute chain, claimed state hub proved inclusion, claimed outcome BondToHub
-[hub @ 318] contract 10: claimed end state 06362d80.. is correct
+[hub @ 318] contract 10: claimed end state 02ee5593.. is correct
 [hub @ 319] contract 10: move_2 by user confirmed: move claim request 1 / prove inclusion / refute chain, claimed state user refuted with heavier chain, claimed outcome BondToUser
-[hub @ 319] contract 10: claimed end state cdf98b21.. is correct
+[hub @ 319] contract 10: claimed end state d0d57c9a.. is correct
 [hub @ 319] contract 10: counterparty's move_2 is consistent with the program
 [hub @ 330] contract 10: challenge window (12 blocks) after move_2 passed; broadcasting split_BondToUser
-[hub @ 331] contract 10 resolved by split_BondToUser (7a6ccadc4dc815b18bfe4f4b022a8fbe2f193662705d67c71c0b2e9c2229291d)
+[hub @ 331] contract 10 resolved by split_BondToUser (e90dff3949be95d67ec16902ca99c9d18ddad74d7ee2e1e36299af4a250249c8)
 === bob's channel ===
 --- on-chain ---
-block 207: funding cfec92dce5870c73c345ac9d997d53d741d9fdc4d3a0ca8902f2f47d22359b72 (harness) 203 vB / 812 WU
+block 207: funding af59e5e166cdd5717f24f2480cf1db261f19bf6723be099b9236d2b77cf04a4f (harness) 203 vB / 812 WU
 --- user ---
 --- hub ---
 ```
@@ -2271,13 +2271,13 @@ block 207: funding cfec92dce5870c73c345ac9d997d53d741d9fdc4d3a0ca8902f2f47d22359
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `e26199f5bce21f23b20fd482a4756b26804fcb02cbe7be03a8a24d84b8461365` |
+| 204 | `funding` | harness | `c60c814e865c5a150fece37354b0f132969fbf926db8992ebd04043e970bf940` |
 
 <details><summary>narrative</summary>
 
 ```
 --- venue ---
-[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 742 pre-signed transactions
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
 [world @ 205 / slot 0] user publishes move 1: cell 4
 [world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
 [world @ 206 / slot 1] hub publishes move 2: cell 1
@@ -2294,22 +2294,15 @@ block 207: funding cfec92dce5870c73c345ac9d997d53d741d9fdc4d3a0ca8902f2f47d22359
 [world @ 211 / slot 7] slot 7 mined with user's move (XOX/OX./X.O); inclusion data served
 [world @ 211 / slot 7] game over on the venue: XOX/OX./X.O turn=hub X won (fold user 0.00115000 BTC / hub 0.00015000 BTC)
 --- on-chain ---
-block 204: funding e26199f5bce21f23b20fd482a4756b26804fcb02cbe7be03a8a24d84b8461365 (harness) 203 vB / 812 WU
+block 204: funding c60c814e865c5a150fece37354b0f132969fbf926db8992ebd04043e970bf940 (harness) 203 vB / 812 WU
 --- user ---
-[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [user @ 204] state 1 signed by both
-[user @ 206] learned statement c30/s1/d2/state
-[user @ 208] learned statement c30/s1/d4/state
-[user @ 210] learned statement c30/s1/d6/state
 [user @ 211] propose seq 2: fold contract 30: user 0.00115000 BTC / hub 0.00015000 BTC
 [user @ 211] state 2 signed by both
 --- hub ---
-[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [hub @ 204] state 1 signed by both
-[hub @ 205] learned statement c30/s1/d1/state
-[hub @ 207] learned statement c30/s1/d3/state
-[hub @ 209] learned statement c30/s1/d5/state
-[hub @ 211] learned statement c30/s1/d7/state
 [hub @ 211] accept draft seq 2: fold contract 30: user 0.00115000 BTC / hub 0.00015000 BTC
 [hub @ 211] state 2 signed by both
 ```
@@ -2323,32 +2316,32 @@ block 204: funding e26199f5bce21f23b20fd482a4756b26804fcb02cbe7be03a8a24d84b8461
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `1197ee9fe1b09d8b111f24029b1514ccb120b8dfc61c475ed384978b0766230c` |
-| 209 | `commitment_1` | user | `8591ef4d90f47e3330817f04b5f4eca6930a2689e3eb5aa78f185129c0eaf8dc` |
-| 210 | `claim_to_remote` | hub | `0ee3781470269f1351768931ab031bca1ccef8551eb7b698492a10ae4d98adc7` |
-| 215 | `claim_to_local` | user | `449103d3f7aa69ab15dd3c4ac3aa00f1484538e365b2f962a76589188a9b11d1` |
-| 215 | `move_1` | user | `b63391bd86a06e42f1a9bbdc31af44949fe5ee9e555c9b04880dc0672ea9eb85` |
-| 227 | `split_1_UserWins` | user | `7ab13a02250a78ec700f2a3f27c53d64028419354fb97c45705c755fd374127a` |
+| 204 | `funding` | harness | `6af782509ec472f42c197878bede4ce6ed9976684c547e084f2b0177267adbc5` |
+| 209 | `commitment_1` | user | `ac79c4cd3fbfbb613a5eff8fe659a581f0ced4d2fb3b80c0664f07dea4305f44` |
+| 210 | `claim_to_remote` | hub | `5d077789226635bec20bc91382dbdf8f2ea28dba9d900752bb987ede66312893` |
+| 215 | `claim_to_local` | user | `6502faccde944cf94970f0687b8ad48198b6112ff936ebae3a26fe9251178c26` |
+| 215 | `move_1` | user | `aeac286678e2fa846aaa1afa20c3b63a964419510abbe9fa8bc6c71bf9e37a47` |
+| 227 | `split_1_UserWins` | user | `c3c4379a12edf671807ed6fc5b3a16c29abea0453b7f3e4a7bafe9a0c44fa754` |
 
 <details><summary>narrative</summary>
 
 ```
 --- venue ---
-[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 742 pre-signed transactions
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
 [world @ 205 / slot 0] user publishes move 1: cell 4
 [world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
 [world @ 206 / slot 1] hub STALLS: does not publish move 2
 [world @ 206 / slot 2] slot 2 mined EMPTY
 [world @ 207 / slot 2] user: hub did not publish a valid move 2; claiming a timeout at depth 1
 --- on-chain ---
-block 204: funding 1197ee9fe1b09d8b111f24029b1514ccb120b8dfc61c475ed384978b0766230c (harness) 203 vB / 812 WU
-block 209: commitment_1 8591ef4d90f47e3330817f04b5f4eca6930a2689e3eb5aa78f185129c0eaf8dc (user) 240 vB / 958 WU
-block 210: claim_to_remote 0ee3781470269f1351768931ab031bca1ccef8551eb7b698492a10ae4d98adc7 (hub) 129 vB / 513 WU
-block 215: claim_to_local 449103d3f7aa69ab15dd3c4ac3aa00f1484538e365b2f962a76589188a9b11d1 (user) 137 vB / 548 WU
-block 215: move_1 b63391bd86a06e42f1a9bbdc31af44949fe5ee9e555c9b04880dc0672ea9eb85 (user) 3885 vB / 15539 WU
-block 227: split_1_UserWins 7ab13a02250a78ec700f2a3f27c53d64028419354fb97c45705c755fd374127a (user) 217 vB / 866 WU
+block 204: funding 6af782509ec472f42c197878bede4ce6ed9976684c547e084f2b0177267adbc5 (harness) 203 vB / 812 WU
+block 209: commitment_1 ac79c4cd3fbfbb613a5eff8fe659a581f0ced4d2fb3b80c0664f07dea4305f44 (user) 240 vB / 958 WU
+block 210: claim_to_remote 5d077789226635bec20bc91382dbdf8f2ea28dba9d900752bb987ede66312893 (hub) 129 vB / 513 WU
+block 215: claim_to_local 6502faccde944cf94970f0687b8ad48198b6112ff936ebae3a26fe9251178c26 (user) 137 vB / 548 WU
+block 215: move_1 aeac286678e2fa846aaa1afa20c3b63a964419510abbe9fa8bc6c71bf9e37a47 (user) 4077 vB / 16305 WU
+block 227: split_1_UserWins c3c4379a12edf671807ed6fc5b3a16c29abea0453b7f3e4a7bafe9a0c44fa754 (user) 217 vB / 866 WU
 --- user ---
-[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [user @ 204] state 1 signed by both
 [user @ 207] contract 30: will claim on-chain at depth 1 (21 bits of prior, move 0100)
 [user @ 208] contract 30: force-closing to claim on-chain at depth 1
@@ -2356,20 +2349,19 @@ block 227: split_1_UserWins 7ab13a02250a78ec700f2a3f27c53d64028419354fb97c45705c
 [user @ 209] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [user @ 214] contract 30: broadcasting move_1: cell 4 -> state .../.X./... turn=hub open, outcome code 0
 [user @ 215] contract 30: move_1 by user confirmed: move cell 4, claimed state .../.X./... turn=hub open, claimed outcome UserWins
-[user @ 215] contract 30: claimed end state c5b8fe15.. is correct
+[user @ 215] contract 30: claimed end state 2f12df17.. is correct
 [user @ 226] contract 30: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
-[user @ 227] contract 30 resolved by split_UserWins (7ab13a02250a78ec700f2a3f27c53d64028419354fb97c45705c755fd374127a)
+[user @ 227] contract 30 resolved by split_UserWins (c3c4379a12edf671807ed6fc5b3a16c29abea0453b7f3e4a7bafe9a0c44fa754)
 --- hub ---
-[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [hub @ 204] state 1 signed by both
-[hub @ 205] learned statement c30/s1/d1/state
 [hub @ 209] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [hub @ 209] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [hub @ 215] contract 30: move_1 by user confirmed: move cell 4, claimed state .../.X./... turn=hub open, claimed outcome UserWins
-[hub @ 215] contract 30: claimed end state c5b8fe15.. is correct
+[hub @ 215] contract 30: claimed end state 2f12df17.. is correct
 [hub @ 215] contract 30: counterparty's move_1 is consistent with the program
 [hub @ 226] contract 30: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
-[hub @ 227] contract 30 resolved by split_UserWins (7ab13a02250a78ec700f2a3f27c53d64028419354fb97c45705c755fd374127a)
+[hub @ 227] contract 30 resolved by split_UserWins (c3c4379a12edf671807ed6fc5b3a16c29abea0453b7f3e4a7bafe9a0c44fa754)
 ```
 </details>
 
@@ -2381,18 +2373,18 @@ block 227: split_1_UserWins 7ab13a02250a78ec700f2a3f27c53d64028419354fb97c45705c
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `f6ace7cf35a0d0ba6ae2797a7648bc967c13025bb0c70f33f01f255d1a751485` |
-| 213 | `commitment_1` | user | `f6736098317549e83e333a75df470599ed8ed680b78478f2a382db7b45fe122a` |
-| 214 | `claim_to_remote` | hub | `41db72d245ed8fa89324ee644fb1b629ae54f565c65855395f608c0ae282a4ae` |
-| 219 | `claim_to_local` | user | `fb13e52b273a78de040e6a7a000f949279bd53f9ea5cb6eadce7cc72e90da1d1` |
-| 219 | `move_5` | user | `bcc2e7139cd4871954a65de109706437d0bb011dc002cfeb4ada04eefb537140` |
-| 231 | `split_5_UserWins` | user | `f4b087ddeb139816e1d386662ed94627f260739a65c2f4c09971cb051d6939e8` |
+| 204 | `funding` | harness | `ebfb9e75e2c20c432e5ff8b282d7147b426d0a0cdb6c88a190538140e3725553` |
+| 213 | `commitment_1` | user | `659b80f60e43b183d992397e86093ca22bbe468014af3752c4fbb52bdbdc9d85` |
+| 214 | `claim_to_remote` | hub | `56d4e46ec15e92170584ac3ab81e80e7864644015120dad475436997710d7b1d` |
+| 219 | `claim_to_local` | user | `c2c2222134b5dcec68f4f945cd1be7975a47d788e8c7bd83898a4a606d1b2150` |
+| 219 | `move_5` | user | `b243d5045c71c26c9b1c732acd459322ce72bf4c713919becfd4281f8875f417` |
+| 231 | `split_5_UserWins` | user | `310684b5c2d326a9ab3f33c2ac2f116a6cb9f475745d055b11f77910dd261e9e` |
 
 <details><summary>narrative</summary>
 
 ```
 --- venue ---
-[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 742 pre-signed transactions
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
 [world @ 205 / slot 0] user publishes move 1: cell 4
 [world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
 [world @ 206 / slot 1] hub publishes move 2: cell 1
@@ -2407,39 +2399,34 @@ block 227: split_1_UserWins 7ab13a02250a78ec700f2a3f27c53d64028419354fb97c45705c
 [world @ 210 / slot 6] slot 6 mined EMPTY
 [world @ 211 / slot 6] user: hub did not publish a valid move 6; claiming a timeout at depth 5
 --- on-chain ---
-block 204: funding f6ace7cf35a0d0ba6ae2797a7648bc967c13025bb0c70f33f01f255d1a751485 (harness) 203 vB / 812 WU
-block 213: commitment_1 f6736098317549e83e333a75df470599ed8ed680b78478f2a382db7b45fe122a (user) 240 vB / 958 WU
-block 214: claim_to_remote 41db72d245ed8fa89324ee644fb1b629ae54f565c65855395f608c0ae282a4ae (hub) 129 vB / 513 WU
-block 219: claim_to_local fb13e52b273a78de040e6a7a000f949279bd53f9ea5cb6eadce7cc72e90da1d1 (user) 137 vB / 548 WU
-block 219: move_5 bcc2e7139cd4871954a65de109706437d0bb011dc002cfeb4ada04eefb537140 (user) 4268 vB / 17070 WU
-block 231: split_5_UserWins f4b087ddeb139816e1d386662ed94627f260739a65c2f4c09971cb051d6939e8 (user) 217 vB / 866 WU
+block 204: funding ebfb9e75e2c20c432e5ff8b282d7147b426d0a0cdb6c88a190538140e3725553 (harness) 203 vB / 812 WU
+block 213: commitment_1 659b80f60e43b183d992397e86093ca22bbe468014af3752c4fbb52bdbdc9d85 (user) 240 vB / 958 WU
+block 214: claim_to_remote 56d4e46ec15e92170584ac3ab81e80e7864644015120dad475436997710d7b1d (hub) 129 vB / 513 WU
+block 219: claim_to_local c2c2222134b5dcec68f4f945cd1be7975a47d788e8c7bd83898a4a606d1b2150 (user) 137 vB / 548 WU
+block 219: move_5 b243d5045c71c26c9b1c732acd459322ce72bf4c713919becfd4281f8875f417 (user) 4498 vB / 17991 WU
+block 231: split_5_UserWins 310684b5c2d326a9ab3f33c2ac2f116a6cb9f475745d055b11f77910dd261e9e (user) 217 vB / 866 WU
 --- user ---
-[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [user @ 204] state 1 signed by both
-[user @ 206] learned statement c30/s1/d2/state
-[user @ 208] learned statement c30/s1/d4/state
 [user @ 211] contract 30: will claim on-chain at depth 5 (21 bits of prior, move 0110)
 [user @ 212] contract 30: force-closing to claim on-chain at depth 5
 [user @ 213] my commitment for state 1 confirmed with 1 contract output(s)
 [user @ 213] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [user @ 218] contract 30: broadcasting move_5: cell 6 -> state XO./.X./X.O turn=hub open, outcome code 0
 [user @ 219] contract 30: move_5 by user confirmed: move cell 6, claimed state XO./.X./X.O turn=hub open, claimed outcome UserWins
-[user @ 219] contract 30: claimed end state 78cf9768.. is correct
+[user @ 219] contract 30: claimed end state c9cb5ceb.. is correct
 [user @ 230] contract 30: challenge window (12 blocks) after move_5 passed; broadcasting split_UserWins
-[user @ 231] contract 30 resolved by split_UserWins (f4b087ddeb139816e1d386662ed94627f260739a65c2f4c09971cb051d6939e8)
+[user @ 231] contract 30 resolved by split_UserWins (310684b5c2d326a9ab3f33c2ac2f116a6cb9f475745d055b11f77910dd261e9e)
 --- hub ---
-[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [hub @ 204] state 1 signed by both
-[hub @ 205] learned statement c30/s1/d1/state
-[hub @ 207] learned statement c30/s1/d3/state
-[hub @ 209] learned statement c30/s1/d5/state
 [hub @ 213] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [hub @ 213] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [hub @ 219] contract 30: move_5 by user confirmed: move cell 6, claimed state XO./.X./X.O turn=hub open, claimed outcome UserWins
-[hub @ 219] contract 30: claimed end state 78cf9768.. is correct
+[hub @ 219] contract 30: claimed end state c9cb5ceb.. is correct
 [hub @ 219] contract 30: counterparty's move_5 is consistent with the program
 [hub @ 230] contract 30: challenge window (12 blocks) after move_5 passed; broadcasting split_UserWins
-[hub @ 231] contract 30 resolved by split_UserWins (f4b087ddeb139816e1d386662ed94627f260739a65c2f4c09971cb051d6939e8)
+[hub @ 231] contract 30 resolved by split_UserWins (310684b5c2d326a9ab3f33c2ac2f116a6cb9f475745d055b11f77910dd261e9e)
 ```
 </details>
 
@@ -2451,18 +2438,18 @@ block 231: split_5_UserWins f4b087ddeb139816e1d386662ed94627f260739a65c2f4c09971
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `739c97e0d3bef8db8df50f727230f4ca6c90ea703983a8f8f136093283416c76` |
-| 214 | `commitment_1` | user | `78df8aa3e16cdb2f11366ca73280137f63565f04d684a3a452b6079397e1fb02` |
-| 215 | `claim_to_remote` | hub | `833a457d0e293ec221c98741599f5f32ea52fecbe11075f68a597af3a44e8e9a` |
-| 220 | `claim_to_local` | user | `fe0ffee45cae9263fd3107879c87702d0f1db943c4af3b6afaf3c3d4ffeba7ec` |
-| 220 | `move_7` | user | `b80cc1ab6db7230a80109600136db847b528cabc248905c5a879986b51a16e67` |
-| 232 | `split_7_UserWins` | user | `d4cb882ba25018f20e58fa8ab9bbec16269d8abd9599205f8db062d9d68b9349` |
+| 204 | `funding` | harness | `908540ec27e29c94e6882cb4c4cd01e85f13cdf13cb38510dc6c90309a6a1ec7` |
+| 214 | `commitment_1` | user | `73d716cccf618205e08d717783db5f9ef80fc020802ff2ca26a997566f55b7c8` |
+| 215 | `claim_to_remote` | hub | `f36587bdc19555b0b1fe591a77e948b592c4791716121e069f8ea11cb0f996f3` |
+| 220 | `claim_to_local` | user | `d2e3ae8440439ee5ac9f19850c28a861cf2d85534eccf76cce7d1bcb7528a96f` |
+| 220 | `move_7` | user | `bf2b58081561e672a718580ae61e99e37d23426fbc006cd1e052cb48cefbcc06` |
+| 232 | `split_7_UserWins` | user | `6f8d27cced1d583d589ec0ade3d8a7db59fd7edb67972c919705cb3c5a739d6e` |
 
 <details><summary>narrative</summary>
 
 ```
 --- venue ---
-[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 742 pre-signed transactions
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
 [world @ 205 / slot 0] user publishes move 1: cell 4
 [world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
 [world @ 206 / slot 1] hub publishes move 2: cell 1
@@ -2480,18 +2467,15 @@ block 231: split_5_UserWins f4b087ddeb139816e1d386662ed94627f260739a65c2f4c09971
 [world @ 211 / slot 7] game over on the venue: XOX/OX./X.O turn=hub X won (fold user 0.00115000 BTC / hub 0.00015000 BTC)
 [world @ 212 / slot 7] user: the fold was refused; claiming the result on-chain at depth 7
 --- on-chain ---
-block 204: funding 739c97e0d3bef8db8df50f727230f4ca6c90ea703983a8f8f136093283416c76 (harness) 203 vB / 812 WU
-block 214: commitment_1 78df8aa3e16cdb2f11366ca73280137f63565f04d684a3a452b6079397e1fb02 (user) 240 vB / 958 WU
-block 215: claim_to_remote 833a457d0e293ec221c98741599f5f32ea52fecbe11075f68a597af3a44e8e9a (hub) 129 vB / 513 WU
-block 220: claim_to_local fe0ffee45cae9263fd3107879c87702d0f1db943c4af3b6afaf3c3d4ffeba7ec (user) 137 vB / 548 WU
-block 220: move_7 b80cc1ab6db7230a80109600136db847b528cabc248905c5a879986b51a16e67 (user) 4266 vB / 17063 WU
-block 232: split_7_UserWins d4cb882ba25018f20e58fa8ab9bbec16269d8abd9599205f8db062d9d68b9349 (user) 217 vB / 866 WU
+block 204: funding 908540ec27e29c94e6882cb4c4cd01e85f13cdf13cb38510dc6c90309a6a1ec7 (harness) 203 vB / 812 WU
+block 214: commitment_1 73d716cccf618205e08d717783db5f9ef80fc020802ff2ca26a997566f55b7c8 (user) 240 vB / 958 WU
+block 215: claim_to_remote f36587bdc19555b0b1fe591a77e948b592c4791716121e069f8ea11cb0f996f3 (hub) 129 vB / 513 WU
+block 220: claim_to_local d2e3ae8440439ee5ac9f19850c28a861cf2d85534eccf76cce7d1bcb7528a96f (user) 137 vB / 548 WU
+block 220: move_7 bf2b58081561e672a718580ae61e99e37d23426fbc006cd1e052cb48cefbcc06 (user) 4499 vB / 17994 WU
+block 232: split_7_UserWins 6f8d27cced1d583d589ec0ade3d8a7db59fd7edb67972c919705cb3c5a739d6e (user) 217 vB / 866 WU
 --- user ---
-[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [user @ 204] state 1 signed by both
-[user @ 206] learned statement c30/s1/d2/state
-[user @ 208] learned statement c30/s1/d4/state
-[user @ 210] learned statement c30/s1/d6/state
 [user @ 211] propose seq 2: fold contract 30: user 0.00115000 BTC / hub 0.00015000 BTC
 [user @ 211] draft seq 2 rejected by counterparty: I refuse to fold
 [user @ 212] contract 30: will claim on-chain at depth 7 (21 bits of prior, move 0010)
@@ -2500,24 +2484,20 @@ block 232: split_7_UserWins d4cb882ba25018f20e58fa8ab9bbec16269d8abd9599205f8db0
 [user @ 214] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [user @ 219] contract 30: broadcasting move_7: cell 2 -> state XOX/OX./X.O turn=hub X won, outcome code 0
 [user @ 220] contract 30: move_7 by user confirmed: move cell 2, claimed state XOX/OX./X.O turn=hub X won, claimed outcome UserWins
-[user @ 220] contract 30: claimed end state 2e0bc008.. is correct
+[user @ 220] contract 30: claimed end state b426e71d.. is correct
 [user @ 231] contract 30: challenge window (12 blocks) after move_7 passed; broadcasting split_UserWins
-[user @ 232] contract 30 resolved by split_UserWins (d4cb882ba25018f20e58fa8ab9bbec16269d8abd9599205f8db062d9d68b9349)
+[user @ 232] contract 30 resolved by split_UserWins (6f8d27cced1d583d589ec0ade3d8a7db59fd7edb67972c919705cb3c5a739d6e)
 --- hub ---
-[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [hub @ 204] state 1 signed by both
-[hub @ 205] learned statement c30/s1/d1/state
-[hub @ 207] learned statement c30/s1/d3/state
-[hub @ 209] learned statement c30/s1/d5/state
-[hub @ 211] learned statement c30/s1/d7/state
 [hub @ 211] rejecting draft seq 2: I refuse to fold
 [hub @ 214] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [hub @ 214] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [hub @ 220] contract 30: move_7 by user confirmed: move cell 2, claimed state XOX/OX./X.O turn=hub X won, claimed outcome UserWins
-[hub @ 220] contract 30: claimed end state 2e0bc008.. is correct
+[hub @ 220] contract 30: claimed end state b426e71d.. is correct
 [hub @ 220] contract 30: counterparty's move_7 is consistent with the program
 [hub @ 231] contract 30: challenge window (12 blocks) after move_7 passed; broadcasting split_UserWins
-[hub @ 232] contract 30 resolved by split_UserWins (d4cb882ba25018f20e58fa8ab9bbec16269d8abd9599205f8db062d9d68b9349)
+[hub @ 232] contract 30 resolved by split_UserWins (6f8d27cced1d583d589ec0ade3d8a7db59fd7edb67972c919705cb3c5a739d6e)
 ```
 </details>
 
@@ -2529,19 +2509,19 @@ block 232: split_7_UserWins d4cb882ba25018f20e58fa8ab9bbec16269d8abd9599205f8db0
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `f931fc045b8431285512f7bef83bdedf9b6e4e3165b9f7c65bfc9f0d3298fc76` |
-| 210 | `commitment_1` | hub | `ca039f5606b9b13d103db674d60b18d384f8381025f926c2b7d8abc94f46041c` |
-| 211 | `claim_to_remote` | user | `46a428f191e7b4bee92af04f8a9413a17e0163d71b69e0ac1b606b129e5f4fbc` |
-| 216 | `claim_to_local` | hub | `610cac040b539681bf2134c759999c0bb3e750118e5d0b643b4eef78b9317c98` |
-| 216 | `move_2` | hub | `502583d6aee726f21c0c2d0adcf079989d9f986139f1145c5136bff739d287a1` |
-| 217 | `move_3` | user | `c2542db74f50984802f9d077eb8ca95d516c089e658b6ccf8e458074249a1be5` |
-| 229 | `r2/split_3_UserWins` | user | `1314a60a5f739fa61328e4220e9c78e53ad7adc5a743d18d50be8d0e45873e21` |
+| 204 | `funding` | harness | `0e8ad101dbabc4c7d5e4ba71e9b7d55c90ba2b03cb1e5d178e2c6d23aa6b6924` |
+| 210 | `commitment_1` | hub | `b749e183dd39c02cf2da06c0ecac624b85049186b73448e7fcc1fa02fef358de` |
+| 211 | `claim_to_remote` | user | `b6bfc2606f0971632937aa8bb5cd0fa7105e943b09ccf23e654cfb2f829c1ae6` |
+| 216 | `claim_to_local` | hub | `c2576c026971f762f7e0050f2806f3ff9034b3e1854d29586dc7c5d7eba428eb` |
+| 216 | `move_2` | hub | `d626ffa277e5deb0a78801881c841459ea63dd52d8df6b56654d3456c72e3368` |
+| 217 | `move_3` | user | `187fe453dd0096592668473b9d6a4dd68ffddfe1d32c08a660e4e295dd8a5097` |
+| 229 | `r2/split_3_UserWins` | user | `e66c6932acec3f0b529004815b54e1edf8702671697d37339c9db171f93fcd95` |
 
 <details><summary>narrative</summary>
 
 ```
 --- venue ---
-[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 742 pre-signed transactions
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
 [world @ 205 / slot 0] user publishes move 1: cell 4
 [world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
 [world @ 206 / slot 1] hub publishes move 2: cell 1
@@ -2550,44 +2530,41 @@ block 232: split_7_UserWins d4cb882ba25018f20e58fa8ab9bbec16269d8abd9599205f8db0
 [world @ 207 / slot 3] slot 3 mined with user's move (XO./.X./...); inclusion data served
 [world @ 208 / slot 3] hub IGNORES user's valid move 3 and claims a timeout at depth 2
 --- on-chain ---
-block 204: funding f931fc045b8431285512f7bef83bdedf9b6e4e3165b9f7c65bfc9f0d3298fc76 (harness) 203 vB / 812 WU
-block 210: commitment_1 ca039f5606b9b13d103db674d60b18d384f8381025f926c2b7d8abc94f46041c (hub) 240 vB / 958 WU
-block 211: claim_to_remote 46a428f191e7b4bee92af04f8a9413a17e0163d71b69e0ac1b606b129e5f4fbc (user) 129 vB / 513 WU
-block 216: claim_to_local 610cac040b539681bf2134c759999c0bb3e750118e5d0b643b4eef78b9317c98 (hub) 137 vB / 548 WU
-block 216: move_2 502583d6aee726f21c0c2d0adcf079989d9f986139f1145c5136bff739d287a1 (hub) 4267 vB / 17067 WU
-block 217: move_3 c2542db74f50984802f9d077eb8ca95d516c089e658b6ccf8e458074249a1be5 (user) 4273 vB / 17090 WU
-block 229: r2/split_3_UserWins 1314a60a5f739fa61328e4220e9c78e53ad7adc5a743d18d50be8d0e45873e21 (user) 217 vB / 866 WU
+block 204: funding 0e8ad101dbabc4c7d5e4ba71e9b7d55c90ba2b03cb1e5d178e2c6d23aa6b6924 (harness) 203 vB / 812 WU
+block 210: commitment_1 b749e183dd39c02cf2da06c0ecac624b85049186b73448e7fcc1fa02fef358de (hub) 240 vB / 958 WU
+block 211: claim_to_remote b6bfc2606f0971632937aa8bb5cd0fa7105e943b09ccf23e654cfb2f829c1ae6 (user) 129 vB / 513 WU
+block 216: claim_to_local c2576c026971f762f7e0050f2806f3ff9034b3e1854d29586dc7c5d7eba428eb (hub) 137 vB / 548 WU
+block 216: move_2 d626ffa277e5deb0a78801881c841459ea63dd52d8df6b56654d3456c72e3368 (hub) 4499 vB / 17993 WU
+block 217: move_3 187fe453dd0096592668473b9d6a4dd68ffddfe1d32c08a660e4e295dd8a5097 (user) 4505 vB / 18018 WU
+block 229: r2/split_3_UserWins e66c6932acec3f0b529004815b54e1edf8702671697d37339c9db171f93fcd95 (user) 217 vB / 866 WU
 --- user ---
-[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [user @ 204] state 1 signed by both
-[user @ 206] learned statement c30/s1/d2/state
 [user @ 210] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [user @ 210] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [user @ 216] contract 30: move_2 by hub confirmed: move cell 1, claimed state .O./.X./... turn=user open, claimed outcome HubWins
-[user @ 216] contract 30: claimed end state af29c886.. is correct
+[user @ 216] contract 30: claimed end state 8c8179a3.. is correct
 [user @ 216] contract 30: counterparty's move_2 is consistent with the program
 [user @ 216] contract 30: broadcasting move_3: cell 0 -> state XO./.X./... turn=hub open, outcome code 0
 [user @ 217] contract 30: move_3 by user confirmed: move cell 0, claimed state XO./.X./... turn=hub open, claimed outcome UserWins
-[user @ 217] contract 30: claimed end state 2f126a07.. is correct
+[user @ 217] contract 30: claimed end state b1f88fdc.. is correct
 [user @ 228] contract 30: challenge window (12 blocks) after move_3 passed; broadcasting split_UserWins
-[user @ 229] contract 30 resolved by split_UserWins (1314a60a5f739fa61328e4220e9c78e53ad7adc5a743d18d50be8d0e45873e21)
+[user @ 229] contract 30 resolved by split_UserWins (e66c6932acec3f0b529004815b54e1edf8702671697d37339c9db171f93fcd95)
 --- hub ---
-[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [hub @ 204] state 1 signed by both
-[hub @ 205] learned statement c30/s1/d1/state
-[hub @ 207] learned statement c30/s1/d3/state
 [hub @ 208] contract 30: will claim on-chain at depth 2 (21 bits of prior, move 0001)
 [hub @ 209] contract 30: force-closing to claim on-chain at depth 2
 [hub @ 210] my commitment for state 1 confirmed with 1 contract output(s)
 [hub @ 210] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [hub @ 215] contract 30: broadcasting move_2: cell 1 -> state .O./.X./... turn=user open, outcome code 1
 [hub @ 216] contract 30: move_2 by hub confirmed: move cell 1, claimed state .O./.X./... turn=user open, claimed outcome HubWins
-[hub @ 216] contract 30: claimed end state af29c886.. is correct
+[hub @ 216] contract 30: claimed end state 8c8179a3.. is correct
 [hub @ 217] contract 30: move_3 by user confirmed: move cell 0, claimed state XO./.X./... turn=hub open, claimed outcome UserWins
-[hub @ 217] contract 30: claimed end state 2f126a07.. is correct
+[hub @ 217] contract 30: claimed end state b1f88fdc.. is correct
 [hub @ 217] contract 30: counterparty's move_3 is consistent with the program
 [hub @ 228] contract 30: challenge window (12 blocks) after move_3 passed; broadcasting split_UserWins
-[hub @ 229] contract 30 resolved by split_UserWins (1314a60a5f739fa61328e4220e9c78e53ad7adc5a743d18d50be8d0e45873e21)
+[hub @ 229] contract 30 resolved by split_UserWins (e66c6932acec3f0b529004815b54e1edf8702671697d37339c9db171f93fcd95)
 ```
 </details>
 
@@ -2599,18 +2576,18 @@ block 229: r2/split_3_UserWins 1314a60a5f739fa61328e4220e9c78e53ad7adc5a743d18d5
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `e935be90b4059aad63ac163cd1f4c209a9d060f970cb48556b5316ccdb74ae95` |
-| 212 | `commitment_1` | hub | `21945562e4f420e2e58c9e21ca11ec08ce0b0fd10dd5f2b5b4a203447b186cf0` |
-| 213 | `claim_to_remote` | user | `0008a2579e90904626b67f3b1184d290a1403fa077bc31c62c61023b87ff0d64` |
-| 218 | `claim_to_local` | hub | `d1581523631ea96a80b47896480077bf93d071f2f11e941f2074f5691ce1677f` |
-| 218 | `move_4` | hub | `309e53cb71dbf7395faa24629feae18229c245c962b10797570495a0c82ece10` |
-| 219 | `disprove_cell_occupied_0` | user | `45ae20e99b26fdb1fbefb6d006f5be37ee21a404d7061651495f517d760d8939` |
+| 204 | `funding` | harness | `9501bb57c2bd61dfc9feb3cb653c19d7f5ccca847ba5448e8c838d70ce24a22c` |
+| 212 | `commitment_1` | hub | `69ac6546d0c60062f3b0e9294f8cbf737ba3b49a0ba81307579cfeeba37a2d4c` |
+| 213 | `claim_to_remote` | user | `63df35bb024524517f253b3a9c58c2c0dfe3b6772d5a2b9e7d555e631425f501` |
+| 218 | `claim_to_local` | hub | `442ab256ac25fc748fcb0247ba374cd394f7b0a63be99f3d0455d0e3c2b19a38` |
+| 218 | `move_4` | hub | `97ee2d5d7c577631f970451c3cdddd343d1d6d4a582612561fa8aae6c59f851c` |
+| 219 | `disprove_cell_occupied_0` | user | `e04a90df5bab8aadb49c2cde28921c372b8d278f3ca799a6cc93c646297a6c04` |
 
 <details><summary>narrative</summary>
 
 ```
 --- venue ---
-[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 742 pre-signed transactions
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
 [world @ 205 / slot 0] user publishes move 1: cell 4
 [world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
 [world @ 206 / slot 1] hub publishes move 2: cell 1
@@ -2622,29 +2599,25 @@ block 229: r2/split_3_UserWins 1314a60a5f739fa61328e4220e9c78e53ad7adc5a743d18d5
 [world @ 209 / slot 5] slot 5 mined EMPTY
 [world @ 210 / slot 5] hub claims its INVALID move 4 on-chain as a timeout of user
 --- on-chain ---
-block 204: funding e935be90b4059aad63ac163cd1f4c209a9d060f970cb48556b5316ccdb74ae95 (harness) 203 vB / 812 WU
-block 212: commitment_1 21945562e4f420e2e58c9e21ca11ec08ce0b0fd10dd5f2b5b4a203447b186cf0 (hub) 240 vB / 958 WU
-block 213: claim_to_remote 0008a2579e90904626b67f3b1184d290a1403fa077bc31c62c61023b87ff0d64 (user) 129 vB / 513 WU
-block 218: claim_to_local d1581523631ea96a80b47896480077bf93d071f2f11e941f2074f5691ce1677f (hub) 137 vB / 548 WU
-block 218: move_4 309e53cb71dbf7395faa24629feae18229c245c962b10797570495a0c82ece10 (hub) 4267 vB / 17067 WU
-block 219: disprove_cell_occupied_0 45ae20e99b26fdb1fbefb6d006f5be37ee21a404d7061651495f517d760d8939 (user) 288 vB / 1150 WU
+block 204: funding 9501bb57c2bd61dfc9feb3cb653c19d7f5ccca847ba5448e8c838d70ce24a22c (harness) 203 vB / 812 WU
+block 212: commitment_1 69ac6546d0c60062f3b0e9294f8cbf737ba3b49a0ba81307579cfeeba37a2d4c (hub) 240 vB / 958 WU
+block 213: claim_to_remote 63df35bb024524517f253b3a9c58c2c0dfe3b6772d5a2b9e7d555e631425f501 (user) 129 vB / 513 WU
+block 218: claim_to_local 442ab256ac25fc748fcb0247ba374cd394f7b0a63be99f3d0455d0e3c2b19a38 (hub) 137 vB / 548 WU
+block 218: move_4 97ee2d5d7c577631f970451c3cdddd343d1d6d4a582612561fa8aae6c59f851c (hub) 4498 vB / 17989 WU
+block 219: disprove_cell_occupied_0 e04a90df5bab8aadb49c2cde28921c372b8d278f3ca799a6cc93c646297a6c04 (user) 288 vB / 1150 WU
 --- user ---
-[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [user @ 204] state 1 signed by both
-[user @ 206] learned statement c30/s1/d2/state
-[user @ 208] learned statement c30/s1/d4/state
 [user @ 212] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [user @ 212] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [user @ 218] contract 30: move_4 by hub confirmed: move cell 0, claimed state OO./.X./... turn=user open, claimed outcome HubWins
-[user @ 218] contract 30: claimed end state 1b14bab1.. is correct
+[user @ 218] contract 30: claimed end state cf499759.. is correct
 [user @ 218] contract 30: counterparty's move_4 is INVALID (invalid move: invalid move: cell 0 occupied); disproving
 [user @ 218] contract 30: broadcast disprove_cell_occupied_0 taking 0.00128000 BTC sats
-[user @ 219] contract 30 resolved by disprove_cell_occupied_0 (45ae20e99b26fdb1fbefb6d006f5be37ee21a404d7061651495f517d760d8939)
+[user @ 219] contract 30 resolved by disprove_cell_occupied_0 (e04a90df5bab8aadb49c2cde28921c372b8d278f3ca799a6cc93c646297a6c04)
 --- hub ---
-[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [hub @ 204] state 1 signed by both
-[hub @ 205] learned statement c30/s1/d1/state
-[hub @ 207] learned statement c30/s1/d3/state
 [hub @ 210] contract 30: will claim on-chain at depth 4 (21 bits of prior, move 0010)
 [hub @ 211] contract 30: force-closing to claim on-chain at depth 4
 [hub @ 212] my commitment for state 1 confirmed with 1 contract output(s)
@@ -2652,8 +2625,8 @@ block 219: disprove_cell_occupied_0 45ae20e99b26fdb1fbefb6d006f5be37ee21a404d706
 [hub @ 217] contract 30: CHEATING in move_4: claiming move cell 0 state OO./.X./... turn=user open code 1
 [hub @ 217] contract 30: broadcasting move_4: cell 0 -> state OO./.X./... turn=user open, outcome code 1
 [hub @ 218] contract 30: move_4 by hub confirmed: move cell 0, claimed state OO./.X./... turn=user open, claimed outcome HubWins
-[hub @ 218] contract 30: claimed end state 1b14bab1.. is correct
-[hub @ 219] contract 30 resolved by disprove_cell_occupied_0 (45ae20e99b26fdb1fbefb6d006f5be37ee21a404d7061651495f517d760d8939)
+[hub @ 218] contract 30: claimed end state cf499759.. is correct
+[hub @ 219] contract 30 resolved by disprove_cell_occupied_0 (e04a90df5bab8aadb49c2cde28921c372b8d278f3ca799a6cc93c646297a6c04)
 ```
 </details>
 
@@ -2661,37 +2634,41 @@ block 219: disprove_cell_occupied_0 45ae20e99b26fdb1fbefb6d006f5be37ee21a404d706
 
 **Expected:** the hub claims a move it never published; the user disputes; the bisection isolates the root_ok step and disproves it
 
-**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 147000 sat, hub 33000 sat
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 143000 sat, hub 33000 sat
 
 | block | tx | broadcast by | txid |
 |---|---|---|---|
-| 204 | `funding` | harness | `3b557a523ed93dd485db2945da4cdfaa8d618e7263516bdb76993902b24cbf9e` |
-| 212 | `commitment_1` | hub | `8353d9c772935f087b8ecac178de4c14f8cae94091f22d385b6d9c5eed59cf4b` |
-| 213 | `claim_to_remote` | user | `578054f65c95740f0988daf6c4b1786234252db483d49910b55cd1b9e0312538` |
-| 218 | `claim_to_local` | hub | `144ba95c1621da89d715fbb16086f0384efd58e3d3c5b6d5ddb86db4706ff9a8` |
-| 218 | `move_4` | hub | `13e7cd0dc45c6a33e81bbac5bb17ff3e4ebecdb22e0e4306dcd4ddcbf408cdf9` |
-| 219 | `d4/dispute` | user | `0a8e374d6ed737453f4e0b80e4b480c938c56d9d2989a6b632e5a53b1d227860` |
-| 220 | `p_round_1` | hub | `a9400db12b750dc0c4459935c7bd65ffb91fcbb1ab2bd0edd3729050a3a0b4af` |
-| 221 | `q_round_1` | user | `2a0cf482a2d8fff4dfcf91b286a69e0340b33dc79730498d84aa47df2f1568d0` |
-| 222 | `p_round_2` | hub | `3c5306fd3eee0ac214ef3b8207ec49ccf5130296c45220e2ebdec5fcc146cebf` |
-| 223 | `q_round_2` | user | `5873e118bf14421dbf42e78e9893a1ca5915b0e5fabccfa80c4768f1c79854e3` |
-| 224 | `p_round_3` | hub | `942c9d868e171676ff7a30ba224a69e217274359d581be3467e1eec459f85221` |
-| 225 | `q_round_3` | user | `51d039f267374e419311e37c0082fa34f3094367aa2b4c21555ff05899b8f633` |
-| 226 | `p_round_4` | hub | `b0d0d191855a80516549c482fabbcf0e524813f144feffb293e4256f9dac1c4b` |
-| 227 | `q_round_4` | user | `3c3d7349dc25719eb4c350c8ca52e954985c55e901923f5f169faa5410215ce3` |
-| 228 | `p_round_5` | hub | `e16f7d4dadf2edeb44e66ce88cd9cc380988a82fd620cbf5ad1cd4d7fa4f6a94` |
-| 229 | `q_round_5` | user | `0754d9bf99e054732857e72828fedd3513eb1ef8d3f2b4d55198e434cd8cf066` |
-| 230 | `p_round_6` | hub | `11f33ec0d32ec95770c8439ec7e54c3165d8dcf9d6432b7d975d758314721b05` |
-| 231 | `q_round_6_check` | user | `f37068ffba7ef29ce8e98641b81609c5377fea645679ee8cbd0509c65b3b698c` |
-| 232 | `c_re_cur` | hub | `80702d5a99d1a33b525e1d72d3109e06b14340b3fe0b1044f0a65f1c084b4359` |
-| 233 | `c_re_next` | hub | `9a6e297dc92282cf42c0cf80eca4dae7f06fcde708861de8e908c360d2acfb40` |
-| 234 | `simple_root_ok_38798320` | user | `61751e12b7d7ab562962833017b6e15fd8cac73c3880e92a05f872a4bcd7935e` |
+| 204 | `funding` | harness | `8597d0a208762ee2c276a0774de2529097070acbc47439029db9541bcd7bdd8e` |
+| 212 | `commitment_1` | hub | `c44b114924c95c43865b48563e085c5eee8629bd7a24a01a671920395198f67a` |
+| 213 | `claim_to_remote` | user | `9de6b043d10e4894c89c4089dd73406a557514001e9f7ff0060dfe499cc77d03` |
+| 218 | `claim_to_local` | hub | `6d8edb29ca5900372e9f4779d79c1fcf16bebf22c7e9fb6d1f9cf451b94fd7f3` |
+| 218 | `move_4` | hub | `989979e425931f9f6c99690e2af10a89b3f2bf427adf801507ff3c609245faec` |
+| 219 | `d4/dispute` | user | `ba77d48825f8a2353f1d73425f0522e424bdb1e9f007e189513e26b23cc103e7` |
+| 220 | `p_round_1` | hub | `a4cbcba99efee8868072a719b12fcf75f4ff1dea7f78cd130e3b8b7f86948979` |
+| 221 | `q_round_1` | user | `7d94e4f79ca26015035ee8f101fcce11c99cd4dd4ff9950070c510c1274e3e1e` |
+| 222 | `p_round_2` | hub | `aada867df1727a7a68e2d43722e1890fb0ae894736d65f800745fcff9c16a988` |
+| 223 | `q_round_2` | user | `59c0c0ed87e9eace4bb39a13e4ca1d6f22be8fe38e47caf08211d5d977165343` |
+| 224 | `p_round_3` | hub | `6ddd5e2e5be45763d19a0b58b190bc7324bff9199cf66f79950968a5a9c33d1c` |
+| 225 | `q_round_3` | user | `6148cd168227c8b1a279d95ec303fc10de1f9c609c44a7bb275acdbe321f99db` |
+| 226 | `p_round_4` | hub | `c05877dc434f499fef67a592e5e931fd10a2fd5aaa4afa27be6268551089746e` |
+| 227 | `q_round_4` | user | `0ae2d98bc4a99652ff019d649c0e718f7fd975eb6050e8580b50511d0be1c0bc` |
+| 228 | `p_round_5` | hub | `4ee5d74a03d60ef2034c91d9760f44368a202370deb273572c22ef88c8645545` |
+| 229 | `q_round_5` | user | `6a1c37412ace711c07a1e81e2c360b0f66afe6c5f2d529edd4275585235e3d9d` |
+| 230 | `p_round_6` | hub | `8af103096f171f50461d845d9f4dbe9dbdcf71b95bde3c6055001ba8aa5db35e` |
+| 231 | `q_round_6` | user | `c682480555051fd6d4cee0536c42ceda95e98e842421dbcac69a0c5f158b3371` |
+| 232 | `p_round_7` | hub | `ed618c3bda233aaea7995bfcaa58da90f92aad26a9c54b5615afccbbf67c6d30` |
+| 233 | `q_round_7` | user | `6f5e96b3451bacb02bc0e43d4ec6fae6324252bcd5cbd5a13301613215456b46` |
+| 234 | `p_round_8` | hub | `8ab4b8d6a781729e98f9bb7ea4bb0ae8d36f7f82049b961af4f944aab84426a1` |
+| 235 | `q_round_8_check` | user | `8b3e728c071dd2ba6938c7180bb83cb2930fd37c0257315b54dceb50a414bef7` |
+| 236 | `c_re_cur` | hub | `baf8b3e9b6b9798c2da3050e48d70d472195f0335042db2c9b6b63845b26aafc` |
+| 237 | `c_re_next` | hub | `96df0e5692429a43de2d7a1b9eac319f1c6d85b71758b0f6ff8b4527794f910c` |
+| 238 | `simple_ent_root_1b3e22b3` | user | `20475a9a13d15c8c146ecccd9e9662238ad4cb2b29b9d819e709e93c12c4ca2b` |
 
 <details><summary>narrative</summary>
 
 ```
 --- venue ---
-[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 742 pre-signed transactions
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
 [world @ 205 / slot 0] user publishes move 1: cell 4
 [world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
 [world @ 206 / slot 1] hub publishes move 2: cell 1
@@ -2704,98 +2681,337 @@ block 219: disprove_cell_occupied_0 45ae20e99b26fdb1fbefb6d006f5be37ee21a404d706
 [world @ 210 / slot 5] hub serves FABRICATED inclusion data for slot 4 (the block is empty)
 [world @ 210 / slot 5] hub claims move 4 on-chain although it never published it
 --- on-chain ---
-block 204: funding 3b557a523ed93dd485db2945da4cdfaa8d618e7263516bdb76993902b24cbf9e (harness) 203 vB / 812 WU
-block 212: commitment_1 8353d9c772935f087b8ecac178de4c14f8cae94091f22d385b6d9c5eed59cf4b (hub) 240 vB / 958 WU
-block 213: claim_to_remote 578054f65c95740f0988daf6c4b1786234252db483d49910b55cd1b9e0312538 (user) 129 vB / 513 WU
-block 218: claim_to_local 144ba95c1621da89d715fbb16086f0384efd58e3d3c5b6d5ddb86db4706ff9a8 (hub) 137 vB / 548 WU
-block 218: move_4 13e7cd0dc45c6a33e81bbac5bb17ff3e4ebecdb22e0e4306dcd4ddcbf408cdf9 (hub) 4274 vB / 17096 WU
-block 219: d4/dispute 0a8e374d6ed737453f4e0b80e4b480c938c56d9d2989a6b632e5a53b1d227860 (user) 194 vB / 774 WU
-block 220: p_round_1 a9400db12b750dc0c4459935c7bd65ffb91fcbb1ab2bd0edd3729050a3a0b4af (hub) 3324 vB / 13293 WU
-block 221: q_round_1 2a0cf482a2d8fff4dfcf91b286a69e0340b33dc79730498d84aa47df2f1568d0 (user) 181 vB / 721 WU
-block 222: p_round_2 3c5306fd3eee0ac214ef3b8207ec49ccf5130296c45220e2ebdec5fcc146cebf (hub) 3324 vB / 13294 WU
-block 223: q_round_2 5873e118bf14421dbf42e78e9893a1ca5915b0e5fabccfa80c4768f1c79854e3 (user) 181 vB / 721 WU
-block 224: p_round_3 942c9d868e171676ff7a30ba224a69e217274359d581be3467e1eec459f85221 (hub) 3324 vB / 13294 WU
-block 225: q_round_3 51d039f267374e419311e37c0082fa34f3094367aa2b4c21555ff05899b8f633 (user) 181 vB / 721 WU
-block 226: p_round_4 b0d0d191855a80516549c482fabbcf0e524813f144feffb293e4256f9dac1c4b (hub) 3324 vB / 13294 WU
-block 227: q_round_4 3c3d7349dc25719eb4c350c8ca52e954985c55e901923f5f169faa5410215ce3 (user) 181 vB / 721 WU
-block 228: p_round_5 e16f7d4dadf2edeb44e66ce88cd9cc380988a82fd620cbf5ad1cd4d7fa4f6a94 (hub) 3324 vB / 13294 WU
-block 229: q_round_5 0754d9bf99e054732857e72828fedd3513eb1ef8d3f2b4d55198e434cd8cf066 (user) 181 vB / 721 WU
-block 230: p_round_6 11f33ec0d32ec95770c8439ec7e54c3165d8dcf9d6432b7d975d758314721b05 (hub) 3324 vB / 13294 WU
-block 231: q_round_6_check f37068ffba7ef29ce8e98641b81609c5377fea645679ee8cbd0509c65b3b698c (user) 181 vB / 722 WU
-block 232: c_re_cur 80702d5a99d1a33b525e1d72d3109e06b14340b3fe0b1044f0a65f1c084b4359 (hub) 3324 vB / 13294 WU
-block 233: c_re_next 9a6e297dc92282cf42c0cf80eca4dae7f06fcde708861de8e908c360d2acfb40 (hub) 3324 vB / 13294 WU
-block 234: simple_root_ok_38798320 61751e12b7d7ab562962833017b6e15fd8cac73c3880e92a05f872a4bcd7935e (user) 6993 vB / 27972 WU
+block 204: funding 8597d0a208762ee2c276a0774de2529097070acbc47439029db9541bcd7bdd8e (harness) 203 vB / 812 WU
+block 212: commitment_1 c44b114924c95c43865b48563e085c5eee8629bd7a24a01a671920395198f67a (hub) 240 vB / 958 WU
+block 213: claim_to_remote 9de6b043d10e4894c89c4089dd73406a557514001e9f7ff0060dfe499cc77d03 (user) 129 vB / 513 WU
+block 218: claim_to_local 6d8edb29ca5900372e9f4779d79c1fcf16bebf22c7e9fb6d1f9cf451b94fd7f3 (hub) 137 vB / 548 WU
+block 218: move_4 989979e425931f9f6c99690e2af10a89b3f2bf427adf801507ff3c609245faec (hub) 4490 vB / 17958 WU
+block 219: d4/dispute ba77d48825f8a2353f1d73425f0522e424bdb1e9f007e189513e26b23cc103e7 (user) 194 vB / 774 WU
+block 220: p_round_1 a4cbcba99efee8868072a719b12fcf75f4ff1dea7f78cd130e3b8b7f86948979 (hub) 3516 vB / 14063 WU
+block 221: q_round_1 7d94e4f79ca26015035ee8f101fcce11c99cd4dd4ff9950070c510c1274e3e1e (user) 181 vB / 721 WU
+block 222: p_round_2 aada867df1727a7a68e2d43722e1890fb0ae894736d65f800745fcff9c16a988 (hub) 3516 vB / 14064 WU
+block 223: q_round_2 59c0c0ed87e9eace4bb39a13e4ca1d6f22be8fe38e47caf08211d5d977165343 (user) 181 vB / 721 WU
+block 224: p_round_3 6ddd5e2e5be45763d19a0b58b190bc7324bff9199cf66f79950968a5a9c33d1c (hub) 3516 vB / 14062 WU
+block 225: q_round_3 6148cd168227c8b1a279d95ec303fc10de1f9c609c44a7bb275acdbe321f99db (user) 181 vB / 721 WU
+block 226: p_round_4 c05877dc434f499fef67a592e5e931fd10a2fd5aaa4afa27be6268551089746e (hub) 3516 vB / 14064 WU
+block 227: q_round_4 0ae2d98bc4a99652ff019d649c0e718f7fd975eb6050e8580b50511d0be1c0bc (user) 181 vB / 721 WU
+block 228: p_round_5 4ee5d74a03d60ef2034c91d9760f44368a202370deb273572c22ef88c8645545 (hub) 3516 vB / 14064 WU
+block 229: q_round_5 6a1c37412ace711c07a1e81e2c360b0f66afe6c5f2d529edd4275585235e3d9d (user) 181 vB / 721 WU
+block 230: p_round_6 8af103096f171f50461d845d9f4dbe9dbdcf71b95bde3c6055001ba8aa5db35e (hub) 3516 vB / 14064 WU
+block 231: q_round_6 c682480555051fd6d4cee0536c42ceda95e98e842421dbcac69a0c5f158b3371 (user) 181 vB / 721 WU
+block 232: p_round_7 ed618c3bda233aaea7995bfcaa58da90f92aad26a9c54b5615afccbbf67c6d30 (hub) 3516 vB / 14062 WU
+block 233: q_round_7 6f5e96b3451bacb02bc0e43d4ec6fae6324252bcd5cbd5a13301613215456b46 (user) 181 vB / 721 WU
+block 234: p_round_8 8ab4b8d6a781729e98f9bb7ea4bb0ae8d36f7f82049b961af4f944aab84426a1 (hub) 3516 vB / 14064 WU
+block 235: q_round_8_check 8b3e728c071dd2ba6938c7180bb83cb2930fd37c0257315b54dceb50a414bef7 (user) 181 vB / 722 WU
+block 236: c_re_cur baf8b3e9b6b9798c2da3050e48d70d472195f0335042db2c9b6b63845b26aafc (hub) 3516 vB / 14064 WU
+block 237: c_re_next 96df0e5692429a43de2d7a1b9eac319f1c6d85b71758b0f6ff8b4527794f910c (hub) 3516 vB / 14064 WU
+block 238: simple_ent_root_1b3e22b3 20475a9a13d15c8c146ecccd9e9662238ad4cb2b29b9d819e709e93c12c4ca2b (user) 7410 vB / 29640 WU
 --- user ---
-[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [user @ 204] state 1 signed by both
-[user @ 206] learned statement c30/s1/d2/state
 [user @ 212] counterparty's commitment for state 1 confirmed with 1 contract output(s)
 [user @ 212] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [user @ 218] contract 30: move_4 by hub confirmed: move cell 8, claimed state XO./.X./..O turn=user open, claimed outcome HubWins
-[user @ 218] contract 30: claimed end state a64d81b0.. is correct; a predicate of the claim FAILS
+[user @ 218] contract 30: claimed end state 5dc62563.. is correct; a predicate of the claim FAILS
 [user @ 218] contract 30: disputing the claim
 [user @ 219] contract 30: dispute opened at depth 4; waiting for the prover's round 1
 [user @ 220] contract 30: prover's round 1 commitments confirmed
 [user @ 220] contract 30: round 1: first bad segment is 1
-[user @ 221] contract 30: challenger picked segment 1 in round 1: steps 32..64
+[user @ 221] contract 30: challenger picked segment 1 in round 1: steps 128..256
 [user @ 222] contract 30: prover's round 2 commitments confirmed
 [user @ 222] contract 30: round 2: first bad segment is 0
-[user @ 223] contract 30: challenger picked segment 0 in round 2: steps 32..48
+[user @ 223] contract 30: challenger picked segment 0 in round 2: steps 128..192
 [user @ 224] contract 30: prover's round 3 commitments confirmed
-[user @ 224] contract 30: round 3: first bad segment is 0
-[user @ 225] contract 30: challenger picked segment 0 in round 3: steps 32..40
+[user @ 224] contract 30: round 3: first bad segment is 1
+[user @ 225] contract 30: challenger picked segment 1 in round 3: steps 160..192
 [user @ 226] contract 30: prover's round 4 commitments confirmed
-[user @ 226] contract 30: round 4: first bad segment is 1
-[user @ 227] contract 30: challenger picked segment 1 in round 4: steps 36..40
+[user @ 226] contract 30: round 4: first bad segment is 0
+[user @ 227] contract 30: challenger picked segment 0 in round 4: steps 160..176
 [user @ 228] contract 30: prover's round 5 commitments confirmed
 [user @ 228] contract 30: round 5: first bad segment is 0
-[user @ 229] contract 30: challenger picked segment 0 in round 5: steps 36..38
+[user @ 229] contract 30: challenger picked segment 0 in round 5: steps 160..168
 [user @ 230] contract 30: prover's round 6 commitments confirmed
-[user @ 230] contract 30: round 6: first bad segment is 1
-[user @ 231] contract 30: challenger picked segment 1 in round 6: steps 37..38
-[user @ 231] contract 30: isolated step 37 is root_ok
-[user @ 232] contract 30: prover re-committed the step's input state
-[user @ 233] contract 30: prover re-committed the step's output state
-[user @ 233] contract 30: step 37 (root_ok) is wrong
-[user @ 233] contract 30: broadcasting simple_root_ok_38798320 (27594 B witness, 6993 vB)
-[user @ 234] contract 30: disproved by simple_root_ok_38798320 (61751e12b7d7ab562962833017b6e15fd8cac73c3880e92a05f872a4bcd7935e)
+[user @ 230] contract 30: round 6: first bad segment is 0
+[user @ 231] contract 30: challenger picked segment 0 in round 6: steps 160..164
+[user @ 232] contract 30: prover's round 7 commitments confirmed
+[user @ 232] contract 30: round 7: first bad segment is 1
+[user @ 233] contract 30: challenger picked segment 1 in round 7: steps 162..164
+[user @ 234] contract 30: prover's round 8 commitments confirmed
+[user @ 234] contract 30: round 8: first bad segment is 1
+[user @ 235] contract 30: challenger picked segment 1 in round 8: steps 163..164
+[user @ 235] contract 30: isolated step 163 is ent_root
+[user @ 236] contract 30: prover re-committed the step's input state
+[user @ 237] contract 30: prover re-committed the step's output state
+[user @ 237] contract 30: step 163 (ent_root) is wrong
+[user @ 237] contract 30: broadcasting simple_ent_root_1b3e22b3 (29262 B witness, 7410 vB)
+[user @ 238] contract 30: disproved by simple_ent_root_1b3e22b3 (20475a9a13d15c8c146ecccd9e9662238ad4cb2b29b9d819e709e93c12c4ca2b)
 --- hub ---
-[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[3,177,86,69,169,216,123,232,99,242,39,34,26,204,71,128,16,193,218,2],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
 [hub @ 204] state 1 signed by both
-[hub @ 205] learned statement c30/s1/d1/state
-[hub @ 207] learned statement c30/s1/d3/state
 [hub @ 210] contract 30: will claim on-chain at depth 4 (21 bits of prior, move 1000)
 [hub @ 211] contract 30: force-closing to claim on-chain at depth 4
 [hub @ 212] my commitment for state 1 confirmed with 1 contract output(s)
 [hub @ 212] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
 [hub @ 217] contract 30: broadcasting move_4: cell 8 -> state XO./.X./..O turn=user open, outcome code 1
 [hub @ 218] contract 30: move_4 by hub confirmed: move cell 8, claimed state XO./.X./..O turn=user open, claimed outcome HubWins
-[hub @ 218] contract 30: claimed end state a64d81b0.. is correct; a predicate of the claim FAILS
+[hub @ 218] contract 30: claimed end state 5dc62563.. is correct; a predicate of the claim FAILS
 [hub @ 219] contract 30: dispute opened at depth 4; waiting for the prover's round 1
-[hub @ 219] contract 30: answering dispute round 1 with states at steps [32]
+[hub @ 219] contract 30: answering dispute round 1 with states at steps [128]
 [hub @ 220] contract 30: prover's round 1 commitments confirmed
-[hub @ 221] contract 30: challenger picked segment 1 in round 1: steps 32..64
-[hub @ 221] contract 30: answering dispute round 2 with states at steps [48]
+[hub @ 221] contract 30: challenger picked segment 1 in round 1: steps 128..256
+[hub @ 221] contract 30: answering dispute round 2 with states at steps [192]
 [hub @ 222] contract 30: prover's round 2 commitments confirmed
-[hub @ 223] contract 30: challenger picked segment 0 in round 2: steps 32..48
-[hub @ 223] contract 30: answering dispute round 3 with states at steps [40]
+[hub @ 223] contract 30: challenger picked segment 0 in round 2: steps 128..192
+[hub @ 223] contract 30: answering dispute round 3 with states at steps [160]
 [hub @ 224] contract 30: prover's round 3 commitments confirmed
-[hub @ 225] contract 30: challenger picked segment 0 in round 3: steps 32..40
-[hub @ 225] contract 30: answering dispute round 4 with states at steps [36]
+[hub @ 225] contract 30: challenger picked segment 1 in round 3: steps 160..192
+[hub @ 225] contract 30: answering dispute round 4 with states at steps [176]
 [hub @ 226] contract 30: prover's round 4 commitments confirmed
-[hub @ 227] contract 30: challenger picked segment 1 in round 4: steps 36..40
-[hub @ 227] contract 30: answering dispute round 5 with states at steps [38]
+[hub @ 227] contract 30: challenger picked segment 0 in round 4: steps 160..176
+[hub @ 227] contract 30: answering dispute round 5 with states at steps [168]
 [hub @ 228] contract 30: prover's round 5 commitments confirmed
-[hub @ 229] contract 30: challenger picked segment 0 in round 5: steps 36..38
-[hub @ 229] contract 30: answering dispute round 6 with states at steps [37]
+[hub @ 229] contract 30: challenger picked segment 0 in round 5: steps 160..168
+[hub @ 229] contract 30: answering dispute round 6 with states at steps [164]
 [hub @ 230] contract 30: prover's round 6 commitments confirmed
-[hub @ 231] contract 30: challenger picked segment 1 in round 6: steps 37..38
-[hub @ 231] contract 30: isolated step 37 is root_ok
-[hub @ 231] contract 30: re-committing the input state of step 37
-[hub @ 232] contract 30: prover re-committed the step's input state
-[hub @ 232] contract 30: re-committing the output state of step 37
-[hub @ 233] contract 30: prover re-committed the step's output state
-[hub @ 234] contract 30: disproved by simple_root_ok_38798320 (61751e12b7d7ab562962833017b6e15fd8cac73c3880e92a05f872a4bcd7935e)
+[hub @ 231] contract 30: challenger picked segment 0 in round 6: steps 160..164
+[hub @ 231] contract 30: answering dispute round 7 with states at steps [162]
+[hub @ 232] contract 30: prover's round 7 commitments confirmed
+[hub @ 233] contract 30: challenger picked segment 1 in round 7: steps 162..164
+[hub @ 233] contract 30: answering dispute round 8 with states at steps [163]
+[hub @ 234] contract 30: prover's round 8 commitments confirmed
+[hub @ 235] contract 30: challenger picked segment 1 in round 8: steps 163..164
+[hub @ 235] contract 30: isolated step 163 is ent_root
+[hub @ 235] contract 30: re-committing the input state of step 163
+[hub @ 236] contract 30: prover re-committed the step's input state
+[hub @ 236] contract 30: re-committing the output state of step 163
+[hub @ 237] contract 30: prover re-committed the step's output state
+[hub @ 238] contract 30: disproved by simple_ent_root_1b3e22b3 (20475a9a13d15c8c146ecccd9e9662238ad4cb2b29b9d819e709e93c12c4ca2b)
+```
+</details>
+
+## G7 — A garbage-signed move is a stall
+
+**Expected:** the hub publishes move 4 with garbage in place of its signature and stalls; the user's timeout claim at depth 3 cannot be answered: commitment, move_3, split_3_UserWins
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 161000 sat, hub 34000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `29bf770201d850eb91fd8178568973123813939eddec2bf7bf35ebad1561513b` |
+| 211 | `commitment_1` | user | `49ac65fee108be94d837a80d0103fb08921712e2dfafff40dcc598b580a1d3b9` |
+| 212 | `claim_to_remote` | hub | `967d5021e79e08684d80dd59cdc6b6e3629082f0b6d7c2448f9a56b467363401` |
+| 217 | `claim_to_local` | user | `5fcb031590631f1e5b38512b96cb8ee019bacb7d07cf5bdc7c346bddaa01e5c0` |
+| 217 | `move_3` | user | `60bc8981ceb9ed90c717c9666a875bc13e2e7d14a30bdab298a436d6a3a991c1` |
+| 229 | `split_3_UserWins` | user | `5bf195b0123803e975f69208750db542399763317e0544f325c47a510cf69e7f` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: cell 4
+[world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
+[world @ 206 / slot 1] hub publishes move 2: cell 1
+[world @ 206 / slot 2] slot 2 mined with hub's move (.O./.X./...); inclusion data served
+[world @ 207 / slot 2] user publishes move 3: cell 0
+[world @ 207 / slot 3] slot 3 mined with user's move (XO./.X./...); inclusion data served
+[world @ 208 / slot 3] hub publishes move 4 with a GARBAGE signature
+[world @ 208 / slot 4] slot 4 mined with hub's move (UNSIGNED); inclusion data served
+[world @ 209 / slot 4] user: hub did not publish a valid move 4; claiming a timeout at depth 3
+--- on-chain ---
+block 204: funding 29bf770201d850eb91fd8178568973123813939eddec2bf7bf35ebad1561513b (harness) 203 vB / 812 WU
+block 211: commitment_1 49ac65fee108be94d837a80d0103fb08921712e2dfafff40dcc598b580a1d3b9 (user) 240 vB / 958 WU
+block 212: claim_to_remote 967d5021e79e08684d80dd59cdc6b6e3629082f0b6d7c2448f9a56b467363401 (hub) 129 vB / 513 WU
+block 217: claim_to_local 5fcb031590631f1e5b38512b96cb8ee019bacb7d07cf5bdc7c346bddaa01e5c0 (user) 137 vB / 548 WU
+block 217: move_3 60bc8981ceb9ed90c717c9666a875bc13e2e7d14a30bdab298a436d6a3a991c1 (user) 4489 vB / 17953 WU
+block 229: split_3_UserWins 5bf195b0123803e975f69208750db542399763317e0544f325c47a510cf69e7f (user) 217 vB / 866 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] state 1 signed by both
+[user @ 209] contract 30: will claim on-chain at depth 3 (21 bits of prior, move 0000)
+[user @ 210] contract 30: force-closing to claim on-chain at depth 3
+[user @ 211] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 211] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
+[user @ 216] contract 30: broadcasting move_3: cell 0 -> state XO./.X./... turn=hub open, outcome code 0
+[user @ 217] contract 30: move_3 by user confirmed: move cell 0, claimed state XO./.X./... turn=hub open, claimed outcome UserWins
+[user @ 217] contract 30: claimed end state 453ac574.. is correct
+[user @ 228] contract 30: challenge window (12 blocks) after move_3 passed; broadcasting split_UserWins
+[user @ 229] contract 30 resolved by split_UserWins (5bf195b0123803e975f69208750db542399763317e0544f325c47a510cf69e7f)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] state 1 signed by both
+[hub @ 211] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 211] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
+[hub @ 217] contract 30: move_3 by user confirmed: move cell 0, claimed state XO./.X./... turn=hub open, claimed outcome UserWins
+[hub @ 217] contract 30: claimed end state 453ac574.. is correct
+[hub @ 217] contract 30: counterparty's move_3 is consistent with the program
+[hub @ 228] contract 30: challenge window (12 blocks) after move_3 passed; broadcasting split_UserWins
+[hub @ 229] contract 30 resolved by split_UserWins (5bf195b0123803e975f69208750db542399763317e0544f325c47a510cf69e7f)
+```
+</details>
+
+## G7B — A garbage-signed move cannot refute a timeout claim
+
+**Expected:** the hub answers the user's timeout claim with its garbage-signed move 4; the user disputes the inclusion claim and the bisection isolates the signature predicate (cpred)
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 141000 sat, hub 34000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `6b08e41ca82b666718ebb70fcceab54c309bebac4589884d808a6b2b9abc4223` |
+| 211 | `commitment_1` | user | `c16632a8887160df568fd52c4fdac34b5a6c464c8852cd163245306412c1cfc4` |
+| 212 | `claim_to_remote` | hub | `e4635cb0d705f46930a40e40765c6f3156d67ada6a16eef665e742485b6319c7` |
+| 217 | `claim_to_local` | user | `0ae5e0d1c2e07ae88828ac0647fb8442c278b38a8422272302b8fa28ca40e1d3` |
+| 217 | `move_3` | user | `6a3772d6b2c73f8e2e31d47bffe989e5e6e16ed72adf025d1d8b21a883684337` |
+| 218 | `move_4` | hub | `9f652d69892068dc83a434c25077336724d9b5e5a882a67c4df997f44535c494` |
+| 219 | `r3/d4/dispute` | user | `3652aed62af5deeb0f036dc101686e5200ac7060dbfc972b655a3be4ab02b220` |
+| 220 | `p_round_1` | hub | `06ead4b516390dd8dc6ca8b1aa11edf5b717168f27b8ffac7787f1c5d9e756bd` |
+| 221 | `q_round_1` | user | `0fc7b5992eb498a0c141e1b6056833a573c58cb98f0c2cc3b1de4454d2b8d6bc` |
+| 222 | `p_round_2` | hub | `11124731d0a5ecf1b711ea3c70216994e4180fe6a2ebbcfd358700064faa5c84` |
+| 223 | `q_round_2` | user | `865227f9037c38171b2466e9c8307098fc0b79a328136409560b49af7ab85eb1` |
+| 224 | `p_round_3` | hub | `18987441496ab1d4593addc299eb28166627f6e72cd70fd1f65d8c4eef3593ec` |
+| 225 | `q_round_3` | user | `629fbcb1234380e8b1e00761d89bf382f3813cb1fad367d430d9812e4247be0e` |
+| 226 | `p_round_4` | hub | `d1cf91b4b4fd68210e34eaaa34d6aff4e19cc1ee6bddef4cab2fe07cacb27335` |
+| 227 | `q_round_4` | user | `0c9ac5727e6988b1f335062ad3a102c4c7eb716a6a9c100ea864ce6ac5f6eaf2` |
+| 228 | `p_round_5` | hub | `38b489625211ccb5cc5609bb6b71a13432d678fb22d8cb98258827e8aee1a1b9` |
+| 229 | `q_round_5` | user | `a7d8fdd301eca3d12ef3577bb20a10b9741c8e170323a98e6f83113c3e55ffa7` |
+| 230 | `p_round_6` | hub | `2f2875518c1ffb7c91f60c60e287d6cea9d228f802c665048c64773acbfc1100` |
+| 231 | `q_round_6` | user | `982a38d81f2029764320afafc88416c9c1c65c06b444e0e5cdceb07ae832eaaf` |
+| 232 | `p_round_7` | hub | `8f447cb8141ca8effae649bfb435e3f0cdb21b804c40bcca97dc8baa342f6b92` |
+| 233 | `q_round_7` | user | `4698a22731173656612233fd34af365478b50329b0869b3b3a3b314d8209db49` |
+| 234 | `p_round_8` | hub | `17b5582b9e42fc236ce057b23c3c061d7a872e7b7a195801efac59c7bbbdae2d` |
+| 235 | `q_round_8` | user | `c56b1918062c6e533371b576df9063f4f8bcd43605a39ff50d871677f1980cff` |
+| 236 | `p_re_cur` | hub | `a7f4209caadb16b7ea1a4dfba4d8b1030dce57843c5d96c6bde2d140381da6d4` |
+| 237 | `p_re_next` | hub | `338691c561d3345aa217d406b9d5f734bbc3383bcdc7f26e26534827c203e510` |
+| 238 | `cpred_oe_s0a_90613fe0` | user | `33027db510a23de3cfbbf16eebec90ec97535c45165b07fe0ed4d913ce5c0a1d` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] game 1 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 235, 882 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: cell 4
+[world @ 205 / slot 1] slot 1 mined with user's move (.../.X./...); inclusion data served
+[world @ 206 / slot 1] hub publishes move 2: cell 1
+[world @ 206 / slot 2] slot 2 mined with hub's move (.O./.X./...); inclusion data served
+[world @ 207 / slot 2] user publishes move 3: cell 0
+[world @ 207 / slot 3] slot 3 mined with user's move (XO./.X./...); inclusion data served
+[world @ 208 / slot 3] hub publishes move 4 with a GARBAGE signature
+[world @ 208 / slot 4] slot 4 mined with hub's move (UNSIGNED); inclusion data served
+[world @ 209 / slot 4] user: hub did not publish a valid move 4; claiming a timeout at depth 3
+--- on-chain ---
+block 204: funding 6b08e41ca82b666718ebb70fcceab54c309bebac4589884d808a6b2b9abc4223 (harness) 203 vB / 812 WU
+block 211: commitment_1 c16632a8887160df568fd52c4fdac34b5a6c464c8852cd163245306412c1cfc4 (user) 240 vB / 958 WU
+block 212: claim_to_remote e4635cb0d705f46930a40e40765c6f3156d67ada6a16eef665e742485b6319c7 (hub) 129 vB / 513 WU
+block 217: claim_to_local 0ae5e0d1c2e07ae88828ac0647fb8442c278b38a8422272302b8fa28ca40e1d3 (user) 137 vB / 548 WU
+block 217: move_3 6a3772d6b2c73f8e2e31d47bffe989e5e6e16ed72adf025d1d8b21a883684337 (user) 4497 vB / 17988 WU
+block 218: move_4 9f652d69892068dc83a434c25077336724d9b5e5a882a67c4df997f44535c494 (hub) 4504 vB / 18016 WU
+block 219: r3/d4/dispute 3652aed62af5deeb0f036dc101686e5200ac7060dbfc972b655a3be4ab02b220 (user) 186 vB / 742 WU
+block 220: p_round_1 06ead4b516390dd8dc6ca8b1aa11edf5b717168f27b8ffac7787f1c5d9e756bd (hub) 3516 vB / 14063 WU
+block 221: q_round_1 0fc7b5992eb498a0c141e1b6056833a573c58cb98f0c2cc3b1de4454d2b8d6bc (user) 181 vB / 721 WU
+block 222: p_round_2 11124731d0a5ecf1b711ea3c70216994e4180fe6a2ebbcfd358700064faa5c84 (hub) 3515 vB / 14060 WU
+block 223: q_round_2 865227f9037c38171b2466e9c8307098fc0b79a328136409560b49af7ab85eb1 (user) 181 vB / 721 WU
+block 224: p_round_3 18987441496ab1d4593addc299eb28166627f6e72cd70fd1f65d8c4eef3593ec (hub) 3515 vB / 14057 WU
+block 225: q_round_3 629fbcb1234380e8b1e00761d89bf382f3813cb1fad367d430d9812e4247be0e (user) 181 vB / 721 WU
+block 226: p_round_4 d1cf91b4b4fd68210e34eaaa34d6aff4e19cc1ee6bddef4cab2fe07cacb27335 (hub) 3516 vB / 14063 WU
+block 227: q_round_4 0c9ac5727e6988b1f335062ad3a102c4c7eb716a6a9c100ea864ce6ac5f6eaf2 (user) 181 vB / 721 WU
+block 228: p_round_5 38b489625211ccb5cc5609bb6b71a13432d678fb22d8cb98258827e8aee1a1b9 (hub) 3516 vB / 14062 WU
+block 229: q_round_5 a7d8fdd301eca3d12ef3577bb20a10b9741c8e170323a98e6f83113c3e55ffa7 (user) 181 vB / 721 WU
+block 230: p_round_6 2f2875518c1ffb7c91f60c60e287d6cea9d228f802c665048c64773acbfc1100 (hub) 3515 vB / 14060 WU
+block 231: q_round_6 982a38d81f2029764320afafc88416c9c1c65c06b444e0e5cdceb07ae832eaaf (user) 181 vB / 721 WU
+block 232: p_round_7 8f447cb8141ca8effae649bfb435e3f0cdb21b804c40bcca97dc8baa342f6b92 (hub) 3515 vB / 14059 WU
+block 233: q_round_7 4698a22731173656612233fd34af365478b50329b0869b3b3a3b314d8209db49 (user) 181 vB / 721 WU
+block 234: p_round_8 17b5582b9e42fc236ce057b23c3c061d7a872e7b7a195801efac59c7bbbdae2d (hub) 3516 vB / 14061 WU
+block 235: q_round_8 c56b1918062c6e533371b576df9063f4f8bcd43605a39ff50d871677f1980cff (user) 189 vB / 753 WU
+block 236: p_re_cur a7f4209caadb16b7ea1a4dfba4d8b1030dce57843c5d96c6bde2d140381da6d4 (hub) 4002 vB / 16007 WU
+block 237: p_re_next 338691c561d3345aa217d406b9d5f734bbc3383bcdc7f26e26534827c203e510 (hub) 3515 vB / 14060 WU
+block 238: cpred_oe_s0a_90613fe0 33027db510a23de3cfbbf16eebec90ec97535c45165b07fe0ed4d913ce5c0a1d (user) 4164 vB / 16653 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[user @ 204] state 1 signed by both
+[user @ 209] contract 30: will claim on-chain at depth 3 (21 bits of prior, move 0000)
+[user @ 210] contract 30: force-closing to claim on-chain at depth 3
+[user @ 211] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 211] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
+[user @ 216] contract 30: broadcasting move_3: cell 0 -> state XO./.X./... turn=hub open, outcome code 0
+[user @ 217] contract 30: move_3 by user confirmed: move cell 0, claimed state XO./.X./... turn=hub open, claimed outcome UserWins
+[user @ 217] contract 30: claimed end state 23ba30bb.. is correct
+[user @ 218] contract 30: move_4 by hub confirmed: move cell 8, claimed state XO./.X./..O turn=user open, claimed outcome HubWins
+[user @ 218] contract 30: claimed end state 33e93a7b.. is correct; a predicate of the claim FAILS
+[user @ 218] contract 30: disputing the claim
+[user @ 219] contract 30: dispute opened at depth 4; waiting for the prover's round 1
+[user @ 220] contract 30: prover's round 1 commitments confirmed
+[user @ 220] contract 30: round 1: first bad segment is 0
+[user @ 221] contract 30: challenger picked segment 0 in round 1: steps 0..128
+[user @ 222] contract 30: prover's round 2 commitments confirmed
+[user @ 222] contract 30: round 2: first bad segment is 1
+[user @ 223] contract 30: challenger picked segment 1 in round 2: steps 64..128
+[user @ 224] contract 30: prover's round 3 commitments confirmed
+[user @ 224] contract 30: round 3: first bad segment is 1
+[user @ 225] contract 30: challenger picked segment 1 in round 3: steps 96..128
+[user @ 226] contract 30: prover's round 4 commitments confirmed
+[user @ 226] contract 30: round 4: first bad segment is 0
+[user @ 227] contract 30: challenger picked segment 0 in round 4: steps 96..112
+[user @ 228] contract 30: prover's round 5 commitments confirmed
+[user @ 228] contract 30: round 5: first bad segment is 0
+[user @ 229] contract 30: challenger picked segment 0 in round 5: steps 96..104
+[user @ 230] contract 30: prover's round 6 commitments confirmed
+[user @ 230] contract 30: round 6: first bad segment is 0
+[user @ 231] contract 30: challenger picked segment 0 in round 6: steps 96..100
+[user @ 232] contract 30: prover's round 7 commitments confirmed
+[user @ 232] contract 30: round 7: first bad segment is 1
+[user @ 233] contract 30: challenger picked segment 1 in round 7: steps 98..100
+[user @ 234] contract 30: prover's round 8 commitments confirmed
+[user @ 234] contract 30: round 8: first bad segment is 1
+[user @ 235] contract 30: challenger picked segment 1 in round 8: steps 99..100
+[user @ 235] contract 30: isolated step 99 is oe_s0a
+[user @ 236] contract 30: prover re-committed the step's input state and block words
+[user @ 237] contract 30: prover re-committed the step's output state
+[user @ 237] contract 30: a predicate of step 99 (oe_s0a) fails
+[user @ 237] contract 30: broadcasting cpred_oe_s0a_90613fe0 (16275 B witness, 4164 vB)
+[user @ 238] contract 30: dispute output spent by unknown leaf "cpred_oe_s0a_90613fe0"
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 30 (ttt-fc:{"game_id":1,"checkpoint":[4,191,110,119,19,79,239,237,31,35,254,173,122,109,135,84,30,74,57,101],"btc_open":204,"grace":1}) stakes 0.00065000 BTC/0.00065000 BTC deadline 235
+[hub @ 204] state 1 signed by both
+[hub @ 211] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 211] contract 30 on-chain at depth 0: state .../.../... turn=user open, turn Some(User), deadline 235
+[hub @ 217] contract 30: move_3 by user confirmed: move cell 0, claimed state XO./.X./... turn=hub open, claimed outcome UserWins
+[hub @ 217] contract 30: claimed end state 23ba30bb.. is correct
+[hub @ 217] contract 30: counterparty's move_3 is consistent with the program
+[hub @ 217] contract 30: broadcasting move_4: cell 8 -> state XO./.X./..O turn=user open, outcome code 1
+[hub @ 218] contract 30: move_4 by hub confirmed: move cell 8, claimed state XO./.X./..O turn=user open, claimed outcome HubWins
+[hub @ 218] contract 30: claimed end state 33e93a7b.. is correct; a predicate of the claim FAILS
+[hub @ 219] contract 30: dispute opened at depth 4; waiting for the prover's round 1
+[hub @ 219] contract 30: answering dispute round 1 with states at steps [128]
+[hub @ 220] contract 30: prover's round 1 commitments confirmed
+[hub @ 221] contract 30: challenger picked segment 0 in round 1: steps 0..128
+[hub @ 221] contract 30: answering dispute round 2 with states at steps [64]
+[hub @ 222] contract 30: prover's round 2 commitments confirmed
+[hub @ 223] contract 30: challenger picked segment 1 in round 2: steps 64..128
+[hub @ 223] contract 30: answering dispute round 3 with states at steps [96]
+[hub @ 224] contract 30: prover's round 3 commitments confirmed
+[hub @ 225] contract 30: challenger picked segment 1 in round 3: steps 96..128
+[hub @ 225] contract 30: answering dispute round 4 with states at steps [112]
+[hub @ 226] contract 30: prover's round 4 commitments confirmed
+[hub @ 227] contract 30: challenger picked segment 0 in round 4: steps 96..112
+[hub @ 227] contract 30: answering dispute round 5 with states at steps [104]
+[hub @ 228] contract 30: prover's round 5 commitments confirmed
+[hub @ 229] contract 30: challenger picked segment 0 in round 5: steps 96..104
+[hub @ 229] contract 30: answering dispute round 6 with states at steps [100]
+[hub @ 230] contract 30: prover's round 6 commitments confirmed
+[hub @ 231] contract 30: challenger picked segment 0 in round 6: steps 96..100
+[hub @ 231] contract 30: answering dispute round 7 with states at steps [98]
+[hub @ 232] contract 30: prover's round 7 commitments confirmed
+[hub @ 233] contract 30: challenger picked segment 1 in round 7: steps 98..100
+[hub @ 233] contract 30: answering dispute round 8 with states at steps [99]
+[hub @ 234] contract 30: prover's round 8 commitments confirmed
+[hub @ 235] contract 30: challenger picked segment 1 in round 8: steps 99..100
+[hub @ 235] contract 30: isolated step 99 is oe_s0a
+[hub @ 235] contract 30: re-committing the input state of step 99
+[hub @ 236] contract 30: prover re-committed the step's input state and block words
+[hub @ 236] contract 30: re-committing the output state of step 99
+[hub @ 237] contract 30: prover re-committed the step's output state
+[hub @ 238] contract 30: dispute output spent by unknown leaf "cpred_oe_s0a_90613fe0"
 ```
 </details>
 
