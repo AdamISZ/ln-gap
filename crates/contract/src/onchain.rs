@@ -12,6 +12,8 @@ use crate::{Program, CODE_BITS};
 /// The reveals carried by a Move witness (after the two signatures).
 #[derive(Clone, Debug)]
 pub struct MoveReveals {
+    /// The previous prover's state reveal, when the leaf carries it (star graphs).
+    pub prior: Option<Reveal>,
     pub mv: Reveal,
     pub state: Reveal,
     pub code: Reveal,
@@ -21,17 +23,21 @@ pub struct MoveReveals {
     pub claim_end: Option<lngap_lamport::winternitz::WotsSig>,
 }
 
-pub fn parse_move_witness(w: &Witness, n_move: usize, n_state: usize, extra_bits: &[usize], claim_end: Option<lngap_lamport::winternitz::WotsParams>) -> Result<MoveReveals> {
+pub fn parse_move_witness(w: &Witness, prior_bits: Option<usize>, n_move: usize, n_state: usize, extra_bits: &[usize], claim_end: Option<lngap_lamport::winternitz::WotsParams>) -> Result<MoveReveals> {
     let args = witness_args_consumption_order(w);
     let n_extra: usize = extra_bits.iter().sum();
     let n_end = claim_end.map(|p| 2 * p.total_digits() as usize).unwrap_or(0);
-    let expected = 2 + n_move + n_state + CODE_BITS + n_extra + n_end;
+    let expected = 2 + prior_bits.unwrap_or(0) + n_move + n_state + CODE_BITS + n_extra + n_end;
     ensure!(args.len() == expected, "move witness has {} args, expected {expected}", args.len());
     let mut at = 2;
     let mut take = |n: usize| -> Result<Reveal> {
         let r = Reveal::from_consumption_order(&args[at..at + n]);
         at += n;
         r
+    };
+    let prior = match prior_bits {
+        Some(n) => Some(take(n)?),
+        None => None,
     };
     let mv = take(n_move)?;
     let state = take(n_state)?;
@@ -44,7 +50,7 @@ pub fn parse_move_witness(w: &Witness, n_move: usize, n_state: usize, extra_bits
         Some(p) => Some(lngap_lamport::winternitz::WotsSig::from_consumption_order(p, &args[at..])?),
         None => None,
     };
-    Ok(MoveReveals { mv, state, code, extras, claim_end })
+    Ok(MoveReveals { prior, mv, state, code, extras, claim_end })
 }
 
 /// Decode reveals against the prover's keys into a [`Claim`].

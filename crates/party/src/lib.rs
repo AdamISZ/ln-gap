@@ -25,7 +25,7 @@ use lngap_channel::{ChannelParams, ChannelState, PartyKeys, PartyPubKeys, Role};
 use lngap_contract::instance::key_label;
 use lngap_contract::leaves::move_witness_args;
 use lngap_contract::onchain::{check_claim, decode_claim, parse_move_witness, MoveReveals};
-use lngap_contract::{Claim, ContractInstance, Extra, ProgramRegistry, CODE_BITS};
+use lngap_contract::{Claim, ContractInstance, Extra, GraphShape, ProgramRegistry, CODE_BITS};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::{uint_to_bits, PublicKey, Reveal, PREIMAGE_LEN};
 use tracing::{info, warn};
@@ -120,6 +120,21 @@ pub struct MoveCtx<'a> {
 pub type MovePolicy = Box<dyn Fn(&MoveCtx) -> Option<Vec<bool>> + Send + Sync>;
 /// Should I propose folding this contract now (e.g. a bond I no longer need)?
 pub type CancelPolicy = Box<dyn Fn(&MoveCtx) -> bool + Send + Sync>;
+/// Should I propose folding this contract with this distribution (a game
+/// settled elsewhere)? `None` while the game is on.
+pub type FoldPolicy = Box<dyn Fn(&MoveCtx) -> Option<[Amount; 2]> + Send + Sync>;
+
+/// A claim this party intends to make on-chain in a star-graph contract:
+/// the depth-`depth` Move from the doubly signed state, leaving from
+/// `prior` (the counterparty's state at depth `depth - 1`, revealed by
+/// `prior_reveal`; both empty at depth 1).
+#[derive(Clone, Debug)]
+pub struct QueuedClaim {
+    pub depth: u32,
+    pub prior: Vec<bool>,
+    pub prior_reveal: Option<Reveal>,
+    pub mv: Vec<bool>,
+}
 
 /// What the change-acceptance policy sees for a counterparty's draft.
 pub struct ChangeCtx<'a> {
@@ -148,6 +163,8 @@ struct Live {
     last_state_reveal: Option<Reveal>,
     resolved: bool,
     dispute: Option<DisputeLive>,
+    /// Graph label prefix of this output's spends (`r{d}/` after a refutation).
+    prefix: String,
 }
 
 /// A statement key this party may need to learn preimages for.
@@ -169,6 +186,9 @@ pub struct Party {
     moves: HashMap<u32, VecDeque<Vec<bool>>>,
     move_policies: HashMap<u32, MovePolicy>,
     cancel_policies: HashMap<u32, CancelPolicy>,
+    fold_policies: HashMap<u32, FoldPolicy>,
+    fold_tried: HashSet<u32>,
+    claims: HashMap<u32, QueuedClaim>,
     change_policy: Option<ChangePolicy>,
     /// Statements held: reveals under their labels.
     reveals: HashMap<String, Reveal>,
@@ -221,6 +241,9 @@ impl Party {
             moves: HashMap::new(),
             move_policies: HashMap::new(),
             cancel_policies: HashMap::new(),
+            fold_policies: HashMap::new(),
+            fold_tried: HashSet::new(),
+            claims: HashMap::new(),
             change_policy: None,
             reveals: HashMap::new(),
             watched: HashMap::new(),
@@ -350,6 +373,19 @@ impl Party {
     pub fn set_cancel_policy(&mut self, id: u32, p: CancelPolicy) {
         self.cancel_policies.insert(id, p);
     }
+    /// A policy for proposing to fold contract `id` with a distribution.
+    pub fn set_fold_policy(&mut self, id: u32, p: FoldPolicy) {
+        self.fold_policies.insert(id, p);
+    }
+    /// Intend to claim on-chain in star-graph contract `id`: force-close
+    /// once the claim's leaf is spendable, then make the depth-`depth` Move.
+    pub fn queue_claim(&mut self, id: u32, claim: QueuedClaim) {
+        self.say(format!("contract {id}: will claim on-chain at depth {} ({} bits of prior, move {})", claim.depth, claim.prior.len(), lngap_contract::bits_str(&claim.mv)));
+        self.claims.insert(id, claim);
+    }
+    pub fn has_queued_claim(&self, id: u32) -> bool {
+        self.claims.contains_key(&id)
+    }
     /// Policy for accepting the counterparty's drafts (default: any valid
     /// change, and Cancel only once the party on turn missed its deadline).
     pub fn set_change_policy(&mut self, p: ChangePolicy) {
@@ -422,17 +458,30 @@ impl Party {
         if self.faults.stop_from_seq.is_some_and(|s| self.channel.current_seq() >= s) {
             return Ok(vec![]);
         }
-        let contracts: Vec<(u32, Option<Role>, Vec<bool>, u32)> = self.channel.current_state().contracts.iter().map(|c| {
+        let contracts: Vec<(u32, Option<Role>, Vec<bool>, u32, GraphShape)> = self.channel.current_state().contracts.iter().map(|c| {
             let i = downcast(c);
-            (i.id, i.turn(), i.state.clone(), i.deadline)
+            (i.id, i.turn(), i.state.clone(), i.deadline, i.graph_shape())
         }).collect();
-        for (id, turn, state, deadline) in contracts {
+        for (id, turn, state, deadline, shape) in contracts {
             if let Some(p) = self.cancel_policies.get(&id) {
                 let has = |l: &str| self.has_reveal(l);
                 if p(&MoveCtx { height: self.height, contract_id: id, state: &state, has: &has }) && !self.cancel_tried.contains(&id) {
                     self.cancel_tried.insert(id);
                     return self.propose_change(Change::Cancel { id });
                 }
+            }
+            if let Some(p) = self.fold_policies.get(&id) {
+                let has = |l: &str| self.has_reveal(l);
+                if let Some(dist) = p(&MoveCtx { height: self.height, contract_id: id, state: &state, has: &has }) {
+                    if !self.fold_tried.contains(&id) {
+                        self.fold_tried.insert(id);
+                        return self.propose_change(Change::Fold { id, dist });
+                    }
+                }
+            }
+            if shape == GraphShape::Star {
+                // the game is played elsewhere; the contract's state never moves off-chain
+                continue;
             }
             match turn {
                 Some(r) if r == self.role => {
@@ -643,6 +692,7 @@ impl Party {
                     last_state_reveal: None,
                     resolved: false,
                     dispute: None,
+                    prefix: String::new(),
                 });
             }
         }
@@ -697,22 +747,34 @@ impl Party {
         let extras = inst.move_extras(d).expects;
         let extra_bits: Vec<usize> = extras.iter().map(|e| e.pk.n_bits()).collect();
         let claim_params = inst.claim_keys(d).map(|c| c.end.params);
-        let reveals = parse_move_witness(&tx.input[0].witness, inst.program.n_move_bits(), inst.program.n_state_bits(), &extra_bits, claim_params)?;
+        let reveals = parse_move_witness(&tx.input[0].witness, inst.prior_bits(d), inst.program.n_move_bits(), inst.program.n_state_bits(), &extra_bits, claim_params)?;
         for (e, r) in extras.iter().zip(&reveals.extras) {
             self.learn_reveal(&e.label, r.clone())?;
         }
-        let prior = self.live[idx].state.clone();
+        // the state the move leaves from: the previous prover's reveal in the
+        // witness (star graphs), else this output's state
+        let prior = match &reveals.prior {
+            Some(r) => inst.depth_keys(d - 1).state.decode_bits(r).context("prior reveal in the move witness")?,
+            None => self.live[idx].state.clone(),
+        };
         let claim = decode_claim(&*inst.program, &keys, prior, &reveals)?;
         let ctx = self.channel.commit_ctx(self.live[idx].seq, self.live[idx].version)?;
-        let tree = inst.depth_tree(&ctx, d)?;
+        let star = inst.graph_shape() == GraphShape::Star;
+        let from_root = self.live[idx].depth == 0;
+        let (tree, prefix) = if star && !from_root {
+            (inst.refuted_tree(&ctx, d)?, format!("r{}/", self.live[idx].depth))
+        } else {
+            (inst.depth_tree(&ctx, d)?, String::new())
+        };
         {
             let l = &mut self.live[idx];
             l.depth = d;
             l.outpoint = OutPoint { txid: tx.compute_txid(), vout: 0 };
             l.prevout = tx.output[0].clone();
             l.tree = tree;
+            l.prefix = prefix;
             l.confirmed_at = height;
-            l.prior_state_reveal = l.last_state_reveal.take();
+            l.prior_state_reveal = reveals.prior.clone().or_else(|| l.last_state_reveal.take());
             l.last_state_reveal = Some(reveals.state.clone());
             l.state = claim.new.clone();
             l.claim_code = Some(claim.code);
@@ -772,7 +834,7 @@ impl Party {
             if keys.prover != self.role && (!ok || self.faults.dispute_anyway) {
                 self.say(format!("contract {id}: disputing the claim"));
                 let l = self.live[idx].clone();
-                return self.broadcast_graph(&l, &format!("d{d}/dispute"), &[]);
+                return self.broadcast_graph(&l, &format!("{}d{d}/dispute", l.prefix), &[]);
             }
         }
         if keys.prover == self.role {
@@ -860,6 +922,20 @@ impl Party {
                     self.channel.force_close()?;
                 }
             }
+            if self.channel.closing.is_none() {
+                // a queued claim whose leaf is (or is about to be) spendable: escalate
+                let ready: Option<u32> = self.channel.current_state().contracts.iter().map(|c| downcast(c)).find(|i| {
+                    self.claims.get(&i.id).is_some_and(|q| {
+                        let cltv = i.move_extras(q.depth).cltv.unwrap_or(0);
+                        height + u32::from(self.channel.params.to_self_delay) >= cltv
+                    })
+                }).map(|i| i.id);
+                if let Some(id) = ready {
+                    let q = &self.claims[&id];
+                    self.say(format!("contract {id}: force-closing to claim on-chain at depth {}", q.depth));
+                    self.channel.force_close()?;
+                }
+            }
         }
         for idx in 0..self.live.len() {
             if self.live[idx].resolved {
@@ -894,14 +970,27 @@ impl Party {
         let l = self.live[idx].clone();
         let params = self.channel.params;
         if l.depth == 0 {
-            let my_turn = inst.turn() == Some(self.role);
-            if my_turn && !self.faults.passive_onchain && self.height < inst.deadline {
-                if let Some(mv) = self.peek_move(l.id, &l.state) {
-                    let leaf = l.tree.leaf("move_1")?;
-                    if self.timelock_ready(&l, &leaf.timelock) {
-                        return self.broadcast_move(idx, 1, mv);
+            if inst.graph_shape() == GraphShape::Star {
+                if let Some(q) = self.claims.get(&l.id).cloned() {
+                    if !self.faults.passive_onchain && self.height < inst.deadline {
+                        let leaf = l.tree.leaf(&format!("move_{}", q.depth))?;
+                        if self.timelock_ready(&l, &leaf.timelock) {
+                            self.claims.remove(&l.id);
+                            return self.broadcast_move_from(idx, q.depth, q.prior, q.prior_reveal, q.mv);
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
+                }
+            } else {
+                let my_turn = inst.turn() == Some(self.role);
+                if my_turn && !self.faults.passive_onchain && self.height < inst.deadline {
+                    if let Some(mv) = self.peek_move(l.id, &l.state) {
+                        let leaf = l.tree.leaf("move_1")?;
+                        if self.timelock_ready(&l, &leaf.timelock) {
+                            return self.broadcast_move(idx, 1, mv);
+                        }
+                        return Ok(());
+                    }
                 }
             }
             if self.height >= inst.deadline && self.timelock_ready(&l, &Timelock::csv(params.to_self_delay)) {
@@ -914,10 +1003,11 @@ impl Party {
         let d = l.depth;
         let prover = inst.prover_at(d);
         let code = l.claim_code.expect("depth ≥ 1 has a claim");
-        let my_move = prover != self.role && inst.program.turn_bits(&l.state)? == Some(self.role) && d < inst.max_depth() && !self.faults.passive_onchain;
+        let next_leaf = format!("move_{}", d + 1);
+        let my_move = prover != self.role && inst.program.turn_bits(&l.state)? == Some(self.role) && d < inst.max_depth() && !self.faults.passive_onchain && l.tree.leaf(&next_leaf).is_ok();
         if my_move {
             if let Some(mv) = self.peek_move(l.id, &l.state) {
-                let leaf = l.tree.leaf(&format!("move_{}", d + 1))?;
+                let leaf = l.tree.leaf(&next_leaf)?;
                 if self.timelock_ready(&l, &leaf.timelock) {
                     return self.broadcast_move(idx, d + 1, mv);
                 }
@@ -928,7 +1018,7 @@ impl Party {
         if self.timelock_ready(&l, &Timelock::csv(window)) {
             self.say(format!("contract {}: challenge window ({window} blocks) after move_{d} passed; broadcasting split_{}", l.id, outcome.name));
             let extra = l.code_reveal.as_ref().expect("code reveal stored with the claim").consumption_order();
-            return self.broadcast_graph(&l, &format!("split_{d}_{}", outcome.name), &extra);
+            return self.broadcast_graph(&l, &format!("{}split_{d}_{}", l.prefix, outcome.name), &extra);
         }
         Ok(())
     }
@@ -943,12 +1033,25 @@ impl Party {
         Ok(())
     }
 
+    /// A move from this output's state: on a chain graph the previous move
+    /// left it there; on a star graph the refutation reveals the claimant's
+    /// state (this output's `last_state_reveal`) as its prior.
     fn broadcast_move(&mut self, idx: usize, d: u32, mv: Vec<bool>) -> Result<()> {
         let l = self.live[idx].clone();
         let inst = self.instance(&l);
-        let new = inst.program.transition_bits(&l.state, &mv, self.role).context("my own move is invalid")?;
+        let prior_reveal = if inst.prior_bits(d).is_some() { l.last_state_reveal.clone() } else { None };
+        self.broadcast_move_from(idx, d, l.state.clone(), prior_reveal, mv)
+    }
+
+    fn broadcast_move_from(&mut self, idx: usize, d: u32, prior: Vec<bool>, prior_reveal: Option<Reveal>, mv: Vec<bool>) -> Result<()> {
+        let l = self.live[idx].clone();
+        let inst = self.instance(&l);
+        if inst.prior_bits(d).is_some() {
+            ensure!(prior_reveal.is_some(), "move_{d} needs the prior state's reveal");
+        }
+        let new = inst.program.transition_bits(&prior, &mv, self.role).context("my own move is invalid")?;
         let code = inst.program.resolution_bits(&new)?.code;
-        let mut claim = Claim { prior: l.state.clone(), mv, new, code, mover: self.role };
+        let mut claim = Claim { prior, mv, new, code, mover: self.role };
         if let Some(cheat) = &self.faults.cheat_move {
             claim = cheat(&claim);
             self.say(format!("contract {}: CHEATING in move_{d}: claiming move {} state {} code {}", l.id, inst.program.describe_move_bits(&claim.mv), inst.program.describe_state_bits(&claim.new), claim.code));
@@ -980,10 +1083,12 @@ impl Party {
             }
             None => None,
         };
-        let key = GraphKey { version: l.version, contract_id: l.id, label: format!("move_{d}") };
+        // a star graph's refutation off `C'_depth` is labelled `r{depth}/move_{d}`
+        let label = if inst.graph_shape() == GraphShape::Star && l.depth >= 1 { format!("r{}/move_{d}", l.depth) } else { format!("move_{d}") };
+        let key = GraphKey { version: l.version, contract_id: l.id, label };
         let rec = self.channel.record(l.seq).ok_or_else(|| anyhow!("no record"))?;
         let ptx = rec.graph.get(&key).ok_or_else(|| anyhow!("no graph tx {key}"))?;
-        let tx = ptx.finalize(&move_witness_args(&mv_r, &st_r, &code_r, &extras, end_sig.as_ref()))?;
+        let tx = ptx.finalize(&move_witness_args(prior_reveal.as_ref(), &mv_r, &st_r, &code_r, &extras, end_sig.as_ref()))?;
         self.pop_move(l.id);
         self.channel.mark_swept(l.outpoint);
         self.say(format!("contract {}: broadcasting move_{d}: {} -> state {}, outcome code {}", l.id, inst.program.describe_move_bits(&claim.mv), inst.program.describe_state_bits(&claim.new), claim.code));
@@ -1009,6 +1114,7 @@ impl Party {
             }
             Change::Resolve { id } => format!("resolve contract {id}"),
             Change::Cancel { id } => format!("cancel contract {id} (fold R(s))"),
+            Change::Fold { id, dist } => format!("fold contract {id}: user {} / hub {}", dist[0], dist[1]),
         }
     }
 }
@@ -1020,6 +1126,9 @@ pub fn default_change_policy(ctx: &ChangeCtx) -> Result<()> {
         let c = ctx.current.contract(*id).ok_or_else(|| anyhow!("no contract {id}"))?;
         let i = downcast(c);
         ensure!(i.turn().is_some() && ctx.height >= i.deadline, "cancel refused: contract {id} has not expired");
+    }
+    if let Change::Fold { id, .. } = ctx.change {
+        bail!("fold of contract {id} refused: no application policy accepts it");
     }
     Ok(())
 }
@@ -1390,9 +1499,35 @@ impl Party {
                 self.broadcast_dispute_tx(&l, &disp, &format!("q_inner_{r}"), &lngap_contract::claim::q_round_witness(&reveal))
             }
             Stage::FlatTerminal => {
-                // Flat inner (n4bit): recompute the isolated compression natively
-                // from the committed init and block words; if it differs from
-                // re_next, disprove with the flat terminal leaf.
+                // Flat inner (n4bit): first everything the step asserts besides
+                // the compression itself (as in inner round 1), then recompute
+                // the isolated compression natively from the committed init and
+                // block words; if it differs from re_next, disprove with the
+                // flat terminal leaf.
+                if let Some((leaf_name, args)) = disp.recommit_mismatch(&ctx, &keys) {
+                    self.say(format!("contract {id}: the prover's re-commitment does not match its earlier commitment"));
+                    return self.broadcast_disproof(idx, &disp, &leaf_name, args);
+                }
+                if let Some(j) = disp.first_bad_block() {
+                    let (leaf_name, args) = disp.block_disproof(&ctx, &keys, j)?;
+                    self.say(format!("contract {id}: block word {j} is wrong"));
+                    return self.broadcast_disproof(idx, &disp, &leaf_name, args);
+                }
+                if disp.ckeep_violated() {
+                    let (leaf_name, _) = lngap_contract::inner::ckeep_leaf(&ctx, disp.prover, &keys, &disp.spec, disp.isolated());
+                    self.say(format!("contract {id}: the compression changed a register it should not have"));
+                    return self.broadcast_disproof(idx, &disp, &leaf_name, disp.re_pair_args()?);
+                }
+                if disp.cpred_violated() {
+                    let (leaf_name, _) = lngap_contract::inner::cpred_leaf(&ctx, disp.prover, &keys, &disp.spec, disp.isolated());
+                    self.say(format!("contract {id}: a predicate of step {} ({}) fails", disp.isolated_step().2, disp.isolated().name()));
+                    return self.broadcast_disproof(idx, &disp, &leaf_name, disp.state_and_block_args(false)?);
+                }
+                if disp.ccopy_violated() {
+                    let (leaf_name, _) = lngap_contract::inner::ccopy_leaf(&ctx, disp.prover, &keys, &disp.spec, disp.isolated());
+                    self.say(format!("contract {id}: step {} copied the wrong block words", disp.isolated_step().2));
+                    return self.broadcast_disproof(idx, &disp, &leaf_name, disp.state_and_block_args(true)?);
+                }
                 let (_, _, step) = disp.isolated_step();
                 let cur = disp.re_cur.as_ref().ok_or_else(|| anyhow!("no re_cur"))?.0.clone();
                 let claimed_next = disp.re_next.as_ref().ok_or_else(|| anyhow!("no re_next"))?.0.clone();
@@ -1475,7 +1610,7 @@ impl Party {
     }
 
     fn broadcast_dispute_tx(&mut self, l: &Live, disp: &DisputeLive, label: &str, extra: &[Vec<u8>]) -> Result<()> {
-        let key = GraphKey { version: l.version, contract_id: l.id, label: format!("d{}/{label}", disp.depth) };
+        let key = GraphKey { version: l.version, contract_id: l.id, label: format!("{}d{}/{label}", l.prefix, disp.depth) };
         let rec = self.channel.record(l.seq).ok_or_else(|| anyhow!("no record"))?;
         let ptx = rec.graph.get(&key).ok_or_else(|| anyhow!("no graph tx {key}"))?;
         let tx = ptx.finalize(extra)?;

@@ -20,6 +20,7 @@ lngap-spv = { path = "../apps/spv" }
 lngap-n4bit = { path = "../n4bit" }
 lngap-factchain = { path = "../apps/factchain" }
 lngap-names-fc = { path = "../apps/names-fc" }
+lngap-tictactoe-fc = { path = "../apps/tictactoe-fc" }
 serde_json.workspace = true
 hex.workspace = true
 bitcoincore-rpc.workspace = true

@@ -27,13 +27,17 @@ pub enum Change {
     /// agreement (e.g. the party on turn has missed its deadline, or a bond
     /// is released). The responder's policy decides.
     Cancel { id: u32 },
+    /// Fold a contract with an agreed distribution of its value (a game
+    /// whose result lives elsewhere than the contract's state). The
+    /// responder's policy must accept it explicitly.
+    Fold { id: u32, dist: [Amount; 2] },
 }
 
 impl Change {
     pub fn contract_id(&self) -> Option<u32> {
         match self {
             Change::Pay { .. } => None,
-            Change::Open { id, .. } | Change::Move { id, .. } | Change::Resolve { id } | Change::Cancel { id } => Some(*id),
+            Change::Open { id, .. } | Change::Move { id, .. } | Change::Resolve { id } | Change::Cancel { id } | Change::Fold { id, .. } => Some(*id),
         }
     }
 }
@@ -144,6 +148,13 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             let d = r.payout.dist(c.value);
             spec.balances[0] += d[0];
             spec.balances[1] += d[1];
+        }
+        Change::Fold { id, dist } => {
+            let pos = spec.contracts.iter().position(|c| c.id == *id).ok_or_else(|| anyhow!("no contract {id}"))?;
+            let c = spec.contracts.remove(pos);
+            ensure!(dist[0] + dist[1] == c.value, "fold of contract {id} distributes {} + {} but it holds {}", dist[0], dist[1], c.value);
+            spec.balances[0] += dist[0];
+            spec.balances[1] += dist[1];
         }
     }
     Ok(spec)

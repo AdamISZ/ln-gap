@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::claim::{dispute_graph, dispute_leaf, ChallengerKeys, ClaimKeys, ClaimSpec};
 use crate::leaves::{move_leaf, settle_leaf, split_leaf, LeafCtx, PriorState};
-use crate::{MoveExtras, Outcome, Program, CODE_BITS};
+use crate::{GraphShape, MoveExtras, Outcome, Program, CODE_BITS};
 
 /// The prover's Lamport public keys for one depth position.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,16 +227,46 @@ impl ContractInstance {
             .collect()
     }
 
+    pub fn graph_shape(&self) -> GraphShape {
+        self.program.graph_shape()
+    }
+    /// The key of the state a depth-`d` Move leaf must reveal as its prior
+    /// (star graphs, `d ≥ 2`: the previous prover's depth-`(d-1)` state key).
+    pub fn prior_key(&self, depth: u32) -> Option<&PublicKey> {
+        if self.graph_shape() == GraphShape::Star && depth >= 2 {
+            Some(&self.depth_keys(depth - 1).state)
+        } else {
+            None
+        }
+    }
+    /// Does the depth-`d` Move leaf carry a prior reveal?
+    pub fn prior_bits(&self, depth: u32) -> Option<usize> {
+        self.prior_key(depth).map(|k| k.n_bits())
+    }
+    fn move_leaf_at(&self, ctx: &CommitCtx, depth: u32, from_root: bool) -> Leaf {
+        let k = self.depth_keys(depth);
+        let ex = self.program.move_extras(depth, k.prover);
+        move_leaf(ctx, depth, k.prover, self.prior_key(depth), &k.mv, &k.state, &k.code, &ex, k.claim.as_ref().map(|c| &c.end), from_root)
+    }
+
     /// The tree of `C'_d` (`d ≥ 1`): disprove leaves, the next Move, the Splits.
+    /// In a star graph this is the output of a claim; the next Move is the
+    /// refutation (see [`ContractInstance::refuted_tree`]).
     pub fn depth_tree(&self, ctx: &CommitCtx, depth: u32) -> Result<TapTree> {
+        self.depth_tree_with(ctx, depth, depth < self.max_depth())
+    }
+    /// The tree of the output of a refutation at `depth` (star graphs): as
+    /// [`ContractInstance::depth_tree`] but with no further Move.
+    pub fn refuted_tree(&self, ctx: &CommitCtx, depth: u32) -> Result<TapTree> {
+        self.depth_tree_with(ctx, depth, false)
+    }
+    fn depth_tree_with(&self, ctx: &CommitCtx, depth: u32, next_move: bool) -> Result<TapTree> {
         ensure!(depth >= 1 && depth <= self.max_depth(), "depth {depth} out of range");
         let lctx = self.leaf_ctx(depth);
         let challenger = ctx.key(lctx.challenger()).payment;
         let mut leaves: Vec<Leaf> = self.disprove_specs(depth).iter().map(|d| d.leaf(&challenger)).collect();
-        if depth < self.max_depth() {
-            let nk = self.depth_keys(depth + 1);
-            let ex = self.program.move_extras(depth + 1, nk.prover);
-            leaves.push(move_leaf(ctx, depth + 1, nk.prover, &nk.mv, &nk.state, &nk.code, &ex, nk.claim.as_ref().map(|c| &c.end)));
+        if next_move {
+            leaves.push(self.move_leaf_at(ctx, depth + 1, false));
         }
         if self.claim_spec(depth).is_some() {
             leaves.push(dispute_leaf(ctx));
@@ -245,6 +275,59 @@ impl ContractInstance {
             leaves.push(split_leaf(ctx, &o, self.window(ctx.params, depth, &o), &lctx.code));
         }
         TapTree::new(leaves)
+    }
+
+    /// The Splits off a `C'_d`-shaped output and, if depth `d` carries a
+    /// claim, its dispute chain; labels prefixed with `prefix`.
+    #[allow(clippy::too_many_arguments)]
+    fn push_splits_and_dispute(&self, out: &mut Vec<PresignedTx>, ctx: &CommitCtx, d: u32, tree_d: &TapTree, c_d: OutPoint, c_d_prevout: &TxOut, prefix: &str) -> Result<()> {
+        let fee = ctx.params.presign_fee;
+        for o in self.program.outcomes() {
+            let leaf = format!("split_{}", o.name);
+            let split_tx = build_spend(c_d, &tree_d.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, c_d_prevout.value - fee));
+            out.push(PresignedTx::new(format!("{prefix}split_{d}_{}", o.name), split_tx, vec![c_d_prevout.clone()], tree_d, &leaf, format!("split at depth {d}: {}", o.name))?);
+        }
+        if let Some(spec) = self.claim_spec(d) {
+            let chain = dispute_graph(ctx, self.prover_at(d), self.claim_keys(d).unwrap(), self.challenger_keys(d).unwrap(), &spec, tree_d, c_d, c_d_prevout)?;
+            for mut p in chain {
+                p.label = format!("{prefix}d{d}/{}", p.label);
+                out.push(p);
+            }
+        }
+        Ok(())
+    }
+
+    /// Star graph: `settle`; for each depth `d` the claim `move_d` off `C`
+    /// with its Splits and dispute chain, and (for `d < M`) the refutation
+    /// `r{d}/move_{d+1}` off `C'_d` with `r{d}/split_{d+1}_X` and
+    /// `r{d}/d{d+1}/…`.
+    fn graph_star(&self, ctx: &CommitCtx, outpoint: OutPoint, prevout: &TxOut) -> Result<Vec<PresignedTx>> {
+        let fee = ctx.params.presign_fee;
+        let mut out = Vec::new();
+        let tree0 = self.tree(ctx)?;
+        let r = self.resolution();
+        let settle_tx = build_spend(outpoint, &tree0.leaf("settle")?.timelock, self.dist_outputs(ctx, r.payout, self.value - fee));
+        out.push(PresignedTx::new("settle", settle_tx, vec![prevout.clone()], &tree0, "settle", format!("settle: R(s) = {}", r.name))?);
+        for d in 1..=self.max_depth() {
+            let tree_d = self.depth_tree(ctx, d)?;
+            let leaf = format!("move_{d}");
+            let move_tx = build_spend(outpoint, &tree0.leaf(&leaf)?.timelock, vec![TxOut { value: self.value - fee, script_pubkey: tree_d.script_pubkey() }]);
+            let c_d = OutPoint { txid: move_tx.compute_txid(), vout: 0 };
+            let c_d_prevout = move_tx.output[0].clone();
+            out.push(PresignedTx::new(leaf.clone(), move_tx, vec![prevout.clone()], &tree0, &leaf, format!("claim at depth {d} by {}", self.prover_at(d)))?);
+            self.push_splits_and_dispute(&mut out, ctx, d, &tree_d, c_d, &c_d_prevout, "")?;
+            if d < self.max_depth() {
+                let tree_r = self.refuted_tree(ctx, d + 1)?;
+                let leaf = format!("move_{}", d + 1);
+                let ref_tx = build_spend(c_d, &tree_d.leaf(&leaf)?.timelock, vec![TxOut { value: c_d_prevout.value - fee, script_pubkey: tree_r.script_pubkey() }]);
+                let c_r = OutPoint { txid: ref_tx.compute_txid(), vout: 0 };
+                let c_r_prevout = ref_tx.output[0].clone();
+                let prefix = format!("r{d}/");
+                out.push(PresignedTx::new(format!("{prefix}{leaf}"), ref_tx, vec![c_d_prevout.clone()], &tree_d, &leaf, format!("refutation at depth {} by {}", d + 1, self.prover_at(d + 1)))?);
+                self.push_splits_and_dispute(&mut out, ctx, d + 1, &tree_r, c_r, &c_r_prevout, &prefix)?;
+            }
+        }
+        Ok(out)
     }
 
     /// Extras the Move at `depth` must reveal.
@@ -286,18 +369,29 @@ impl ContractOutput for ContractInstance {
     fn value(&self) -> Amount {
         self.value
     }
-    /// Depth-0 tree: `revoke`, `settle`, and `move_1` if the contract is open.
+    /// Depth-0 tree: `revoke`, `settle`, and `move_1` if the contract is open
+    /// (a star graph: `move_d` for every depth).
     fn tree(&self, ctx: &CommitCtx) -> Result<TapTree> {
         let mut leaves = vec![ctx.revoke_leaf(), settle_leaf(ctx, self.deadline)];
-        if self.max_depth() >= 1 {
-            let k = self.depth_keys(1);
-            let ex = self.program.move_extras(1, k.prover);
-            leaves.push(move_leaf(ctx, 1, k.prover, &k.mv, &k.state, &k.code, &ex, k.claim.as_ref().map(|c| &c.end)));
+        match self.graph_shape() {
+            GraphShape::Chain => {
+                if self.max_depth() >= 1 {
+                    leaves.push(self.move_leaf_at(ctx, 1, true));
+                }
+            }
+            GraphShape::Star => {
+                for d in 1..=self.max_depth() {
+                    leaves.push(self.move_leaf_at(ctx, d, true));
+                }
+            }
         }
         TapTree::new(leaves)
     }
     /// `settle`, then for each depth `move_d` and its `split_d_X`s.
     fn graph(&self, ctx: &CommitCtx, outpoint: OutPoint, prevout: &TxOut) -> Result<Vec<PresignedTx>> {
+        if self.graph_shape() == GraphShape::Star {
+            return self.graph_star(ctx, outpoint, prevout);
+        }
         let fee = ctx.params.presign_fee;
         let mut out = Vec::new();
         let tree0 = self.tree(ctx)?;

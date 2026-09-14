@@ -393,6 +393,7 @@ dependencies = [
  "lngap-party",
  "lngap-spv",
  "lngap-tictactoe",
+ "lngap-tictactoe-fc",
  "serde_json",
  "tracing",
  "tracing-subscriber",
@@ -511,6 +512,23 @@ dependencies = [
  "lngap-channel",
  "lngap-contract",
  "lngap-lamport",
+]
+
+[[package]]
+name = "lngap-tictactoe-fc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-names",
+ "lngap-tictactoe",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

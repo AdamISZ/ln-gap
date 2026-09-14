@@ -238,14 +238,20 @@ fn reveal_verify(mut b: Builder, pk: &PublicKey) -> Builder {
     b
 }
 
-/// The Move leaf at depth `d` for prover `P`: both signatures, then P's
-/// reveals of move, new state and outcome code, then any extra statements
-/// the contract requires (`expect_uint`). Carries `CSV to_self_delay` when P
-/// is the commitment's broadcaster and this is depth 1, and `CLTV` if the
+/// The Move leaf at depth `d` for prover `P`: both signatures, then (if
+/// `prior` is given) the previous prover's reveal of the state the move
+/// leaves from, then P's reveals of move, new state and outcome code, then
+/// any extra statements the contract requires (`expect_uint`), then the
+/// claim's end-state signature. With `extras.bind_end`, the move and state
+/// reveals are decoded and compared against the bound end-state word.
+/// Carries `CSV to_self_delay` when P is the commitment's broadcaster and
+/// the leaf spends the commitment's output (`from_root`), and `CLTV` if the
 /// contract says the move is only allowed from some height.
-/// Witness: `sig_U, sig_H, move reveal, new-state reveal, code reveal, extras...`.
-pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new: &PublicKey, code: &PublicKey, extras: &MoveExtras, claim_end: Option<&lngap_lamport::winternitz::WotsPublic>) -> Leaf {
-    let delayed = depth == 1 && prover == ctx.broadcaster;
+/// Witness: `sig_U, sig_H, [prior reveal], move reveal, new-state reveal,
+/// code reveal, extras..., [end signature]`.
+#[allow(clippy::too_many_arguments)]
+pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, prior: Option<&PublicKey>, mv: &PublicKey, new: &PublicKey, code: &PublicKey, extras: &MoveExtras, claim_end: Option<&lngap_lamport::winternitz::WotsPublic>, from_root: bool) -> Leaf {
+    let delayed = from_root && prover == ctx.broadcaster;
     let mut b = Builder::new();
     let mut tl = Timelock::NONE;
     if let Some(h) = extras.cltv {
@@ -257,8 +263,18 @@ pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new:
         tl.csv = Some(ctx.params.to_self_delay);
     }
     b = ctx.two_of_two_verify(b);
-    b = reveal_verify(b, mv);
-    b = reveal_verify(b, new);
+    if let Some(p) = prior {
+        b = reveal_verify(b, p);
+    }
+    let bind = extras.bind_end.as_ref().filter(|_| claim_end.is_some());
+    if bind.is_some() {
+        // decoded numbers parked: move below, state on top of the altstack
+        b = b.decode_uint(mv).push_opcode(OP_TOALTSTACK);
+        b = b.decode_uint(new).push_opcode(OP_TOALTSTACK);
+    } else {
+        b = reveal_verify(b, mv);
+        b = reveal_verify(b, new);
+    }
     b = reveal_verify(b, code);
     for e in &extras.expects {
         b = b.expect_uint(&e.pk, e.value);
@@ -266,6 +282,9 @@ pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new:
     if let Some(end) = claim_end {
         use lngap_lamport::winternitz::WotsExt;
         b = b.wots_verify(end);
+        if let Some(bind) = bind {
+            b = bind_check(b, end.params.message_digits as usize, bind.word);
+        }
         for _ in 0..end.params.message_digits / 2 {
             b = b.push_opcode(OP_2DROP);
         }
@@ -273,9 +292,29 @@ pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, mv: &PublicKey, new:
     Leaf::new(format!("move_{depth}"), b.push_opcode(OP_PUSHNUM_1).into_script(), tl)
 }
 
+/// With `n` message nibbles on the stack (nibble `n-1` on top) and the
+/// decoded state (top) and move on the altstack: nibble `8 word` is zero,
+/// nibble `8 word + 1` is the move, and nibbles `8 word + 2 ..= 8 word + 7`
+/// read as a number are the state. Consumes the altstack values.
+fn bind_check(mut b: Builder, n: usize, word: usize) -> Builder {
+    let d = |i: usize| (n - 1 - i) as i64;
+    let base = 8 * word;
+    b = b.push_int(d(base + 2)).push_opcode(OP_PICK);
+    for k in 3..8 {
+        for _ in 0..4 {
+            b = b.push_opcode(OP_DUP).push_opcode(OP_ADD);
+        }
+        b = b.push_int(d(base + k) + 1).push_opcode(OP_PICK).push_opcode(OP_ADD);
+    }
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_NUMEQUALVERIFY);
+    b = b.push_int(d(base + 1)).push_opcode(OP_PICK).push_opcode(OP_FROMALTSTACK).push_opcode(OP_NUMEQUALVERIFY);
+    b.push_int(d(base)).push_opcode(OP_PICK).push_int(0).push_opcode(OP_NUMEQUALVERIFY)
+}
+
 /// Move witness args after the two signatures.
-pub fn move_witness_args(mv: &Reveal, new: &Reveal, code: &Reveal, extras: &[Reveal], claim_end: Option<&lngap_lamport::winternitz::WotsSig>) -> Vec<Vec<u8>> {
-    let mut v = mv.consumption_order();
+pub fn move_witness_args(prior: Option<&Reveal>, mv: &Reveal, new: &Reveal, code: &Reveal, extras: &[Reveal], claim_end: Option<&lngap_lamport::winternitz::WotsSig>) -> Vec<Vec<u8>> {
+    let mut v = prior.map(|p| p.consumption_order()).unwrap_or_default();
+    v.extend(mv.consumption_order());
     v.extend(new.consumption_order());
     v.extend(code.consumption_order());
     for e in extras {

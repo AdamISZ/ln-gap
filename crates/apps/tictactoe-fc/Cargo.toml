@@ -1,0 +1,18 @@
+[package]
+name = "lngap-tictactoe-fc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-n4bit = { path = "../../n4bit" }
+lngap-factchain = { path = "../factchain" }
+lngap-tictactoe = { path = "../tictactoe" }
+lngap-names = { path = "../names" }
+lngap-contract = { path = "../../contract" }
+lngap-channel = { path = "../../channel" }
+lngap-lamport = { path = "../../lamport" }
+bitcoin = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

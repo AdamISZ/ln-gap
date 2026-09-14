@@ -19,6 +19,7 @@ use tracing::info;
 pub const FUNDING: Amount = Amount::from_sat(200_000);
 pub mod names_world;
 pub mod factchain_world;
+pub mod game_world;
 pub mod scenarios;
 
 pub const HALF: Amount = Amount::from_sat(100_000);
@@ -223,7 +224,9 @@ impl Harness {
     /// parties unless it is a disproof or a revocation/balance sweep.
     pub fn assert_signing_rule(&self) {
         for s in &self.seen {
+            // a refutation's spends are labelled `r{d}/…`
             let r = s.role.as_str();
+            let r = if r.starts_with('r') && r.contains('/') && r[1..r.find('/').unwrap()].chars().all(|c| c.is_ascii_digit()) { &r[r.find('/').unwrap() + 1..] } else { r };
             // disproofs, sweeps and the bisection leaves the challenger spends alone
             let single = r.starts_with("disprove_")
                 || r.starts_with("revoke_sweep")

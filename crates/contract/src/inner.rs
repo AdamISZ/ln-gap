@@ -654,8 +654,40 @@ pub fn flat_terminal_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec:
             continue;
         }
         let (name, script) = flat_round_leaf(ctx, prover, keys, spec, step_idx as usize);
-        if !leaves.iter().any(|l| l.name == name) {
-            leaves.push(Leaf::new(name, script, Timelock::NONE));
+        push_unique(&mut leaves, name, script);
+    }
+    // everything else a compression step asserts (as `I_1` does for the
+    // round-level chain): block words against their sources, the
+    // re-commitments against the path's commitments, untouched registers,
+    // predicates and copies
+    let n = spec.n_words;
+    for (j, src) in block_sources(spec) {
+        let (name, script) = block_leaf(ctx, prover, keys, n, j, src);
+        push_unique(&mut leaves, name, script);
+    }
+    for src in cur_sources(spec) {
+        let (name, script) = mismatch_leaf(ctx, prover, keys, n, false, &src);
+        push_unique(&mut leaves, name, script);
+    }
+    for src in next_sources(spec) {
+        let (name, script) = mismatch_leaf(ctx, prover, keys, n, true, &src);
+        push_unique(&mut leaves, name, script);
+    }
+    for step in &spec.steps {
+        if !matches!(step, Step::Compress { .. }) {
+            continue;
+        }
+        if n > spec.d_words() {
+            let (name, script) = ckeep_leaf(ctx, prover, keys, spec, step);
+            push_unique(&mut leaves, name, script);
+        }
+        if !step.preds().is_empty() {
+            let (name, script) = cpred_leaf(ctx, prover, keys, spec, step);
+            push_unique(&mut leaves, name, script);
+        }
+        if !step.copies().is_empty() {
+            let (name, script) = ccopy_leaf(ctx, prover, keys, spec, step);
+            push_unique(&mut leaves, name, script);
         }
     }
     leaves.push(timeout_leaf(ctx, prover));

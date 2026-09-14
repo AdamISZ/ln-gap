@@ -43,12 +43,38 @@ pub struct Extra {
     pub value: u32,
 }
 
+/// A Move's claim registers bound to its Lamport-revealed fields: end-state
+/// word `word` must equal `move << 24 | state` (the move in the top byte,
+/// the state in the low 24 bits). This is what ties a venue entry's content
+/// to the move the leaf's disproofs judge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EndBind {
+    pub word: usize,
+}
+
 /// What a Move leaf requires beyond the prover's own commitments.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MoveExtras {
     /// The move is only valid at or after this height (`OP_CLTV`).
     pub cltv: Option<u32>,
     pub expects: Vec<Extra>,
+    /// Bind the claim's end state to the move and state reveals.
+    pub bind_end: Option<EndBind>,
+}
+
+/// The shape of a contract's pre-signed graph.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GraphShape {
+    /// `C → move_1 → C'_1 → move_2 → …`: the game is played on-chain move
+    /// by move once escalated.
+    #[default]
+    Chain,
+    /// `C → move_d → C'_d` for every depth `d` (a claim from the doubly
+    /// signed initial state, revealing the counterparty's prior state), and
+    /// off each `C'_d` one `move_{d+1}` (the refutation) after which no
+    /// further move exists. Moves are played elsewhere (a venue); Bitcoin
+    /// sees one claim and at most one answer.
+    Star,
 }
 
 /// How `V` is divided for an outcome.
@@ -145,6 +171,10 @@ pub trait Contract: Send + Sync + Debug + 'static {
         let _ = (from, depth);
         vec![]
     }
+    /// The pre-signed graph's shape (see [`GraphShape`]).
+    fn graph_shape(&self) -> GraphShape {
+        GraphShape::Chain
+    }
 
     fn describe_state(&self, s: &Self::State) -> String {
         format!("{s:?}")
@@ -169,6 +199,7 @@ pub trait Program: Send + Sync + Debug {
     fn move_extras(&self, depth: u32, prover: Role) -> MoveExtras;
     fn claim(&self, from: &[bool], depth: u32) -> Option<claim::ClaimSpec>;
     fn claim_data(&self, from: &[bool], depth: u32) -> claim::ClaimData;
+    fn graph_shape(&self) -> GraphShape;
     fn describe_state_bits(&self, s: &[bool]) -> String;
     fn describe_move_bits(&self, m: &[bool]) -> String;
 
@@ -223,6 +254,9 @@ impl<C: Contract> Program for C {
     fn claim_data(&self, from: &[bool], depth: u32) -> claim::ClaimData {
         Contract::claim_data(self, from, depth)
     }
+    fn graph_shape(&self) -> GraphShape {
+        Contract::graph_shape(self)
+    }
     fn describe_state_bits(&self, s: &[bool]) -> String {
         match self.state_from_bits(s) {
             Ok(st) => self.describe_state(&st),
@@ -244,7 +278,7 @@ pub fn bits_str(b: &[bool]) -> String {
 /// Re-exports used by contract authors.
 pub mod prelude {
     pub use crate::leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx};
-    pub use crate::{Contract, Extra, Invalid, MoveExtras, Outcome, Payout};
+    pub use crate::{Contract, EndBind, Extra, GraphShape, Invalid, MoveExtras, Outcome, Payout};
     pub use bitcoin::opcodes::all::*;
     pub use lngap_channel::Role;
     pub use lngap_lamport::{bits_to_uint, uint_to_bits};
