@@ -284,11 +284,15 @@ pub const FC_N8: Scenario = Scenario {
         w.steps(5)?;
 
         let roles = party_txs(&w.alice);
-        assert!(roles.iter().any(|r| r == "move_1"), "Alice claimed: {roles:?}");
-        assert!(roles.iter().any(|r| r == "move_2"), "hub answered: {roles:?}");
+        // as in tests/fc_names.rs: the hub force-closes and makes move_1 (its
+        // fabricated proof), Alice disputes, and the bisection lands on a
+        // terminal leaf (a simple step with a cheated end state, or a
+        // compression leaf if the cheat hit a midstate)
+        assert!(roles.iter().any(|r| r == "move_1"), "hub's proof move: {roles:?}");
+        assert!(roles.iter().any(|r| r == "d1/dispute"), "Alice disputed: {roles:?}");
         let d = disproof(&roles).expect("bisection disproof");
         assert!(
-            d.starts_with("round_") || d.starts_with("cpred_") || d.starts_with("block_") || d.starts_with("ckeep_") || d.starts_with("re_"),
+            d.starts_with("round_") || d.starts_with("cpred_") || d.starts_with("block_") || d.starts_with("ckeep_") || d.starts_with("re_") || d.starts_with("simple_") || d.starts_with("flat_"),
             "disproof at a bisection leaf: {d} (roles: {roles:?})"
         );
         // Alice wins the bond (the hub's proof was disproved)
