@@ -18,3 +18,5 @@ scenario_test!(g3_loser_refuses_the_fold, G3);
 scenario_test!(g4_spurious_timeout_claim_is_refuted_by_inclusion, G4);
 scenario_test!(g5_invalid_move_is_disproved, G5);
 scenario_test!(g6_fabricated_inclusion_is_disproved_by_bisection, G6);
+scenario_test!(g7_garbage_signature_is_a_stall, G7);
+scenario_test!(g7b_garbage_signature_cannot_refute, G7B);

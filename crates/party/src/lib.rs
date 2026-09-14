@@ -132,7 +132,6 @@ pub type FoldPolicy = Box<dyn Fn(&MoveCtx) -> Option<[Amount; 2]> + Send + Sync>
 pub struct QueuedClaim {
     pub depth: u32,
     pub prior: Vec<bool>,
-    pub prior_reveal: Option<Reveal>,
     pub mv: Vec<bool>,
 }
 
@@ -753,9 +752,9 @@ impl Party {
         }
         // the state the move leaves from: the previous prover's reveal in the
         // witness (star graphs), else this output's state
-        let prior = match &reveals.prior {
-            Some(r) => inst.depth_keys(d - 1).state.decode_bits(r).context("prior reveal in the move witness")?,
-            None => self.live[idx].state.clone(),
+        let prior = match (&reveals.prior, inst.prior_key(d)) {
+            (Some(r), Some(pk)) => pk.decode_bits(r).context("prior reveal in the move witness")?,
+            _ => self.live[idx].state.clone(),
         };
         let claim = decode_claim(&*inst.program, &keys, prior, &reveals)?;
         let ctx = self.channel.commit_ctx(self.live[idx].seq, self.live[idx].version)?;
@@ -976,7 +975,7 @@ impl Party {
                         let leaf = l.tree.leaf(&format!("move_{}", q.depth))?;
                         if self.timelock_ready(&l, &leaf.timelock) {
                             self.claims.remove(&l.id);
-                            return self.broadcast_move_from(idx, q.depth, q.prior, q.prior_reveal, q.mv);
+                            return self.broadcast_move_from(idx, q.depth, q.prior, q.mv);
                         }
                         return Ok(());
                     }
@@ -1033,22 +1032,16 @@ impl Party {
         Ok(())
     }
 
-    /// A move from this output's state: on a chain graph the previous move
-    /// left it there; on a star graph the refutation reveals the claimant's
-    /// state (this output's `last_state_reveal`) as its prior.
+    /// A move from this output's state (on a star graph: the refutation,
+    /// re-committing the claimant's state as its prior).
     fn broadcast_move(&mut self, idx: usize, d: u32, mv: Vec<bool>) -> Result<()> {
         let l = self.live[idx].clone();
-        let inst = self.instance(&l);
-        let prior_reveal = if inst.prior_bits(d).is_some() { l.last_state_reveal.clone() } else { None };
-        self.broadcast_move_from(idx, d, l.state.clone(), prior_reveal, mv)
+        self.broadcast_move_from(idx, d, l.state.clone(), mv)
     }
 
-    fn broadcast_move_from(&mut self, idx: usize, d: u32, prior: Vec<bool>, prior_reveal: Option<Reveal>, mv: Vec<bool>) -> Result<()> {
+    fn broadcast_move_from(&mut self, idx: usize, d: u32, prior: Vec<bool>, mv: Vec<bool>) -> Result<()> {
         let l = self.live[idx].clone();
         let inst = self.instance(&l);
-        if inst.prior_bits(d).is_some() {
-            ensure!(prior_reveal.is_some(), "move_{d} needs the prior state's reveal");
-        }
         let new = inst.program.transition_bits(&prior, &mv, self.role).context("my own move is invalid")?;
         let code = inst.program.resolution_bits(&new)?.code;
         let mut claim = Claim { prior, mv, new, code, mover: self.role };
@@ -1067,6 +1060,8 @@ impl Party {
             }
         }
         let ks = inst.keys_seq;
+        // star graphs: my own re-commitment of the state I move from
+        let prior_reveal = if inst.prior_bits(d).is_some() { Some(self.keystore.reveal_bits(&key_label(l.id, ks, d, "prior"), &claim.prior)?) } else { None };
         let mv_r = self.keystore.reveal_bits(&key_label(l.id, ks, d, "move"), &claim.mv)?;
         let st_r = self.keystore.reveal_bits(&key_label(l.id, ks, d, "state"), &claim.new)?;
         let code_r = self.keystore.reveal_bits(&key_label(l.id, ks, d, "code"), &uint_to_bits(u32::from(claim.code), CODE_BITS))?;

@@ -143,6 +143,7 @@ impl Contract for NRegFc {
                 cltv: Some(self.params.claim_from),
                 expects: vec![],
                 bind_end: None,
+                bind_prior: None,
             }
         } else {
             MoveExtras::default()

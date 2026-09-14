@@ -277,26 +277,52 @@ Bitcoin (VENUE.md §4) is not built, since a single honest miner cannot
 censor. Each side stakes `STAKE + RESERVE`; the reserve returns on a fold
 and goes to the winner on-chain, so stalling costs more than resigning.
 
-## D27. Entry authentication is off-chain only
+## D27. A claim verifies the counterparty's published signature; nobody needs the other side's secrets
 
-A venue entry carries a tag over the mover's Lamport preimages, served
-alongside; the claim binds the entry's content to the on-chain reveal but
-never hashes the preimages. An entry with the right content and garbage
-preimages is a stall the counterparty cannot attribute on-chain. Listed
-with the served-data gap (D19, SPV_DISPUTE.md limitations): both are
-bytes the commitment does not cover. The fix is to hash the preimages
-inside the claim under an n4bit-keyed Lamport key, which needs
-conditional predicates.
+Revealing Lamport preimages on the venue signs a move, but a signature is
+only ever *checked* on Bitcoin by being used in a valid spend, so an
+unsigned entry with the right content was indistinguishable from a signed
+one to the one party who needed it signed (the counterparty could not
+present garbage preimages and could not exhibit that they were garbage).
+Resolution, three parts:
+
+- Entries carry the mover's state preimages inline; the block root is a
+  two-level hash of the content and the claim-native digest of each
+  20-byte chunk (`entry_root`, uniform for all entries). The claim
+  absorbs that stream, so the digests are block words, and each must
+  equal the commitment selected by the corresponding state bit of the
+  content word (`Pred::EqConstBit`, a constant chosen by a register bit).
+  The claim never hashes a preimage; the block's root commits to the
+  digests and the predicates tie them to the key.
+- Every state key has a second commitment set, the claim-native hash of
+  each preimage (`DepthKeys::state_n4`), pinned in the signed channel
+  state and bound into the claim (`Program::claim_bound`). The HASH160
+  commitments are used only by the key's owner in its own Move leaves;
+  the claim-native ones only inside claims. Script cannot relate the
+  element form of a preimage to its nibble form, and nothing requires it
+  to: a mover whose two commitment sets disagree fails its own claims.
+- A claim at depth `d` proves slots `d - 1` and `d`. The prior is the
+  claimant's own re-commitment of the counterparty's state
+  (`DepthKeys::prior`), bound to the counterparty entry's content word
+  (`MoveExtras::bind_prior`); the disprove leaves read it from the
+  claimant's reveal. So a party builds every claim from public data.
+
+Consequence: an unsigned entry is not a post. The mover cannot claim or
+refute with it (G7B: its inclusion claim fails at the signature
+predicate), and the counterparty's timeout claim stands (G7). Cost: one
+more bisection round and about a quarter more dispute size; nothing on
+the stall path (GAME_PROTOCOL.md §4).
 
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
   now enforced on-chain (D20, scenarios N8–N9). Still open: binding the served
   proof data to the Move, and user-side non-inclusion claims.
-- **Venue (GAME_PROTOCOL.md §5).** Entry authentication in the claim (D27);
-  the summons response on Bitcoin; variable-length claims for response
-  windows; the equivocation leaf; `settle` after the deadline ignores the
-  venue; a smaller register file for the claim transaction.
+- **Venue (GAME_PROTOCOL.md §5).** The summons response on Bitcoin;
+  variable-length claims for response windows; the equivocation leaf;
+  `settle` after the deadline ignores the venue; a smaller register file
+  for the claim transaction; the dispute terminal trees carry one
+  predicate leaf per signature step (opening a game takes ~45 s debug).
 - **T9 / liveness rule.** Scenario T9 documents that an honest user who ignores
   a hub force-close during their own turn forfeits the stake (Settle pays R(s)
   = hub wins). Agreed as the PoC reading on 2026-09-06; revisit whether the

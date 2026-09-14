@@ -98,6 +98,11 @@ pub enum Pred {
     /// at most `target` (nibbles, most significant first). The n4bit PoW
     /// check: `D` is the whole 40-nibble state and targets compare big-endian.
     LeTargetBe { off: usize, target: Vec<u8> },
+    /// Nibbles `[off, off + if0.len())` equal `if1` if bit `bit` (0 = least
+    /// significant) of nibble `nib` is set, else `if0`: a constant selected
+    /// by a register bit, e.g. a Lamport bit's two commitments chosen by the
+    /// message bit an entry states.
+    EqConstBit { nib: usize, bit: u8, off: usize, if0: Vec<u8>, if1: Vec<u8> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +375,10 @@ impl Pred {
                 }
                 true
             }
+            Pred::EqConstBit { nib, bit, off, if0, if1 } => {
+                let c = if (n[*nib] >> bit) & 1 == 1 { if1 } else { if0 };
+                n[*off..*off + c.len()] == c[..]
+            }
         }
     }
     pub fn name(&self) -> String {
@@ -378,6 +387,7 @@ impl Pred {
             Pred::EqNibbles { a, b, n } => format!("eq@{a}={b}x{n}"),
             Pred::LeTarget { .. } => "le_target".into(),
             Pred::LeTargetBe { off, target } => format!("le_be@{off}x{}", target.len()),
+            Pred::EqConstBit { nib, bit, off, if0, .. } => format!("eq_bit@{nib}.{bit}->{off}x{}", if0.len()),
         }
     }
 }

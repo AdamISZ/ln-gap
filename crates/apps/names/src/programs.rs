@@ -168,7 +168,7 @@ impl Contract for NReg {
     /// hub's acceptance of the request is its signature on the bond itself.
     fn move_extras(&self, depth: u32, _prover: Role) -> MoveExtras {
         if depth == 1 {
-            MoveExtras { cltv: Some(self.params.claim_from), expects: vec![], bind_end: None }
+            MoveExtras { cltv: Some(self.params.claim_from), expects: vec![], bind_end: None, bind_prior: None }
         } else {
             MoveExtras::default()
         }

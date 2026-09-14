@@ -59,17 +59,23 @@ pub struct Brain {
     pub refuse_fold: bool,
     /// Never claim on-chain (whatever the opponent does).
     pub passive: bool,
+    /// Publish the move at this depth with garbage in place of the
+    /// signature (the preimages).
+    pub garbage_at: Option<u32>,
+    /// Answer a timeout claim with a garbage-signed move of mine.
+    pub refute_with_garbage: bool,
 }
 
-/// A move published on the venue: the entry and the mover's served reveals.
+/// A move published on the venue.
 #[derive(Clone, Debug)]
 pub struct Published {
     pub entry: SlotEntry,
-    pub mv: Reveal,
-    pub state: Reveal,
+    pub bytes: Vec<u8>,
     /// The board the mover claimed to leave.
     pub claimed: Board,
-    /// The board after it (None if the move was invalid).
+    /// Do the entry's preimages open the mover's pinned key?
+    pub signed: bool,
+    /// The board after it (None if the move was invalid or unsigned).
     pub board: Option<Board>,
 }
 
@@ -87,8 +93,10 @@ pub struct GameWorld {
     pub depth: u32,
     pub board: Board,
     pub published: HashMap<u32, Published>,
-    /// The entry for the coming slot, with the mover's reveals.
-    pending: Option<(Vec<u8>, Published)>,
+    /// What each mined slot's block carries (empty for an empty block).
+    pub blocks: HashMap<u32, Vec<u8>>,
+    /// The entry for the coming slot.
+    pending: Option<Published>,
     /// The agreed cooperative distribution once the game is over (shared
     /// with the parties' fold policies).
     result: Arc<Mutex<Option<[Amount; 2]>>>,
@@ -126,6 +134,7 @@ impl GameWorld {
             depth: 0,
             board: Board::empty(),
             published: HashMap::new(),
+            blocks: HashMap::new(),
             pending: None,
             result: Arc::new(Mutex::new(None)),
             refuse: Arc::new(Mutex::new([false; 2])),
@@ -213,10 +222,12 @@ impl GameWorld {
     /// Off `C'_d` a party answers a claim with its own next move: the move
     /// it published on the venue from that very state.
     fn install_move_policy(&mut self, r: Role) {
+        let with_garbage = self.brains[r.idx()].refute_with_garbage;
         let mine: Vec<(Vec<bool>, Vec<bool>)> = self
             .published
             .iter()
-            .filter(|(d, p)| TicTacToeFc::mover_at(**d) == r && p.board.is_some())
+            .filter(|(d, p)| TicTacToeFc::mover_at(**d) == r && (p.board.is_some() || (with_garbage && !p.signed)))
+            .filter(|(d, _)| **d == 1 || self.published.get(&(*d - 1)).is_some_and(|q| q.board.is_some()))
             .map(|(d, p)| {
                 let prior = if *d == 1 { Board::empty() } else { self.published[&(d - 1)].board.clone().expect("valid prior") };
                 (self.program.state_bits(&prior), uint_to_bits(u32::from(p.entry.mv), 4))
@@ -246,13 +257,20 @@ impl GameWorld {
         self.fc_height() + 1 - self.fc_open
     }
 
-    /// The mover's reveals for move `d` (its own Lamport keys).
-    fn reveals(&mut self, r: Role, d: u32, mv: u8, new: &Board) -> Result<(Reveal, Reveal)> {
+    /// The mover's reveal of the state after move `d` (its own Lamport key).
+    fn state_reveal(&mut self, r: Role, d: u32, new: &Board) -> Result<Reveal> {
         let seq = self.keys_seq();
-        let ks = self.h.party(r).keystore();
-        let mv_r = ks.reveal_bits(&key_label(ID_GAME, seq, d, "move"), &uint_to_bits(u32::from(mv), 4))?;
-        let st_r = ks.reveal_bits(&key_label(ID_GAME, seq, d, "state"), &lngap_tictactoe::TicTacToe.state_bits(new))?;
-        Ok((mv_r, st_r))
+        let bits = lngap_tictactoe::TicTacToe.state_bits(new);
+        self.h.party(r).keystore().reveal_bits(&key_label(ID_GAME, seq, d, "state"), &bits)
+    }
+    /// The claim data for slot `d`: the headers to it, the counterparty's
+    /// block `d - 1` and my block `d` (or an entry of my choosing).
+    fn slot_data(&self, d: u32, own: &[u8]) -> lngap_contract::ClaimData {
+        let keys = self.instance().keys.clone();
+        let commits = |k: u32| keys[k as usize - 1].state_n4.clone();
+        let headers: Vec<[u8; 48]> = self.fc.chain_headers().iter().map(|h| h.0).collect();
+        let prev = self.blocks.get(&(d - 1)).map(|b| b.as_slice());
+        self.program.slot_claim(d, commits).data(&headers[..d as usize], prev, own)
     }
 
     /// The brain on turn prepares the coming slot's entry.
@@ -291,59 +309,60 @@ impl GameWorld {
             let new = self.program.transition(&self.board, &cell, r).map_err(|e| anyhow!("{r}'s scripted move {d} is invalid: {e}"))?;
             (cell, new, true)
         };
-        let (mv_r, st_r) = self.reveals(r, d, cell, &new)?;
-        let entry = self.program.entry(d, cell, &new, &mv_r, &st_r);
-        let bytes = entry.encode();
-        self.pending = Some((bytes, Published { entry, mv: mv_r, state: st_r, claimed: new.clone(), board: valid.then_some(new) }));
-        if valid {
+        let st_r = self.state_reveal(r, d, &new)?;
+        let mut entry = self.program.entry(d, cell, &new, &st_r);
+        if brain.garbage_at == Some(d) {
+            entry.sigs = (0..entry.sigs.len()).map(|i| [0xEE ^ i as u8; 20]).collect();
+            self.say(format!("{r} publishes move {d} with a GARBAGE signature"));
+        } else if valid {
             self.say(format!("{r} publishes move {d}: cell {cell}"));
         }
+        let bytes = entry.encode();
+        self.pending = Some(Published { entry, bytes, claimed: new.clone(), signed: true, board: valid.then_some(new) });
         Ok(())
     }
 
     /// Mine the coming slot with the pending entry (or empty), let everyone
-    /// verify it, serve its claim data, and let the counterparty learn the
-    /// mover's reveals.
+    /// verify it against the mover's pinned commitments, and serve the
+    /// slot's claim data.
     fn mine_slot(&mut self) -> Result<()> {
         let d = self.next_slot();
-        let (bytes, published) = match self.pending.take() {
-            Some((b, p)) => (b, Some(p)),
-            None => (vec![], None),
-        };
+        let published = self.pending.take();
+        let bytes = published.as_ref().map(|p| p.bytes.clone()).unwrap_or_default();
         self.miner.submit(bytes.clone());
         let block = self.miner.mine_next().expect("mine");
         self.fc.verify_and_append(&block).map_err(|e| anyhow!(e))?;
-        let Some(p) = published else {
+        self.blocks.insert(d, bytes.clone());
+        let Some(mut p) = published else {
             if d <= 9 && !self.escalated && self.board.status == OPEN {
                 self.say(format!("slot {d} mined EMPTY"));
             }
             return Ok(());
         };
-        // both parties verify the entry against the mover's pinned keys
+        // anyone verifies the entry: content, and the signature against the
+        // mover's claim-native commitments (what the claim checks on-chain)
         let inst = self.instance();
         let mover = TicTacToeFc::mover_at(d);
         let keys = inst.depth_keys(d);
         ensure!(keys.prover == mover);
-        let mv_bits = keys.mv.decode_bits(&p.mv)?;
-        let st_bits = keys.state.decode_bits(&p.state)?;
-        ensure!(bits_to_uint(&mv_bits) == u32::from(p.entry.mv) && bits_to_uint(&st_bits) == p.entry.state, "served reveals do not match the entry");
-        let preimages: Vec<[u8; 20]> = p.mv.preimages.iter().chain(&p.state.preimages).copied().collect();
-        ensure!(SlotEntry::tag_of(&preimages) == p.entry.tag, "served reveals do not match the entry's tag");
-        // the counterparty holds the mover's state reveal (it is the prior of any claim it makes)
-        let seq = self.keys_seq();
-        self.h.party(mover.other()).learn_reveal(&key_label(ID_GAME, seq, d, "state"), p.state.clone())?;
-        // serve the slot's inclusion data
-        let headers: Vec<[u8; 48]> = self.fc.chain_headers().iter().map(|h| h.0).collect();
-        let data = self.program.shape(d).data(&headers[..d as usize], &bytes);
+        let decoded = SlotEntry::decode(&bytes).ok_or_else(|| anyhow!("undecodable entry"))?;
+        ensure!(decoded.state == bits_to_uint(&self.program.state_bits(&p.claimed)) && decoded.mover == mover.idx() as u8 && decoded.depth == d as u8);
+        p.signed = decoded.check_sigs(&keys.state_n4);
+        if !p.signed {
+            p.board = None;
+        }
+        // serve the slot's inclusion data (for the mover's claim at this depth)
+        let data = self.slot_data(d, &bytes);
         self.store.put(&TicTacToeFc::slot_key(GAME_ID, d), data);
         let valid = p.board.is_some();
         if valid {
             self.board = p.board.clone().unwrap();
             self.depth = d;
         }
+        let what = if valid { self.board.render() } else if !p.signed { "UNSIGNED".into() } else { "invalid".into() };
         self.published.insert(d, p);
         self.install_move_policy(mover);
-        self.say(format!("slot {d} mined with {mover}'s move ({}); inclusion data served", if valid { self.board.render() } else { "invalid".into() }));
+        self.say(format!("slot {d} mined with {mover}'s move ({what}); inclusion data served"));
         if valid && self.board.status != OPEN {
             let dist = match self.program.resolution(&self.board).payout {
                 lngap_contract::Payout::UserAll => [STAKE + STAKE + RESERVE, RESERVE],
@@ -360,10 +379,9 @@ impl GameWorld {
     /// headers and the entry the mover would have published.
     fn serve_fabricated(&mut self, r: Role, d: u32, cell: u8) -> Result<()> {
         let new = self.program.transition(&self.board, &cell, r).map_err(|e| anyhow!("{e}"))?;
-        let (mv_r, st_r) = self.reveals(r, d, cell, &new)?;
-        let entry = self.program.entry(d, cell, &new, &mv_r, &st_r).encode();
-        let headers: Vec<[u8; 48]> = self.fc.chain_headers().iter().map(|h| h.0).collect();
-        let data = self.program.shape(d).data(&headers[..d as usize], &entry);
+        let st_r = self.state_reveal(r, d, &new)?;
+        let entry = self.program.entry(d, cell, &new, &st_r).encode();
+        let data = self.slot_data(d, &entry);
         self.store.put(&TicTacToeFc::slot_key(GAME_ID, d), data);
         self.say(format!("{r} serves FABRICATED inclusion data for slot {d} (the block is empty)"));
         Ok(())
@@ -434,15 +452,15 @@ impl GameWorld {
 
     /// Queue `r`'s claim at depth `d` (its own move `d`) in the channel contract.
     fn queue_claim(&mut self, r: Role, d: u32, cell: u8) -> Result<()> {
-        let (prior, prior_reveal) = if d == 1 {
-            (Board::empty(), None)
+        let prior = if d == 1 {
+            Board::empty()
         } else {
             let p = self.published.get(&(d - 1)).ok_or_else(|| anyhow!("no published move {}", d - 1))?;
-            (p.board.clone().ok_or_else(|| anyhow!("move {} was invalid", d - 1))?, Some(p.state.clone()))
+            p.board.clone().ok_or_else(|| anyhow!("move {} was invalid", d - 1))?
         };
         let prior_bits = self.program.state_bits(&prior);
         self.escalated = true;
-        self.h.party(r).queue_claim(ID_GAME, QueuedClaim { depth: d, prior: prior_bits, prior_reveal, mv: uint_to_bits(u32::from(cell), 4) });
+        self.h.party(r).queue_claim(ID_GAME, QueuedClaim { depth: d, prior: prior_bits, mv: uint_to_bits(u32::from(cell), 4) });
         Ok(())
     }
 

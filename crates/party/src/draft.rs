@@ -9,7 +9,7 @@ use lngap_channel::{ChannelState, ContractOutput, Role};
 use lngap_contract::claim::{end_label, index_label, round_label};
 use lngap_contract::inner::{self, InnerKeys};
 use lngap_contract::instance::key_label;
-use lngap_contract::{ChallengerKeys, ClaimKeys, ContractInstance, DepthKeys, InstanceSpec, ProgramRegistry, CODE_BITS};
+use lngap_contract::{ChallengerKeys, ClaimKeys, ContractInstance, DepthKeys, GraphShape, InstanceSpec, ProgramRegistry, CODE_BITS};
 use lngap_lamport::keystore::KeyStore;
 use serde::{Deserialize, Serialize};
 
@@ -210,12 +210,17 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
                     }
                     None => None,
                 };
+                let star = p.graph_shape() == GraphShape::Star;
+                let state_label = key_label(c.id, c.keys_seq, d, "state");
+                let state = ks.generate(&state_label, p.n_state_bits())?;
                 let k = DepthKeys {
                     prover: me,
                     mv: ks.generate(&key_label(c.id, c.keys_seq, d, "move"), p.n_move_bits())?,
-                    state: ks.generate(&key_label(c.id, c.keys_seq, d, "state"), p.n_state_bits())?,
+                    state,
                     code: ks.generate(&key_label(c.id, c.keys_seq, d, "code"), CODE_BITS)?,
                     claim: claim_keys,
+                    prior: if star && d >= 2 { Some(ks.generate(&key_label(c.id, c.keys_seq, d, "prior"), p.n_state_bits())?) } else { None },
+                    state_n4: if star { ks.commit_with(&state_label, |p| lngap_n4bit::hash_claim(p))? } else { vec![] },
                 };
                 filled.prover.push((c.id, d, k.clone()));
                 c.keys[i] = Some(k);

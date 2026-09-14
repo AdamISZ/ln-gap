@@ -30,7 +30,9 @@ use lngap_contract::prelude::*;
 use lngap_contract::{Program, ProgramRegistry};
 #[allow(unused_imports)]
 use lngap_contract::Contract as _;
-use lngap_factchain::slot::{SlotEntry, SlotShape, E_WORD};
+use lngap_contract::instance::DepthKeys;
+use lngap_factchain::slot::{SlotClaim, SlotEntry, SlotSpec, E2_WORD, E_WORD, STATE_BITS};
+use lngap_n4bit::Digest;
 use lngap_lamport::Reveal;
 use lngap_names::ServedData;
 use lngap_tictactoe::{Board, TicTacToe};
@@ -86,27 +88,31 @@ impl TicTacToeFc {
     pub fn claim_from(&self, depth: u32) -> u32 {
         self.params.btc_open + depth + 1 + self.params.grace
     }
-    pub fn shape(&self, depth: u32) -> SlotShape {
-        SlotShape {
+    /// The slot claim at `depth`: my slot `depth` and the counterparty's
+    /// `depth - 1`, under the given commitments to each depth's state key
+    /// (all zero when only the shape matters).
+    pub fn slot_claim(&self, depth: u32, commits: impl Fn(u32) -> Vec<[Digest; 2]>) -> SlotClaim {
+        let spec = |d: u32| SlotSpec { depth: d as u8, mover: Self::mover_at(d).idx() as u8, commits: commits(d) };
+        SlotClaim {
             checkpoint: self.params.checkpoint,
             target: lngap_factchain::pow_target(),
-            n_headers: depth as usize,
             game_id: self.params.game_id,
-            depth: depth as u8,
-            mover: Self::mover_at(depth).idx() as u8,
+            depth: depth as usize,
+            prev: (depth >= 2).then(|| spec(depth - 1)),
+            own: spec(depth),
         }
     }
-    /// The venue entry for move `depth` leaving the board at `new`, with the
-    /// mover's reveals of the move and the new state.
-    pub fn entry(&self, depth: u32, mv: u8, new: &Board, mv_reveal: &Reveal, state_reveal: &Reveal) -> SlotEntry {
-        let preimages: Vec<[u8; 20]> = mv_reveal.preimages.iter().chain(&state_reveal.preimages).copied().collect();
+    /// The venue entry for move `depth` leaving the board at `new`, signed
+    /// with the mover's reveal of the new state.
+    pub fn entry(&self, depth: u32, mv: u8, new: &Board, state_reveal: &Reveal) -> SlotEntry {
+        assert_eq!(state_reveal.preimages.len(), STATE_BITS);
         SlotEntry {
             game_id: self.params.game_id,
             depth: depth as u8,
             mover: Self::mover_at(depth).idx() as u8,
             mv,
             state: bits_to_uint(&self.rules.state_bits(new)),
-            tag: SlotEntry::tag_of(&preimages),
+            sigs: state_reveal.preimages.clone(),
         }
     }
 }
@@ -166,15 +172,26 @@ impl Contract for TicTacToeFc {
     fn graph_shape(&self) -> GraphShape {
         GraphShape::Star
     }
-    /// A depth-`d` claim waits for slot `d + 1` to pass, and binds the
-    /// inclusion claim's entry word to the move and state reveals.
+    /// A depth-`d` claim waits for slot `d + 1` to pass, binds my entry's
+    /// word to the move and state reveals, and (from depth 2) the
+    /// counterparty's entry's word to my re-commitment of its state.
     fn move_extras(&self, depth: u32, _prover: Role) -> MoveExtras {
-        MoveExtras { cltv: Some(self.claim_from(depth)), expects: vec![], bind_end: Some(EndBind { word: E_WORD }) }
+        MoveExtras { cltv: Some(self.claim_from(depth)), expects: vec![], bind_end: Some(EndBind { word: E_WORD }), bind_prior: (depth >= 2).then_some(EndBind { word: E2_WORD }) }
     }
-    /// Every depth carries the slot claim for move `depth` (the contract's
-    /// state is always the empty board, so depth counts from move 1).
+    /// Every depth carries the slot claim for moves `depth - 1` and `depth`
+    /// (the contract's state is always the empty board, so depth counts
+    /// from move 1). Without keys the commitments are zero: the shape only.
     fn claim(&self, _from: &[bool], depth: u32) -> Option<ClaimSpec> {
-        Some(self.shape(depth).spec())
+        Some(self.slot_claim(depth, |_| vec![[[0u8; 20]; 2]; STATE_BITS]).spec())
+    }
+    /// With the keys: each depth's state commitments come from that
+    /// depth's `DepthKeys::state_n4`.
+    fn claim_bound(&self, _from: &[bool], depth: u32, keys: &[DepthKeys]) -> Option<ClaimSpec> {
+        let commits = |d: u32| {
+            let k = &keys[d as usize - 1].state_n4;
+            if k.len() == STATE_BITS { k.clone() } else { vec![[[0u8; 20]; 2]; STATE_BITS] }
+        };
+        Some(self.slot_claim(depth, commits).spec())
     }
     fn claim_data(&self, _from: &[bool], depth: u32) -> ClaimData {
         self.store.get(&Self::slot_key(self.params.game_id, depth)).unwrap_or_default()
@@ -199,7 +216,7 @@ mod tests {
         for d in 1..=9 {
             let spec = Contract::claim(&t, &init, d).unwrap();
             assert_eq!(spec.n_words, slot::N_WORDS);
-            assert_eq!(spec.steps.len(), (8 * d as usize + 6).next_power_of_two());
+            assert_eq!(spec.steps.len(), (8 * d as usize + 66 * if d >= 2 { 2 } else { 1 }).next_power_of_two());
         }
         assert_eq!(t.claim_from(3), 105);
         assert_eq!(TicTacToeFc::mover_at(1), Role::User);

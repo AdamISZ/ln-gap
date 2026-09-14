@@ -167,6 +167,47 @@ pub const G6: Scenario = Scenario {
     },
 };
 
+pub const G7: Scenario = Scenario {
+    id: "G7",
+    title: "A garbage-signed move is a stall",
+    expected: "the hub publishes move 4 with garbage in place of its signature and stalls; the user's timeout claim at depth 3 cannot be answered: commitment, move_3, split_3_UserWins",
+    run: || {
+        let mut b = honest();
+        b[Role::Hub.idx()].garbage_at = Some(4);
+        b[Role::Hub.idx()].passive = true;
+        let mut w = GameWorld::new("G7", b)?;
+        w.step_until(60, |w| w.contract_txs().iter().any(|r| r.starts_with("split_")))?;
+        w.steps(2)?;
+        let (c, m, s, d, o) = summary(&w);
+        ensure!(c == 1 && m == vec!["move_3".to_string()] && s == vec!["split_3_UserWins".to_string()], "{m:?} {s:?}");
+        ensure!(d.is_empty() && o.is_empty(), "nothing else: {d:?} {o:?}");
+        ensure!(w.h.balance(Role::User) > sat(100_000) + STAKE);
+        Ok(report(&w, &G7))
+    },
+};
+
+pub const G7B: Scenario = Scenario {
+    id: "G7B",
+    title: "A garbage-signed move cannot refute a timeout claim",
+    expected: "the hub answers the user's timeout claim with its garbage-signed move 4; the user disputes the inclusion claim and the bisection isolates the signature predicate (cpred)",
+    run: || {
+        let mut b = honest();
+        b[Role::Hub.idx()].garbage_at = Some(4);
+        b[Role::Hub.idx()].refute_with_garbage = true;
+        let mut w = GameWorld::new("G7B", b)?;
+        w.step_until(120, |w| w.contract_txs().iter().any(|r| r.starts_with("cpred_") || r.starts_with("simple_") || r.starts_with("ccopy_") || r.starts_with("flat_") || r.starts_with("re_") || r.starts_with("block_") || r.starts_with("ckeep_")))?;
+        w.steps(2)?;
+        let (_, m, s, _, o) = summary(&w);
+        ensure!(m == vec!["move_3".to_string(), "move_4".to_string()], "the claim and the garbage refutation: {m:?}");
+        ensure!(o.iter().any(|r| r == "r3/d4/dispute"), "the user disputes the refutation's claim: {o:?}");
+        ensure!(o.iter().any(|r| r.starts_with("cpred_")), "the signature predicate fails: {o:?}");
+        ensure!(s.is_empty());
+        ensure!(w.h.balance(Role::User) > sat(100_000) + STAKE - sat(25_000));
+        ensure!(w.h.balance(Role::Hub) < sat(100_000) - STAKE);
+        Ok(report(&w, &G7B))
+    },
+};
+
 pub fn scenarios() -> Vec<Scenario> {
-    vec![G1, G2A, G2B, G3, G4, G5, G6]
+    vec![G1, G2A, G2B, G3, G4, G5, G6, G7, G7B]
 }

@@ -25,7 +25,9 @@ response is therefore to resign.
 | G3 | the loser refuses the cooperative fold | commitment, `move_7` (terminal claim), `split_7_UserWins` |
 | G4 | a spurious timeout claim (the hub ignores a valid move 3) | commitment, `move_2`, the user's refutation `move_3` with its inclusion claim, `r2/split_3_UserWins`: the claimant forfeits |
 | G5 | the hub publishes an invalid move and claims it | commitment, `move_4`, `disprove_cell_occupied_0` |
-| G6 | the hub claims a move it never published | commitment, `move_4`, `d4/dispute`, 6 bisection rounds, re-commitments, `simple_root_ok`: disproved at the predicate |
+| G6 | the hub claims a move it never published | commitment, `move_4`, `d4/dispute`, 8 bisection rounds, re-commitments, `simple_ent_root`: disproved at the root predicate |
+| G7 | the hub publishes move 4 with garbage in place of its signature, then stalls | commitment, `move_3` (timeout claim), `split_3_UserWins`: an unsigned entry is not a post |
+| G7B | the hub answers the timeout claim with its garbage-signed move | `move_3`, refutation `move_4`, `r3/d4/dispute`, 8 rounds, re-commitments, `cpred_oe_s0a`: disproved at the signature predicate |
 
 G2A and G2B are the point: three transactions whether the stall happens at
 move 2 or move 6. The old tic-tac-toe (docs/SCENARIOS.md, T-scenarios)
@@ -35,13 +37,16 @@ plays the rest of the game on Bitcoin move by move after a force-close.
 
 **Venue.** One fact-chain block per Bitcoin block (a harness convenience).
 The block `d` after the contract opened is *slot* `d`, and move `d` must
-sit in it: a move published later is a stall. The entry is 28 bytes,
-`(game_id, depth, mover, move, state, tag)`, where the tag is the hash of
-the mover's Lamport preimages for the move and state, which are served
-alongside (`docs/DECISIONS.md` D20 convention: content-only entries,
-auxiliary data served). Anyone verifies a published move against the
-mover's pinned per-depth key; the counterparty stores the mover's state
-reveal, since it is the prior of any claim the counterparty later makes.
+sit in it: a move published later is a stall. The entry is 428 bytes:
+8 bytes of content, `(game_id, depth, mover, move, state)`, followed by the
+mover's 21 Lamport preimages for the state bits, its signature. A block's
+root is a two-level hash (D23): the content, then the claim-native digest
+of each 20-byte chunk. Anyone verifies a published move against the
+mover's pinned commitments; an entry whose preimages do not open the key
+is not a move (G7). The counterparty never needs the mover's secrets: a
+claim re-commits the counterparty's state under the claimant's own key
+and proves, from the venue alone, that the counterparty published exactly
+that state, signed.
 
 **Contract.** `ttt-fc:{game_id, checkpoint, btc_open, grace}`, opened once
 at the empty board with each side staking `STAKE + RESERVE` (50k + 15k
@@ -54,10 +59,11 @@ than resigning. The pre-signed graph is a *star* (`GraphShape::Star`):
   `R(empty board)`), and a claim leaf `move_d` for every depth `d` in
   `1..=9`;
 - a claim at depth `d` (prover: the mover of move `d`) reveals the
-  counterparty's state at `d - 1` (its own Lamport reveal, read off the
-  venue), move `d`, the new state and the outcome code `R(s_d)`, and
+  counterparty's state at `d - 1` under the prover's own re-commitment
+  key, move `d`, the new state and the outcome code `R(s_d)`, and
   commits a *slot claim*: the fact-chain header chain from the checkpoint
-  to slot `d` and the entry, with predicates (§3). `R(s_d)` is the result
+  to slot `d`, the counterparty's entry in slot `d - 1` and the prover's
+  in slot `d`, with predicates (§3). `R(s_d)` is the result
   if `s_d` is terminal and "the party on turn forfeits" otherwise, so a
   claim at a non-terminal state is a *timeout claim*. Its leaf carries
   `CLTV btc_open + d + 1 + grace`: the counterparty's slot passes first;
@@ -69,8 +75,10 @@ than resigning. The pre-signed graph is a *star* (`GraphShape::Star`):
   `d + 1` and its claim, and the splits. No further move: a refuted
   timeout claim ends with `R(s_{d+1})`, the claimant on turn, forfeiting.
 
-The graph has 742 pre-signed transactions (9 claims + 8 refutations, each
-with 3 splits and a dispute chain) and opens in about 12 s (debug build).
+The graph has 882 pre-signed transactions (9 claims + 8 refutations, each
+with 3 splits and a dispute chain) and opens in about 45 s (debug build;
+most of it is building the dispute terminal trees, which carry one
+predicate leaf per signature step).
 
 **Escalation.** A party whose opponent's slot passed without a valid move
 queues a claim; the party force-closes when the claim's `CLTV` is within
@@ -81,21 +89,36 @@ machinery: disproofs, bisection, timeouts, splits.
 
 ## 3. The slot claim (`lngap_factchain::slot`)
 
-A 16-word register file: `D` (the hash state), `P` (previous digest), `R`
-(the last header's root field), `E` (the entry's `(move, state)` word).
-Per header: 6 absorbs of 16 nibbles with `EqNibbles` predicates tying the
-header's `prev` field to `P` and copies of its `root` field into `R`, a
-zero pad block, then a simple step checking `LeTargetBe(D)` (proof of
-work) and copying `D` to `P`. Then the entry: 4 absorbs, the first with
-`EqConst` on `(game_id, depth, mover)` and a copy of `(move, state)` into
-`E`, a pad block, and `root_ok: EqNibbles(D, R)`. `8 d + 6` steps, padded
-to a power of two: 16 steps (4 rounds) at depth 1, 128 (7 rounds) at
-depth 9.
+A 17-word register file: `D` (the hash state), `P` (previous digest), `R`
+(the current header's root field), `E` (my entry's `(move, state)` word),
+`E2` (the counterparty's). Per header: 6 absorbs of 16 nibbles with
+`EqNibbles` predicates tying the header's `prev` field to `P` and copies of
+its `root` field into `R`, a zero pad block, then a simple step checking
+`LeTargetBe(D)` (proof of work) and copying `D` to `P`. After header
+`d - 1` the counterparty's entry, after header `d` mine: 64 absorbs of the
+512-byte entry stream. The first block is the content, with `EqConst` on
+`(game_id, depth, mover)` and a copy of `(move, state)` into `E2` or `E`.
+The next 63 blocks are the 21 digests of the entry's chunks, the mover's
+preimages, each checked with `EqConstBit`: the digest must equal the
+commitment `h(p0)` or `h(p1)` pinned for that state bit, selected by the
+bit's value in the content word already sitting in `E2` or `E`. Then a pad
+block and `ent_root: EqNibbles(D, R)`. `8 d + 66` steps at depth 1,
+`8 d + 132` from depth 2, padded to a power of two: 128 steps (7 rounds)
+at depth 1, 256 (8 rounds) from depth 2 to 9.
 
-The Move leaf binds `E` to the Lamport reveals (`EndBind`): it decodes the
-move and state to numbers, verifies the WOTS end state, and compares the
-nibbles of word `E`. So the claim proves "slot `d` holds an entry saying
-`(mover, move, state)`" and the disproofs judge exactly that move.
+The claim never hashes a preimage. The block's root already commits to
+the digests of the entry's chunks; the predicates tie each digest to the
+mover's key and to the state the entry states. So "a valid move in slot
+`d`" is fully objective on-chain, and a garbage-signed entry fails its own
+inclusion claim (G7, G7B).
+
+The Move leaf binds the registers to the Lamport reveals (`EndBind`): it
+decodes the prior, move and state to numbers, verifies the WOTS end
+state, and compares the state nibbles of `E2` with the prior and the
+nibbles of `E` with the move and state. So the disproofs judge exactly the
+moves the venue holds, and the prior is the claimant's own commitment,
+verified by its own leaf with HASH160; the counterparty's HASH160 key is
+never needed by anyone but the counterparty (D27).
 
 None of this held before this branch: the fact-chain claim absorbed
 8-byte blocks with a round counter indexed by the step's position in the
@@ -109,26 +132,26 @@ be expressed and the builder skipped them (D23). The chain now hashes with
 | transaction | vsize |
 |---|---|
 | commitment | 240 vB |
-| claim `move_d` (prior reveal 21 + move 4 + state 21 + code 2 preimages, WOTS end state over 64 bytes) | 3,885–4,274 vB |
-| refutation `r{d}/move_{d+1}` | 4,273 vB |
+| claim `move_d` (prior 21 + move 4 + state 21 + code 2 preimages, WOTS end state over 68 bytes) | 4,077–4,505 vB |
+| refutation `r{d}/move_{d+1}` | 4,497 vB |
 | split | 217 vB |
 | `disprove_cell_occupied_0` | 288 vB |
-| bisection: `dispute` 194, `p_round` 3,324 × 6, `q_round` 181 × 6, `c_re_cur`/`c_re_next` 3,324 × 2, `simple_root_ok` 6,993 | 34.9 kvB in 16 transactions |
+| bisection (G6): `dispute` 194, `p_round` 3,516 × 8, `q_round` 181 × 8, `c_re_cur`/`c_re_next` 3,516 × 2, `simple_ent_root` 7,410 | 44.2 kvB in 20 transactions |
+| bisection (G7B): as above but `p_re_cur` 4,002, `p_re_next` 3,515, `cpred_oe_s0a` 4,164 | 41.5 kvB in 20 transactions |
 
-Stall or refused fold: 3 transactions, about 4.7 kvB, at any depth. The
-claim transaction is dominated by the WOTS commitment of the 64-byte end
-state; a smaller register file (or committing only `E` and `D`) would
-roughly halve it.
+Stall or refused fold: 3 transactions, about 5.0 kvB, at any depth. The
+claim transaction is dominated by the WOTS commitment of the 68-byte end
+state; a smaller register file would roughly halve it. Before the
+signature check (commit `14fddd1`) the figures were 742 pre-signed
+transactions, 4.3 kvB per claim and 35 kvB / 16 transactions per
+dispute: the check costs one bisection round and about a quarter of the
+dispute, and nothing on the stall path.
 
 ## 5. Known gaps
 
-1. **Entry authentication is not checked on-chain.** The claim binds the
-   entry's 8-byte content to the reveal; the 20-byte tag over the
-   preimages is not verified by any leaf. A mover can publish the right
-   content with garbage preimages: the counterparty cannot build a claim
-   from it and cannot exhibit the garbage either. Same class as the
-   served-data gap (D19); the fix is hashing the preimages inside the
-   claim (n4bit-keyed Lamport, conditional predicates). D27.
+1. **Resolved: entry signatures are verified by the claim** (D27, G7,
+   G7B). What remains is the served-data gap for the bisection itself
+   (D19): a prover serving different data than it commits is not caught.
 2. **No summons response on Bitcoin.** A party late on the venue
    forfeits; the design record's summons rule (answer an absence claim by
    acting on Bitcoin) only matters under venue censorship, which a

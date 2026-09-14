@@ -60,6 +60,8 @@ pub struct MoveExtras {
     pub expects: Vec<Extra>,
     /// Bind the claim's end state to the move and state reveals.
     pub bind_end: Option<EndBind>,
+    /// Bind the state nibbles of an end-state word to the prior reveal.
+    pub bind_prior: Option<EndBind>,
 }
 
 /// The shape of a contract's pre-signed graph.
@@ -175,6 +177,12 @@ pub trait Contract: Send + Sync + Debug + 'static {
     fn graph_shape(&self) -> GraphShape {
         GraphShape::Chain
     }
+    /// The claim with the instance's keys bound in (commitments a claim
+    /// checks published data against). Same shape as [`Contract::claim`].
+    fn claim_bound(&self, from: &[bool], depth: u32, keys: &[instance::DepthKeys]) -> Option<claim::ClaimSpec> {
+        let _ = keys;
+        self.claim(from, depth)
+    }
 
     fn describe_state(&self, s: &Self::State) -> String {
         format!("{s:?}")
@@ -200,6 +208,7 @@ pub trait Program: Send + Sync + Debug {
     fn claim(&self, from: &[bool], depth: u32) -> Option<claim::ClaimSpec>;
     fn claim_data(&self, from: &[bool], depth: u32) -> claim::ClaimData;
     fn graph_shape(&self) -> GraphShape;
+    fn claim_bound(&self, from: &[bool], depth: u32, keys: &[instance::DepthKeys]) -> Option<claim::ClaimSpec>;
     fn describe_state_bits(&self, s: &[bool]) -> String;
     fn describe_move_bits(&self, m: &[bool]) -> String;
 
@@ -256,6 +265,9 @@ impl<C: Contract> Program for C {
     }
     fn graph_shape(&self) -> GraphShape {
         Contract::graph_shape(self)
+    }
+    fn claim_bound(&self, from: &[bool], depth: u32, keys: &[instance::DepthKeys]) -> Option<claim::ClaimSpec> {
+        Contract::claim_bound(self, from, depth, keys)
     }
     fn describe_state_bits(&self, s: &[bool]) -> String {
         match self.state_from_bits(s) {

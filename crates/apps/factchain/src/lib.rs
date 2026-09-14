@@ -39,6 +39,49 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Header size in bytes.
 pub const HEADER_BYTES: usize = 48;
 
+/// A block's entry hashes in two levels, so that a claim can verify the
+/// digest of each 20-byte chunk (a published Lamport preimage) against a
+/// pinned commitment without hashing the chunk itself: the entry's first
+/// `ENTRY_HEAD` bytes, then the claim-native digest of each following
+/// `CHUNK`-byte chunk padded to `CHUNK_PAD`, zero-padded to `STREAM_BYTES`
+/// (at most `MAX_CHUNKS` chunks). The root is the claim-native hash of
+/// that stream, `64` absorb blocks for every entry.
+pub const ENTRY_HEAD: usize = 8;
+pub const CHUNK: usize = 20;
+pub const CHUNK_PAD: usize = 24;
+pub const MAX_CHUNKS: usize = 21;
+pub const STREAM_BYTES: usize = ENTRY_HEAD + MAX_CHUNKS * CHUNK_PAD;
+
+/// The chunks after the head, the last zero-padded.
+pub fn entry_chunks(entry: &[u8]) -> Vec<[u8; CHUNK]> {
+    let rest = entry.get(ENTRY_HEAD..).unwrap_or(&[]);
+    rest.chunks(CHUNK)
+        .map(|c| {
+            let mut a = [0u8; CHUNK];
+            a[..c.len()].copy_from_slice(c);
+            a
+        })
+        .collect()
+}
+
+/// The stream whose claim-native hash is the entry's root.
+pub fn entry_stream(entry: &[u8]) -> Vec<u8> {
+    let chunks = entry_chunks(entry);
+    assert!(chunks.len() <= MAX_CHUNKS, "entry of {} bytes has more than {MAX_CHUNKS} chunks", entry.len());
+    let mut s = vec![0u8; STREAM_BYTES];
+    let n = entry.len().min(ENTRY_HEAD);
+    s[..n].copy_from_slice(&entry[..n]);
+    for (i, c) in chunks.iter().enumerate() {
+        s[ENTRY_HEAD + i * CHUNK_PAD..ENTRY_HEAD + i * CHUNK_PAD + CHUNK].copy_from_slice(&hash(c));
+    }
+    s
+}
+
+/// The root a block carries for `entry`.
+pub fn entry_root(entry: &[u8]) -> Digest {
+    hash(&entry_stream(entry))
+}
+
 /// Fixed PoW difficulty for the PoC: 5 leading zero bits.
 pub const DIFFICULTY_BITS: u32 = 5;
 
@@ -128,7 +171,7 @@ pub struct Block {
 impl Block {
     /// Build a block (unmined, nonce = 0). The root is the hash of the entry.
     pub fn new(prev: &Digest, height: u32, entry: &[u8]) -> Block {
-        let root = hash(entry);
+        let root = entry_root(entry);
         Block {
             header: Header::new(prev, &root, height),
             entry: entry.to_vec(),
@@ -140,7 +183,7 @@ impl Block {
         if !self.header.meets_pow() {
             return Err(format!("PoW failed at height {}", self.header.height()));
         }
-        let computed_root = hash(&self.entry);
+        let computed_root = entry_root(&self.entry);
         if computed_root != self.header.root() {
             return Err(format!(
                 "root mismatch at height {}: header says {} but hash(entry) = {}",
@@ -164,7 +207,7 @@ impl Block {
 /// The genesis block: height 0, prev = all-zeros, empty entry.
 pub fn genesis() -> Block {
     let entry = vec![];
-    let root = hash(&entry);
+    let root = entry_root(&entry);
     let mut header = Header::new(&[0u8; DIGEST_BYTES], &root, 0);
     // Mine the genesis
     mine(&mut header);
@@ -360,7 +403,7 @@ impl FactShape {
         }
         // Entry hash = root of the last header
         let last = data.headers.last().unwrap();
-        let computed = hash(&data.entry);
+        let computed = entry_root(&data.entry);
         if computed != last.root() {
             return Err(format!(
                 "entry hash mismatch: header root {} but hash(entry) = {}",

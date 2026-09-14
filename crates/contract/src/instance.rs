@@ -24,6 +24,15 @@ pub struct DepthKeys {
     pub code: PublicKey,
     /// Present iff the program has a claim.
     pub claim: Option<ClaimKeys>,
+    /// Star graphs, depth ≥ 2: the prover's own re-commitment of the
+    /// counterparty's state at the previous depth (the Move's prior).
+    #[serde(default)]
+    pub prior: Option<PublicKey>,
+    /// Star graphs: claim-native commitments to the state key's preimages,
+    /// `[h(p0), h(p1)]` per bit, so a claim can check a published state's
+    /// signature without ever handling the preimages.
+    #[serde(default)]
+    pub state_n4: Vec<[[u8; 20]; 2]>,
 }
 
 /// Label under which a party generates/reveals a Lamport key.
@@ -129,20 +138,26 @@ impl ContractInstance {
             ensure!(challenger_keys.is_empty() && keys.iter().all(|k| k.claim.is_none()), "claim keys on a program without a claim");
         }
         let mut prover = program.turn_bits(&state)?;
+        let star = program.graph_shape() == GraphShape::Star;
         for (i, k) in keys.iter().enumerate() {
             let p = prover.ok_or_else(|| anyhow!("keys for depth {} but the contract is terminal", i + 1))?;
             ensure!(k.prover == p, "depth {}: prover should be {p}", i + 1);
             ensure!(k.mv.n_bits() == program.n_move_bits(), "depth {}: move key size", i + 1);
             ensure!(k.state.n_bits() == program.n_state_bits(), "depth {}: state key size", i + 1);
             ensure!(k.code.n_bits() == CODE_BITS, "depth {}: code key size", i + 1);
+            if star {
+                ensure!(k.state_n4.len() == program.n_state_bits(), "depth {}: claim-native state commitments", i + 1);
+                ensure!(k.prior.as_ref().map(|p| p.n_bits()) == (i >= 1).then_some(program.n_state_bits()), "depth {}: prior key", i + 1);
+            }
             prover = Some(p.other());
         }
         Ok(ContractInstance { id, program, value, state, deadline, keys_seq, keys, challenger_keys })
     }
 
-    /// The claim the `depth`-th move from this instance's state commits.
+    /// The claim the `depth`-th move from this instance's state commits,
+    /// with the keys' commitments bound in.
     pub fn claim_spec(&self, depth: u32) -> Option<ClaimSpec> {
-        self.program.claim(&self.state, depth)
+        self.program.claim_bound(&self.state, depth, &self.keys)
     }
     /// The served data for that claim.
     pub fn claim_data(&self, depth: u32) -> crate::claim::ClaimData {
@@ -208,10 +223,10 @@ impl ContractInstance {
     }
     pub fn leaf_ctx(&self, depth: u32) -> LeafCtx {
         let k = self.depth_keys(depth);
-        let prior = if depth == 1 {
-            PriorState::Constant(self.state.clone())
-        } else {
-            PriorState::Committed(self.depth_keys(depth - 1).state.clone())
+        let prior = match self.prior_key(depth) {
+            Some(pk) => PriorState::Committed(pk.clone()),
+            None if depth == 1 => PriorState::Constant(self.state.clone()),
+            None => PriorState::Committed(self.depth_keys(depth - 1).state.clone()),
         };
         LeafCtx { depth, prover: k.prover, prior, mv: k.mv.clone(), new: k.state.clone(), code: k.code.clone(), outcomes: self.program.outcomes() }
     }
@@ -231,10 +246,11 @@ impl ContractInstance {
         self.program.graph_shape()
     }
     /// The key of the state a depth-`d` Move leaf must reveal as its prior
-    /// (star graphs, `d ≥ 2`: the previous prover's depth-`(d-1)` state key).
+    /// (star graphs, `d ≥ 2`: the prover's own re-commitment of the
+    /// counterparty's state, bound to the claim's copy of the venue entry).
     pub fn prior_key(&self, depth: u32) -> Option<&PublicKey> {
         if self.graph_shape() == GraphShape::Star && depth >= 2 {
-            Some(&self.depth_keys(depth - 1).state)
+            self.depth_keys(depth).prior.as_ref()
         } else {
             None
         }

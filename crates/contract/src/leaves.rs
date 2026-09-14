@@ -263,8 +263,13 @@ pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, prior: Option<&Publi
         tl.csv = Some(ctx.params.to_self_delay);
     }
     b = ctx.two_of_two_verify(b);
+    let bind_prior = extras.bind_prior.as_ref().filter(|_| claim_end.is_some() && prior.is_some());
     if let Some(p) = prior {
-        b = reveal_verify(b, p);
+        if bind_prior.is_some() {
+            b = b.decode_uint(p).push_opcode(OP_TOALTSTACK);
+        } else {
+            b = reveal_verify(b, p);
+        }
     }
     let bind = extras.bind_end.as_ref().filter(|_| claim_end.is_some());
     if bind.is_some() {
@@ -285,6 +290,9 @@ pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, prior: Option<&Publi
         if let Some(bind) = bind {
             b = bind_check(b, end.params.message_digits as usize, bind.word);
         }
+        if let Some(bp) = bind_prior {
+            b = fold_state(b, end.params.message_digits as usize, bp.word).push_opcode(OP_FROMALTSTACK).push_opcode(OP_NUMEQUALVERIFY);
+        }
         for _ in 0..end.params.message_digits / 2 {
             b = b.push_opcode(OP_2DROP);
         }
@@ -296,7 +304,9 @@ pub fn move_leaf(ctx: &CommitCtx, depth: u32, prover: Role, prior: Option<&Publi
 /// decoded state (top) and move on the altstack: nibble `8 word` is zero,
 /// nibble `8 word + 1` is the move, and nibbles `8 word + 2 ..= 8 word + 7`
 /// read as a number are the state. Consumes the altstack values.
-fn bind_check(mut b: Builder, n: usize, word: usize) -> Builder {
+/// With `n` message nibbles on the stack (nibble `n-1` on top), push the
+/// number formed by nibbles `8 word + 2 ..= 8 word + 7` (a word's low 24 bits).
+fn fold_state(mut b: Builder, n: usize, word: usize) -> Builder {
     let d = |i: usize| (n - 1 - i) as i64;
     let base = 8 * word;
     b = b.push_int(d(base + 2)).push_opcode(OP_PICK);
@@ -306,6 +316,13 @@ fn bind_check(mut b: Builder, n: usize, word: usize) -> Builder {
         }
         b = b.push_int(d(base + k) + 1).push_opcode(OP_PICK).push_opcode(OP_ADD);
     }
+    b
+}
+
+fn bind_check(mut b: Builder, n: usize, word: usize) -> Builder {
+    let d = |i: usize| (n - 1 - i) as i64;
+    let base = 8 * word;
+    b = fold_state(b, n, word);
     b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_NUMEQUALVERIFY);
     b = b.push_int(d(base + 1)).push_opcode(OP_PICK).push_opcode(OP_FROMALTSTACK).push_opcode(OP_NUMEQUALVERIFY);
     b.push_int(d(base)).push_opcode(OP_PICK).push_int(0).push_opcode(OP_NUMEQUALVERIFY)

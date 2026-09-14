@@ -87,6 +87,39 @@ pub(crate) fn preds_script(b: &mut Builder, preds: &[Pred], n: usize) -> usize {
                 bb = bb.push_opcode(OP_TOALTSTACK);
                 results += 1;
             }
+            Pred::EqConstBit { nib, bit, off, if0, if1 } => {
+                assert_eq!(if0.len(), if1.len());
+                // the selector bit: the nibble lies in one of the ranges where bit `bit` is set
+                let step = 1usize << (bit + 1);
+                let half = 1usize << bit;
+                let ranges: Vec<(i64, i64)> = (0..16 / step).map(|m| ((m * step + half) as i64, (m * step + step) as i64)).collect();
+                bb = bb.push_int(d(*nib)).push_opcode(OP_PICK);
+                for (k, (lo, hi)) in ranges.iter().enumerate() {
+                    if k + 1 < ranges.len() {
+                        bb = bb.push_opcode(OP_DUP);
+                    }
+                    bb = bb.push_int(*lo).push_int(*hi).push_opcode(OP_WITHIN);
+                    if k + 1 < ranges.len() {
+                        bb = bb.push_opcode(OP_TOALTSTACK);
+                    }
+                }
+                for _ in 1..ranges.len() {
+                    bb = bb.push_opcode(OP_FROMALTSTACK).push_opcode(OP_BOOLOR);
+                }
+                // both branches push the same number of results
+                bb = bb.push_opcode(OP_IF);
+                for (k, c) in if1.iter().enumerate() {
+                    bb = bb.push_int(d(off + k)).push_opcode(OP_PICK);
+                    bb = push_scriptnum(bb, *c).push_opcode(OP_EQUAL).push_opcode(OP_TOALTSTACK);
+                }
+                bb = bb.push_opcode(OP_ELSE);
+                for (k, c) in if0.iter().enumerate() {
+                    bb = bb.push_int(d(off + k)).push_opcode(OP_PICK);
+                    bb = push_scriptnum(bb, *c).push_opcode(OP_EQUAL).push_opcode(OP_TOALTSTACK);
+                }
+                bb = bb.push_opcode(OP_ENDIF);
+                results += if0.len();
+            }
         }
     }
     *b = bb;
