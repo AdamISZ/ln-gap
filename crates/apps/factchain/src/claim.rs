@@ -156,12 +156,11 @@ impl FactChainShape {
         let mut data = Vec::new();
         for h in headers {
             let w = words(h);
-            // 6 absorb steps (2 words each = 12 words = all header data)
+            // 6 absorb steps (2 words each = 12 words = all header data);
+            // the padding step has constant sources and takes no data
             for b in 0..6 {
                 data.push(vec![w[b * 2], w[b * 2 + 1]]);
             }
-            // 7th step: padding block (2 zero words)
-            data.push(vec![0u32, 0u32]);
         }
         data
     }
@@ -260,7 +259,7 @@ mod tests {
 
     #[test]
     fn spec_validates() {
-        let g = lngap_n4bit::hash(&[]);
+        let g = lngap_n4bit::hash_claim(&[]);
         let shape = FactChainShape {
             checkpoint: g,
             target: lngap_n4bit::target_from_difficulty(5),

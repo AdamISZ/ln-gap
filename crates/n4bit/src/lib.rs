@@ -250,6 +250,60 @@ pub fn hash(input: &[u8]) -> Digest {
     digest
 }
 
+/// Nibbles per absorb block of the claim-native hash (two 32-bit words).
+pub const CLAIM_BLOCK_NIBBLES: usize = 16;
+
+/// The claim-native hash: exactly what a `ClaimSpec` over `HashKind::N4Bit`
+/// computes, so that a chain built with it can be verified by bisection.
+///
+/// Differences from [`hash`]: the input is absorbed in 16-nibble (8-byte)
+/// blocks zero-padded to the 20-nibble rate (one block = two 32-bit claim
+/// words), the round counter restarts at 0 for every message and advances
+/// by `ROUNDS` per block, the padding is one final all-zero block (no
+/// `+1`), and the digest is the whole 40-nibble state with no squeeze.
+/// A 48-byte header is 6 data blocks + 1 pad block = 7 compression steps;
+/// an empty input is 1 data block (all zero) + 1 pad block.
+pub fn hash_claim(input: &[u8]) -> Digest {
+    let nibbles = bytes_to_nibbles(input);
+    let n_blocks = nibbles.len().div_ceil(CLAIM_BLOCK_NIBBLES).max(1);
+    let mut state = [0u8; STATE_NIBBLES];
+    let mut round_counter = 0;
+    for k in 0..n_blocks {
+        let mut block = [0u8; RATE_NIBBLES];
+        let lo = k * CLAIM_BLOCK_NIBBLES;
+        let hi = (lo + CLAIM_BLOCK_NIBBLES).min(nibbles.len());
+        if lo < nibbles.len() {
+            block[..hi - lo].copy_from_slice(&nibbles[lo..hi]);
+        }
+        sponge_absorb(&mut state, &block, round_counter);
+        round_counter += ROUNDS;
+    }
+    sponge_absorb(&mut state, &[0u8; RATE_NIBBLES], round_counter);
+    let bytes = nibbles_to_bytes(&state);
+    let mut digest = [0u8; DIGEST_BYTES];
+    digest.copy_from_slice(&bytes);
+    digest
+}
+
+/// The claim-native hash's data blocks as pairs of big-endian 32-bit words
+/// (one pair per compression step; the pad step takes no data).
+pub fn claim_blocks(input: &[u8]) -> Vec<[u32; 2]> {
+    let n_blocks = (2 * input.len()).div_ceil(CLAIM_BLOCK_NIBBLES).max(1);
+    (0..n_blocks)
+        .map(|k| {
+            let mut w = [0u32; 2];
+            for (j, word) in w.iter_mut().enumerate() {
+                let mut a = [0u8; 4];
+                for (i, byte) in a.iter_mut().enumerate() {
+                    *byte = input.get(8 * k + 4 * j + i).copied().unwrap_or(0);
+                }
+                *word = u32::from_be_bytes(a);
+            }
+            w
+        })
+        .collect()
+}
+
 /// Check whether a digest meets a target (digest <= target, big-endian
 /// comparison). This mirrors the LeTarget predicate in the claim model but
 /// in native code.

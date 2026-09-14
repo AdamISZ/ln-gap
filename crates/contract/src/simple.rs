@@ -74,6 +74,19 @@ pub(crate) fn preds_script(b: &mut Builder, preds: &[Pred], n: usize) -> usize {
                 bb = bb.push_opcode(OP_TOALTSTACK);
                 results += 1;
             }
+            Pred::LeTargetBe { off, target } => {
+                // big-endian: the last nibble is least significant; fold from it up
+                let len = target.len();
+                bb = bb.push_int(d(off + len - 1)).push_opcode(OP_PICK);
+                bb = push_scriptnum(bb, target[len - 1]).push_opcode(OP_LESSTHANOREQUAL);
+                for k in (0..len - 1).rev() {
+                    bb = bb.push_int(d(off + k) + 1).push_opcode(OP_PICK).push_opcode(OP_DUP);
+                    bb = push_scriptnum(bb, target[k]).push_opcode(OP_LESSTHAN).push_opcode(OP_SWAP);
+                    bb = push_scriptnum(bb, target[k]).push_opcode(OP_EQUAL).push_opcode(OP_ROT).push_opcode(OP_BOOLAND).push_opcode(OP_BOOLOR);
+                }
+                bb = bb.push_opcode(OP_TOALTSTACK);
+                results += 1;
+            }
         }
     }
     *b = bb;

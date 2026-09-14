@@ -680,7 +680,7 @@ fn flat_round_leaf(
     let d_nibbles = spec.d_nibbles();
     let bw = spec.hash.block_words();
     let n_rounds = spec.hash.n_rounds() as usize;
-    let round_counter = step_idx * n_rounds;
+    let round_counter = spec.round_counter(step_idx);
     let step = &spec.steps[step_idx];
     let init = match step { Step::Compress { init, .. } => *init, _ => unreachable!() };
 

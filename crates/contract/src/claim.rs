@@ -94,6 +94,10 @@ pub enum Pred {
     /// `D` (words 0..8, as the 32 hash bytes) read as a 256-bit little-endian
     /// number is at most `target` (little-endian bytes).
     LeTarget { target: [u8; 32] },
+    /// Nibbles `[off, off + target.len())` read as a big-endian number are
+    /// at most `target` (nibbles, most significant first). The n4bit PoW
+    /// check: `D` is the whole 40-nibble state and targets compare big-endian.
+    LeTargetBe { off: usize, target: Vec<u8> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -357,6 +361,15 @@ impl Pred {
                 }
                 true
             }
+            Pred::LeTargetBe { off, target } => {
+                for (k, t) in target.iter().enumerate() {
+                    let nib = n[*off + k];
+                    if nib != *t {
+                        return nib < *t;
+                    }
+                }
+                true
+            }
         }
     }
     pub fn name(&self) -> String {
@@ -364,6 +377,7 @@ impl Pred {
             Pred::EqConst { off, nibbles } => format!("eq_const@{off}x{}", nibbles.len()),
             Pred::EqNibbles { a, b, n } => format!("eq@{a}={b}x{n}"),
             Pred::LeTarget { .. } => "le_target".into(),
+            Pred::LeTargetBe { off, target } => format!("le_be@{off}x{}", target.len()),
         }
     }
 }
@@ -461,10 +475,26 @@ impl ClaimSpec {
         }
         (init_w, b)
     }
+    /// The n4bit round counter of compression step `step_index`: `ROUNDS`
+    /// times its block index within its message, a message starting at the
+    /// nearest preceding compression with `Init::Iv` (or at step 0). This
+    /// is what makes every message hash to the same digest wherever it sits
+    /// in the claim, i.e. what `lngap_n4bit::hash_claim` computes.
+    pub fn round_counter(&self, step_index: usize) -> usize {
+        let mut start = 0;
+        for i in (0..=step_index.min(self.steps.len().saturating_sub(1))).rev() {
+            if matches!(self.steps[i], Step::Compress { init: Init::Iv, .. }) {
+                start = i;
+                break;
+            }
+        }
+        let blocks = self.steps[start..step_index].iter().filter(|s| matches!(s, Step::Compress { .. })).count();
+        blocks * self.hash.n_rounds() as usize
+    }
     /// Apply one step (`data` for a compression with data sources). Returns
     /// the output state and whether the step's predicates held.
-    /// `step_index` is the step's position in the spec (used for n4bit round
-    /// counter accumulation; ignored for SHA-256).
+    /// `step_index` is the step's position in the spec (used for the n4bit
+    /// round counter, see [`ClaimSpec::round_counter`]; ignored for SHA-256).
     pub fn apply(&self, step_index: usize, step: &Step, state: &[u32], data: &[u32]) -> (Vec<u32>, bool) {
         let mut n = state_nibbles(state);
         let (out_d, space): (Option<Vec<u32>>, Vec<u8>) = match step {
@@ -488,7 +518,7 @@ impl ClaimSpec {
                         let mut block = [0u8; lngap_n4bit::RATE_NIBBLES];
                         let n = bn.len().min(lngap_n4bit::RATE_NIBBLES);
                         block[..n].copy_from_slice(&bn[..n]);
-                        let round_counter = step_index * lngap_n4bit::ROUNDS;
+                        let round_counter = self.round_counter(step_index);
                         lngap_n4bit::sponge_absorb(&mut st, &block, round_counter);
                         nibbles_state(&st)
                     }

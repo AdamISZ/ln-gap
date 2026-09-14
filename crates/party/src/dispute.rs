@@ -231,7 +231,7 @@ impl DisputeLive {
             }
             HashKind::N4Bit => {
                 let (_, _, step) = self.isolated_step();
-                let states = n4bit_round_states(&init, &block, step as usize, cheat);
+                let states = n4bit_round_states(&init, &block, self.spec.round_counter(step as usize), cheat);
                 self.my_sched = Some(vec![]);
                 self.my_inner = Some(states);
             }
@@ -378,7 +378,7 @@ impl DisputeLive {
                 let s_nibbles = lngap_contract::claim::state_nibbles(&s_in);
                 let mut st: [u8; lngap_n4bit::STATE_NIBBLES] = s_nibbles.as_slice().try_into().unwrap();
                 let (_, _, step) = self.isolated_step();
-                let round_counter = step as usize * lngap_n4bit::ROUNDS;
+                let round_counter = self.spec.round_counter(step as usize);
                 lngap_n4bit::spn_round(&mut st, round_counter + r as usize);
                 let expect = lngap_contract::claim::nibbles_state(&st);
                 let claimed = self.inner_state(r + 1).ok_or_else(|| anyhow!("no inner state {}", r + 1))?;
@@ -524,7 +524,7 @@ pub fn parse_p_inner(tx: &Transaction, keys: &ClaimKeys, inner_path: &[u32], r: 
 
 /// Recompute the n4bit inner chain from init and block: absorbs the block
 /// into the state's rate, then runs all SPN rounds, recording each state.
-fn n4bit_round_states(init: &[u32], block: &[u8], step_idx: usize, cheat: Option<&dyn Fn(u32, &[u32]) -> Vec<u32>>) -> Vec<Vec<u32>> {
+fn n4bit_round_states(init: &[u32], block: &[u8], round_counter: usize, cheat: Option<&dyn Fn(u32, &[u32]) -> Vec<u32>>) -> Vec<Vec<u32>> {
     let init_nibbles = lngap_contract::claim::state_nibbles(init);
     let mut st: [u8; lngap_n4bit::STATE_NIBBLES] = init_nibbles.as_slice().try_into().unwrap();
     // Absorb block: ADD block nibbles to rate
@@ -536,7 +536,6 @@ fn n4bit_round_states(init: &[u32], block: &[u8], step_idx: usize, cheat: Option
         st[i] = (st[i] + rate[i]) % 16;
     }
     let mut v: Vec<Vec<u32>> = vec![lngap_contract::claim::nibbles_state(&st)];
-    let round_counter = step_idx * lngap_n4bit::ROUNDS;
     for r in 0..lngap_n4bit::ROUNDS {
         lngap_n4bit::spn_round(&mut st, round_counter + r);
         let s = lngap_contract::claim::nibbles_state(&st);

@@ -12,7 +12,9 @@
 //! prev(20)  root(20)  height(4)  nonce(4)  = 48 bytes
 //! ```
 //!
-//! - `prev`: 160-bit digest of the parent header (n4bit hash).
+//! - `prev`: 160-bit digest of the parent header (the claim-native n4bit
+//!   hash, `lngap_n4bit::hash_claim`, so that a bisection claim over the
+//!   header bytes computes exactly this digest).
 //! - `root`: 160-bit hash of the block's single entry (stage 1), or the
 //!   Merkle root of the ledger tree (stage 2+).
 //! - `height`: block height (u32 little-endian).
@@ -29,8 +31,9 @@
 //! No retargeting.
 
 pub mod claim;
+pub mod slot;
 
-use lngap_n4bit::{hash, meets_target, target_from_difficulty, Digest, DIGEST_BYTES};
+use lngap_n4bit::{hash_claim as hash, meets_target, target_from_difficulty, Digest, DIGEST_BYTES};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Header size in bytes.
