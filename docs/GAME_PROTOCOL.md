@@ -152,11 +152,12 @@ dispute, and nothing on the stall path.
 1. **Resolved: entry signatures are verified by the claim** (D27, G7,
    G7B). What remains is the served-data gap for the bisection itself
    (D19): a prover serving different data than it commits is not caught.
-2. **No summons response on Bitcoin.** A party late on the venue
-   forfeits; the design record's summons rule (answer an absence claim by
-   acting on Bitcoin) only matters under venue censorship, which a
-   one-miner world cannot produce. A spurious timeout claim is treated as
-   a lie and forfeits the whole stake.
+2. **Decided, not a gap: absence is final.** A party late on the venue
+   loses its bond, and a refuted timeout claim forfeits the claimant's.
+   The game never continues on Bitcoin (VENUE.md §4). The consequence is
+   that the venue's inclusion is load-bearing: censoring a move for one
+   slot takes a bond, which is what the venue's consensus must price
+   (VENUE.md §7).
 3. **One block per move.** The slot rule fixes every claim's header count
    at open. A response window needs prover-selected header counts
    (variable-length claims), which remain unbuilt.
