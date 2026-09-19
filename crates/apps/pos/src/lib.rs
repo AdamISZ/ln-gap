@@ -11,13 +11,16 @@
 //! subset of the header (the head for a stall refutation, the root for an
 //! entry exhibit) without a separate attestation form.
 //!
-//! The chain is SPARSE: the sealer produces a block only for a slot that
-//! carries an entry; slots strictly increase and `prev` links the previous
-//! published block. Absence is not a chain fact and needs none — a "Bob did
+//! The chain runs a CONSTANT CADENCE by default: one block per slot, empty
+//! if no entry is pending (various venue-level reasons may prefer or even
+//! require this — liveness, ordering for non-game apps). But density is a
+//! default, not a validity rule: clients accept any strictly increasing
+//! slot sequence, and the dispute layer never depends on it — a "Bob did
 //! not publish in the window" claim is enforced by the challenge window
 //! itself: a refutation that does not exist cannot be exhibited. (Density
-//! was a requirement of the D28 PoW stall claim's fixed-position header
-//! scan, which the thin PoS claim drops.)
+//! WAS a hard requirement of the D28 PoW stall claim's fixed-position
+//! header scan; the thin PoS claim drops that, and gaps are a liveness
+//! event, not a validity failure.)
 
 use lngap_ec_wots::{Attestation, Attester, EpochTable};
 use lngap_factchain::{entry_head, entry_root, Header, HEADER_BYTES, HEAD_BYTES};
@@ -116,9 +119,9 @@ pub fn genesis(attester: &Attester) -> (SealedBlock, EpochTable) {
     )
 }
 
-/// The sealer: accepts pending entries, builds blocks, attests them.
-/// SPARSE: `seal_next` produces nothing for a slot with no pending entry
-/// (see the crate docs).
+/// The sealer: accepts pending entries, builds blocks, attests them. One
+/// block per slot on a constant cadence — empty blocks seal empty slots
+/// (see the crate docs: cadence is the default, not a validity rule).
 pub struct PosMiner {
     attester: Attester,
     /// The slot of the last sealed block.
@@ -151,33 +154,35 @@ impl PosMiner {
         self.pending.len()
     }
 
-    /// Seal the first pending entry at `slot`. Returns Ok(None) when nothing
-    /// is pending — no block exists for a slot with no entry. `slot` must
-    /// follow the last sealed slot.
-    pub fn seal_next(&mut self, slot: u32) -> Result<Option<(SealedBlock, EpochTable)>, String> {
-        if self.pending.is_empty() {
-            return Ok(None);
-        }
+    /// Seal the block at `slot`: the first pending entry, or an empty block
+    /// (the cadence default). Returns the block and its epoch table
+    /// (registry data the venue publishes alongside). `slot` must follow
+    /// the last sealed slot.
+    pub fn seal_next(&mut self, slot: u32) -> Result<(SealedBlock, EpochTable), String> {
         if slot <= self.height {
             return Err(format!(
                 "slot {slot} does not follow the tip slot {}",
                 self.height
             ));
         }
-        let entry = self.pending.remove(0);
+        let entry = if self.pending.is_empty() {
+            Vec::new()
+        } else {
+            self.pending.remove(0)
+        };
         let header = Header::new(&self.tip, &entry_root(&entry), &entry_head(&entry), slot);
         let table = self.attester.epoch_table(slot as u64, HEADER_CHUNKS);
         let attestation = self.attester.attest(&table, header.as_bytes());
         self.tip = header.digest();
         self.height = slot;
-        Ok(Some((
+        Ok((
             SealedBlock {
                 header,
                 entry,
                 attestation,
             },
             table,
-        )))
+        ))
     }
 }
 
@@ -298,7 +303,11 @@ impl PosClient {
         let parent_slot = if block.header.prev() == self.checkpoint.1 {
             self.checkpoint.0
         } else {
-            match self.headers.iter().find(|h| h.digest() == block.header.prev()) {
+            match self
+                .headers
+                .iter()
+                .find(|h| h.digest() == block.header.prev())
+            {
                 Some(p) => p.height(),
                 None => return Err(format!("unknown parent for slot {slot}")),
             }
@@ -367,15 +376,26 @@ mod tests {
     }
 
     #[test]
-    fn sparse_chain_verifies() {
+    fn cadence_seals_empty_slots() {
+        let (mut miner, mut client) = boot();
+        // Nothing pending: the slot still gets its (empty) block.
+        let (b1, t1) = miner.seal_next(1).unwrap();
+        assert!(b1.entry.is_empty());
+        assert_eq!(b1.header.head(), [0u8; HEAD_BYTES]);
+        client.verify_and_append(&b1, &t1).unwrap();
+    }
+
+    #[test]
+    fn chain_verifies_with_gaps() {
         let (mut miner, mut client) = boot();
         miner.submit(b"move at slot 1".to_vec());
         miner.submit(b"move at slot 3".to_vec());
         miner.submit(b"move at slot 7".to_vec());
-        let (b1, t1) = miner.seal_next(1).unwrap().unwrap();
-        let (b3, t3) = miner.seal_next(3).unwrap().unwrap();
-        let (b7, t7) = miner.seal_next(7).unwrap().unwrap();
-        // Gaps are legal: slots 2, 4, 5, 6 have no blocks.
+        let (b1, t1) = miner.seal_next(1).unwrap();
+        let (b3, t3) = miner.seal_next(3).unwrap();
+        let (b7, t7) = miner.seal_next(7).unwrap();
+        // Gaps are legal to the client: validity is strictly-increasing
+        // slots, not density (cadence is the sealer's default, not a rule).
         client.verify_and_append(&b1, &t1).unwrap();
         client.verify_and_append(&b3, &t3).unwrap();
         client.verify_and_append(&b7, &t7).unwrap();
@@ -386,17 +406,11 @@ mod tests {
     }
 
     #[test]
-    fn no_entry_no_block() {
-        let (mut miner, _client) = boot();
-        assert!(miner.seal_next(1).unwrap().is_none());
-    }
-
-    #[test]
     fn non_increasing_slot_rejected() {
         let (mut miner, mut client) = boot();
         miner.submit(b"a".to_vec());
         miner.submit(b"b".to_vec());
-        let (b3, t3) = miner.seal_next(3).unwrap().unwrap();
+        let (b3, t3) = miner.seal_next(3).unwrap();
         // Miner-side: the next seal must follow slot 3.
         assert!(miner.seal_next(3).is_err());
         assert!(miner.seal_next(2).is_err());
@@ -409,7 +423,7 @@ mod tests {
     fn seal_rejects_tampered_header() {
         let (mut miner, client) = boot();
         miner.submit(b"x".to_vec());
-        let (mut block, table) = miner.seal_next(1).unwrap().unwrap();
+        let (mut block, table) = miner.seal_next(1).unwrap();
         // Flip a byte in the pad field (the old nonce): the structural
         // checks do not read it, so only the seal can catch this.
         block.header.0[95] ^= 1;
@@ -423,7 +437,7 @@ mod tests {
     fn seal_rejects_wrong_epoch_table() {
         let (mut miner, _client) = boot();
         miner.submit(b"x".to_vec());
-        let (block, _table) = miner.seal_next(1).unwrap().unwrap();
+        let (block, _table) = miner.seal_next(1).unwrap();
         let wrong = miner.attester().epoch_table(99, HEADER_CHUNKS);
         assert!(block.verify_seal(&wrong).is_err());
     }
@@ -432,7 +446,7 @@ mod tests {
     fn structure_rejects_tampered_entry() {
         let (mut miner, client) = boot();
         miner.submit(b"some move".to_vec());
-        let (mut block, _table) = miner.seal_next(1).unwrap().unwrap();
+        let (mut block, _table) = miner.seal_next(1).unwrap();
         block.entry[0] ^= 1;
         assert!(block.verify_structure(&client.tip()).is_err());
     }
@@ -441,7 +455,7 @@ mod tests {
     fn equivocation_is_detected() {
         let (mut miner, mut client) = boot();
         miner.submit(b"move A".to_vec());
-        let (block_a, table) = miner.seal_next(1).unwrap().unwrap();
+        let (block_a, table) = miner.seal_next(1).unwrap();
         client.verify_and_append(&block_a, &table).unwrap();
 
         // The attester equivocates: a second, different block at slot 1,
@@ -479,8 +493,8 @@ mod tests {
         let (mut miner, mut client) = boot();
         miner.submit(b"move at 1".to_vec());
         miner.submit(b"move at 7".to_vec());
-        let (b1, t1) = miner.seal_next(1).unwrap().unwrap();
-        let (b7, t7) = miner.seal_next(7).unwrap().unwrap();
+        let (b1, t1) = miner.seal_next(1).unwrap();
+        let (b7, t7) = miner.seal_next(7).unwrap();
         client.verify_and_append(&b1, &t1).unwrap();
         client.verify_and_append(&b7, &t7).unwrap();
 
