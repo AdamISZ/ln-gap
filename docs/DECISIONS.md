@@ -622,6 +622,37 @@ party gating come with the graph integration; the two-head form of
 (state, move, state') (the plan's 5.1) is resolved when the real
 predicates are wired.
 
+## D34. The PoS absence-claim graph: the leaf family and tree shapes
+
+Date: 2026-09-19. Context: pos-factchain plan step 4 (first increment);
+D33, D28.
+
+Per depth `d`: the contract output carries the claimant's absence claim
+`absent_d` (CLTV to the height after the mover's slot window, plus the
+claimant's key). The claim output's tree: the mover's refutation (the
+D33 leaf, the slot's epoch table as script constants) racing the
+claimant's timeout splits (CSV `delta`, code-gated). The refutation
+output's tree: the claimant's disprove over the parked tuple (CSV
+`delta`, challenger-gated) and the mover's splits after
+`delta + delta'` (code-gated, D28's "by the code the victim revealed").
+No claim chain, no bisection: the publication leg is the readout, the
+validity leg is the parked-tuple predicates. Built as
+`lngap_pos::graph::{absent_leaf, claim_tree, refuted_tree}` over the
+existing `split_leaf`/`BuilderExt` pieces.
+
+Measured on regtest (tests/pos_graph.rs; all three paths mined, the
+too-early split and the legal-tuple disprove rejected): the absence
+claim and the splits are ~200 vB; the refutation 17,305 vB; the
+disprove 2,532 vB. A stall costs the claim plus the split (two small
+transactions); a refuted claim pays the ~17 kvB readout once.
+
+Deferred to 4b+: the ContractInstance/draft plumbing of the per-depth
+refute and code key sets; the two-head refutation (the plan's 5.1) and
+with it the prior-state predicates (until then the disprove set covers
+only move-in-isolation checks like out-of-range — the graph is not yet
+safe against occupied-cell claims); the PoS sig exhibit (D31's analogue
+needs the entry-tail binding); the party policies and the S1-S9 port.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

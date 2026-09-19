@@ -9,6 +9,10 @@ lngap-factchain = { path = "../factchain" }
 lngap-ec-wots = { path = "../../ec-wots" }
 lngap-n4bit = { path = "../../n4bit" }
 lngap-lamport = { path = "../../lamport" }
+lngap-contract = { path = "../../contract" }
+lngap-channel = { path = "../../channel" }
+anyhow.workspace = true
+lngap-btc = { path = "../../btc" }
 bitcoin.workspace = true
 hex.workspace = true
 

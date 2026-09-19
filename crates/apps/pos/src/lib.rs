@@ -26,6 +26,7 @@ use lngap_ec_wots::{Attestation, Attester, EpochTable};
 use lngap_factchain::{entry_head, entry_root, Header, HEADER_BYTES, HEAD_BYTES};
 use lngap_n4bit::{Digest, DIGEST_BYTES};
 
+pub mod graph;
 pub mod refute;
 
 /// Attested chunks per header: one per nibble (96 bytes = 192 chunks).

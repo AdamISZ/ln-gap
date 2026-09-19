@@ -530,9 +530,12 @@ dependencies = [
 name = "lngap-pos"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bitcoin",
  "hex",
  "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
  "lngap-ec-wots",
  "lngap-factchain",
  "lngap-lamport",
