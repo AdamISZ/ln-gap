@@ -20,11 +20,13 @@ use lngap_channel::Role;
 use lngap_contract::instance::key_label;
 use lngap_contract::{Claim, Contract};
 use lngap_factchain::slot::SlotEntry;
+use lngap_factchain::sig::{levels_for, CommitTree};
 use lngap_factchain::{ChainClient, Miner};
 use lngap_lamport::{bits_to_uint, uint_to_bits, Reveal};
 use lngap_names::ServedData;
 use lngap_party::draft::{downcast, Change};
-use lngap_party::{ChangeCtx, MoveCtx, QueuedClaim};
+use lngap_party::{ChangeCtx, ClaimKind, MoveCtx, QueuedClaim};
+use lngap_n4bit::{hash_claim, Digest};
 use lngap_tictactoe::{Board, OPEN};
 use lngap_tictactoe_fc::{registry, TicTacToeFc, TttFcParams};
 use tracing::info;
@@ -64,6 +66,18 @@ pub struct Brain {
     pub garbage_at: Option<u32>,
     /// Answer a timeout claim with a garbage-signed move of mine.
     pub refute_with_garbage: bool,
+    /// Stall graphs: exhibit the opponent's soundly signed entry at this
+    /// depth as garbage-signed (a baseless signature exhibit).
+    pub fabricate_sig_at: Option<u32>,
+    /// Stall graphs: after publishing my invalid move, prove a stall against
+    /// the opponent once its slot passes (a liar's stall proof).
+    pub claim_own_invalid: bool,
+    /// Stall graphs: do not exhibit the opponent's invalid move (wait for
+    /// its stall proof instead).
+    pub no_exhibit: bool,
+    /// Stall graphs: exhibit the opponent's valid move at this depth as a
+    /// lie (a baseless exhibit).
+    pub frame_at: Option<u32>,
 }
 
 /// A move published on the venue.
@@ -106,12 +120,25 @@ pub struct GameWorld {
     pub escalated: bool,
     fold_rejected: bool,
     pub log: Vec<String>,
+    /// The stall graph (D28) instead of the star graph.
+    pub stall: bool,
+    /// Stall graphs: each role's per-depth venue keys' claim-native
+    /// commitments (index `[role][d - 1]`), what anyone checks a published
+    /// entry's signature against.
+    venue_commits: [Vec<Vec<[Digest; 2]>>; 2],
 }
 
 impl GameWorld {
     /// A funded channel, a fact chain at genesis, and the game contract
     /// opened at the empty board with the given brains.
     pub fn new(label: &str, brains: [Brain; 2]) -> Result<GameWorld> {
+        Self::new_with(label, brains, false)
+    }
+    /// The same on the stall graph (D28).
+    pub fn new_stall(label: &str, brains: [Brain; 2]) -> Result<GameWorld> {
+        Self::new_with(label, brains, true)
+    }
+    fn new_with(label: &str, brains: [Brain; 2], stall: bool) -> Result<GameWorld> {
         init_log();
         let store = ServedData::default();
         let h = Harness::new(label, registry(store.clone()))?;
@@ -120,7 +147,7 @@ impl GameWorld {
         let miner = Miner::new(checkpoint, 0);
         let fc = ChainClient::from_checkpoint(0, checkpoint);
         let btc_open = h.height();
-        let program = TicTacToeFc::new(TttFcParams { game_id: GAME_ID, checkpoint, btc_open, grace: GRACE }, store.clone());
+        let program = TicTacToeFc::new(TttFcParams { game_id: GAME_ID, checkpoint, btc_open, grace: GRACE, stall, w_max: 10 }, store.clone());
         let mut w = GameWorld {
             h,
             miner,
@@ -141,11 +168,46 @@ impl GameWorld {
             escalated: false,
             fold_rejected: false,
             log: Vec::new(),
+            stall,
+            venue_commits: [vec![], vec![]],
         };
         *w.refuse.lock().unwrap() = [w.brains[0].refuse_fold, w.brains[1].refuse_fold];
         w.install_policies();
+        if stall {
+            // the venue keys come first: each role's signature exhibit pins
+            // the other's commitment tree roots, constants of the graph
+            w.make_venue_keys()?;
+        }
         w.open_game()?;
         Ok(w)
+    }
+
+    /// Stall graphs: the Bitcoin-side keys are per role, so each party's
+    /// per-depth venue signing keys are separate. The harness generates
+    /// them in each party's key store and publishes their claim-native
+    /// commitments to everyone (in a deployment, exchanged in the draft).
+    fn make_venue_keys(&mut self) -> Result<()> {
+        let n = lngap_tictactoe::TicTacToe.n_state_bits();
+        for r in Role::BOTH {
+            let mut commits = Vec::new();
+            for d in 1..=9u32 {
+                let label = Self::venue_label(d);
+                let ks = self.h.party(r).keystore();
+                ks.generate(&label, n)?;
+                commits.push(ks.commit_with(&label, |p| hash_claim(p))?);
+            }
+            self.venue_commits[r.idx()] = commits;
+        }
+        // serve each role's commitment tree roots at the depths it moves
+        let levels = levels_for(2 * n);
+        for r in Role::BOTH {
+            let roots: Vec<Option<Digest>> = (0..10).map(|d| (d >= 1 && TicTacToeFc::mover_at(d as u32) == r).then(|| CommitTree::new(&self.venue_commits[r.idx()][d - 1], levels).root())).collect();
+            TicTacToeFc::put_roots(&self.store, GAME_ID, r, &roots);
+        }
+        Ok(())
+    }
+    fn venue_label(d: u32) -> String {
+        key_label(ID_GAME, 0, d, "venue")
     }
 
     fn say(&mut self, s: String) {
@@ -261,14 +323,28 @@ impl GameWorld {
     fn state_reveal(&mut self, r: Role, d: u32, new: &Board) -> Result<Reveal> {
         let seq = self.keys_seq();
         let bits = lngap_tictactoe::TicTacToe.state_bits(new);
-        self.h.party(r).keystore().reveal_bits(&key_label(ID_GAME, seq, d, "state"), &bits)
+        let label = if self.stall { Self::venue_label(d) } else { key_label(ID_GAME, seq, d, "state") };
+        self.h.party(r).keystore().reveal_bits(&label, &bits)
+    }
+    /// The `(move, state)` word of the entry published at depth `d`, or
+    /// the initial word at depth 0.
+    fn head_word(&self, d: u32) -> u32 {
+        if d == 0 {
+            let init = self.program.stall_claim_for(Role::User).initial_e2;
+            return u32::from_be_bytes(init[..4].try_into().unwrap());
+        }
+        let e = &self.published[&d].entry;
+        SlotEntry::word1(e.mv, e.state)
+    }
+    fn headers(&self) -> Vec<[u8; lngap_factchain::HEADER_BYTES]> {
+        self.fc.chain_headers().iter().map(|h| h.0).collect()
     }
     /// The claim data for slot `d`: the headers to it, the counterparty's
     /// block `d - 1` and my block `d` (or an entry of my choosing).
     fn slot_data(&self, d: u32, own: &[u8]) -> lngap_contract::ClaimData {
         let keys = self.instance().keys.clone();
         let commits = |k: u32| keys[k as usize - 1].state_n4.clone();
-        let headers: Vec<[u8; 48]> = self.fc.chain_headers().iter().map(|h| h.0).collect();
+        let headers: Vec<[u8; lngap_factchain::HEADER_BYTES]> = self.fc.chain_headers().iter().map(|h| h.0).collect();
         let prev = self.blocks.get(&(d - 1)).map(|b| b.as_slice());
         self.program.slot_claim(d, commits).data(&headers[..d as usize], prev, own)
     }
@@ -341,19 +417,26 @@ impl GameWorld {
         };
         // anyone verifies the entry: content, and the signature against the
         // mover's claim-native commitments (what the claim checks on-chain)
-        let inst = self.instance();
         let mover = TicTacToeFc::mover_at(d);
-        let keys = inst.depth_keys(d);
-        ensure!(keys.prover == mover);
+        let commits = if self.stall {
+            self.venue_commits[mover.idx()][d as usize - 1].clone()
+        } else {
+            let inst = self.instance();
+            let keys = inst.depth_keys(d);
+            ensure!(keys.prover == mover);
+            keys.state_n4.clone()
+        };
         let decoded = SlotEntry::decode(&bytes).ok_or_else(|| anyhow!("undecodable entry"))?;
         ensure!(decoded.state == bits_to_uint(&self.program.state_bits(&p.claimed)) && decoded.mover == mover.idx() as u8 && decoded.depth == d as u8);
-        p.signed = decoded.check_sigs(&keys.state_n4);
+        p.signed = decoded.check_sigs(&commits);
         if !p.signed {
             p.board = None;
         }
-        // serve the slot's inclusion data (for the mover's claim at this depth)
-        let data = self.slot_data(d, &bytes);
-        self.store.put(&TicTacToeFc::slot_key(GAME_ID, d), data);
+        if !self.stall {
+            // serve the slot's inclusion data (for the mover's claim at this depth)
+            let data = self.slot_data(d, &bytes);
+            self.store.put(&TicTacToeFc::slot_key(GAME_ID, d), data);
+        }
         let valid = p.board.is_some();
         if valid {
             self.board = p.board.clone().unwrap();
@@ -361,7 +444,9 @@ impl GameWorld {
         }
         let what = if valid { self.board.render() } else if !p.signed { "UNSIGNED".into() } else { "invalid".into() };
         self.published.insert(d, p);
-        self.install_move_policy(mover);
+        if !self.stall {
+            self.install_move_policy(mover);
+        }
         self.say(format!("slot {d} mined with {mover}'s move ({what}); inclusion data served"));
         if valid && self.board.status != OPEN {
             let dist = match self.program.resolution(&self.board).payout {
@@ -393,6 +478,9 @@ impl GameWorld {
     fn react_step(&mut self) -> Result<()> {
         if self.escalated {
             return Ok(());
+        }
+        if self.stall {
+            return self.react_step_stall();
         }
         let last_slot = self.fc_height() - self.fc_open; // slots mined so far
         for r in Role::BOTH {
@@ -452,15 +540,161 @@ impl GameWorld {
 
     /// Queue `r`'s claim at depth `d` (its own move `d`) in the channel contract.
     fn queue_claim(&mut self, r: Role, d: u32, cell: u8) -> Result<()> {
-        let prior = if d == 1 {
-            Board::empty()
-        } else {
-            let p = self.published.get(&(d - 1)).ok_or_else(|| anyhow!("no published move {}", d - 1))?;
-            p.board.clone().ok_or_else(|| anyhow!("move {} was invalid", d - 1))?
-        };
+        let prior = self.board_before(d)?;
         let prior_bits = self.program.state_bits(&prior);
         self.escalated = true;
-        self.h.party(r).queue_claim(ID_GAME, QueuedClaim { depth: d, prior: prior_bits, mv: uint_to_bits(u32::from(cell), 4) });
+        self.h.party(r).queue_claim(ID_GAME, QueuedClaim::star(d, prior_bits, uint_to_bits(u32::from(cell), 4)));
+        Ok(())
+    }
+
+    /// The board move `d` leaves from (the empty board at depth 1).
+    fn board_before(&self, d: u32) -> Result<Board> {
+        if d == 1 {
+            return Ok(Board::empty());
+        }
+        let p = self.published.get(&(d - 1)).ok_or_else(|| anyhow!("no published move {}", d - 1))?;
+        p.board.clone().ok_or_else(|| anyhow!("move {} was invalid", d - 1))
+    }
+
+    // ----- the stall graph -----
+
+    /// Brains on the stall graph: a stall proof when the opponent's slot
+    /// passed empty (or is ignored, or the game is over and the fold was
+    /// refused), a lie exhibit when its move was invalid (or is framed), a
+    /// stall proof of one's own invalid or fabricated move.
+    fn react_step_stall(&mut self) -> Result<()> {
+        let last_slot = self.fc_height() - self.fc_open;
+        for r in Role::BOTH {
+            let brain = self.brains[r.idx()].clone();
+            if brain.passive {
+                continue;
+            }
+            let other = r.other();
+            if self.board.status != OPEN {
+                if self.fold_rejected && TicTacToeFc::mover_at(self.depth) == r && last_slot >= self.depth + 1 {
+                    let d = self.depth;
+                    self.say(format!("{r}: the fold was refused; proving on-chain that {other} has no move after {d}"));
+                    return self.queue_stall(r, d, None);
+                }
+                continue;
+            }
+            if let Some(d) = brain.fabricate_at {
+                if last_slot >= d + 1 && TicTacToeFc::mover_at(d) == r && self.depth == d - 1 {
+                    let cell = brain.moves[(d as usize - 1) / 2];
+                    self.say(format!("{r} proves a stall with move {d} although it never published it (the slot is empty)"));
+                    return self.queue_stall(r, d, Some(cell));
+                }
+            }
+            if let (true, Some(d)) = (brain.claim_own_invalid, brain.invalid_at) {
+                if TicTacToeFc::mover_at(d) == r && self.published.contains_key(&d) && last_slot >= d + 1 {
+                    self.say(format!("{r} proves a stall with its INVALID move {d}: {other} published nothing at {}", d + 1));
+                    return self.queue_stall(r, d, None);
+                }
+            }
+            if let Some(k) = brain.frame_at {
+                if TicTacToeFc::mover_at(k) == other && self.published.get(&k).is_some_and(|p| p.board.is_some()) {
+                    self.say(format!("{r} FRAMES {other}'s valid move {k} as a lie"));
+                    return self.queue_lie(r, k);
+                }
+            }
+            if let Some(k) = brain.ignore_at {
+                if k >= 2 && TicTacToeFc::mover_at(k) == other && self.published.get(&k).is_some_and(|p| p.board.is_some()) && last_slot >= k {
+                    self.say(format!("{r} IGNORES {other}'s valid move {k} and proves a stall at depth {}", k - 1));
+                    return self.queue_stall(r, k - 1, None);
+                }
+            }
+            if let Some(k) = brain.fabricate_sig_at {
+                if TicTacToeFc::mover_at(k) == other && self.published.get(&k).is_some_and(|p| p.signed) {
+                    self.say(format!("{r} exhibits {other}'s soundly signed entry {k} as GARBAGE-SIGNED"));
+                    return self.queue_sig(r, k, true);
+                }
+            }
+            let k = self.depth + 1;
+            if k >= 2 && TicTacToeFc::mover_at(k) == other && last_slot >= k {
+                match self.published.get(&k) {
+                    Some(p) if p.board.is_none() && p.signed => {
+                        if !brain.no_exhibit {
+                            self.say(format!("{r}: {other}'s move {k} is invalid; exhibiting it"));
+                            return self.queue_lie(r, k);
+                        }
+                    }
+                    Some(p) if !p.signed => {
+                        if !brain.no_exhibit {
+                            self.say(format!("{r}: {other}'s entry {k} is garbage-signed; exhibiting it"));
+                            return self.queue_sig(r, k, false);
+                        }
+                    }
+                    Some(_) => {}
+                    None => {
+                        if last_slot >= k {
+                            self.say(format!("{r}: {other} published nothing at slot {k}; proving a stall at depth {}", k - 1));
+                            return self.queue_stall(r, k - 1, None);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `r` proves a stall with its move `d` (published, or `fabricated`
+    /// with this cell): serves the claim's data and queues it.
+    fn queue_stall(&mut self, r: Role, d: u32, fabricated: Option<u8>) -> Result<()> {
+        let prior = self.board_before(d)?;
+        let (mv, new, e) = match fabricated {
+            Some(cell) => {
+                let new = self.program.transition(&prior, &cell, r).map_err(|e| anyhow!("{e}"))?;
+                let e = SlotEntry::word1(cell, bits_to_uint(&self.program.state_bits(&new)));
+                (cell, new, e)
+            }
+            None => {
+                let p = self.published.get(&d).ok_or_else(|| anyhow!("no published move {d}"))?;
+                (p.entry.mv, p.claimed.clone(), SlotEntry::word1(p.entry.mv, p.entry.state))
+            }
+        };
+        let e2 = self.head_word(d - 1);
+        let data = self.program.stall_claim_for(r).data(d as usize, &self.headers(), &[e], &[e2]);
+        self.store.put(&TicTacToeFc::stall_key(GAME_ID, r), data);
+        self.escalated = true;
+        let q = QueuedClaim { kind: ClaimKind::Stall, depth: d, prior: self.program.state_bits(&prior), mv: uint_to_bits(u32::from(mv), 4), new: Some(self.program.state_bits(&new)), code: None };
+        self.h.party(r).queue_claim(ID_GAME, q);
+        Ok(())
+    }
+
+    /// `r` exhibits the opponent's move `k` as a lie: serves the claim's
+    /// data and queues it.
+    fn queue_lie(&mut self, r: Role, k: u32) -> Result<()> {
+        let prior = self.board_before(k)?;
+        let p = self.published.get(&k).ok_or_else(|| anyhow!("no published move {k}"))?.clone();
+        let e = SlotEntry::word1(p.entry.mv, p.entry.state);
+        let e2 = self.head_word(k - 1);
+        let data = self.program.lie_claim_for(r).data(k as usize, &self.headers(), &[e], &[e2]);
+        self.store.put(&TicTacToeFc::lie_key(GAME_ID, r), data);
+        self.escalated = true;
+        let q = QueuedClaim { kind: ClaimKind::Lie, depth: k, prior: self.program.state_bits(&prior), mv: uint_to_bits(u32::from(p.entry.mv), 4), new: Some(self.program.state_bits(&p.claimed)), code: None };
+        self.h.party(r).queue_claim(ID_GAME, q);
+        Ok(())
+    }
+
+    /// `r` exhibits the opponent's entry `k` as garbage-signed (stall
+    /// graphs): serves the claim's data (the first bit whose preimage opens
+    /// nothing, or, when `fabricated`, bit 0 of a sound entry) and queues it
+    /// with `r`'s winning code.
+    fn queue_sig(&mut self, r: Role, k: u32, fabricated: bool) -> Result<()> {
+        let other = r.other();
+        let p = self.published.get(&k).ok_or_else(|| anyhow!("no published entry {k}"))?.clone();
+        let n = lngap_tictactoe::TicTacToe.n_state_bits();
+        let head_bits: Vec<bool> = (0..n).map(|i| (p.entry.state >> i) & 1 == 1).collect();
+        let commits = self.venue_commits[other.idx()][k as usize - 1].clone();
+        let sig = self.program.sig_claim_for(r).ok_or_else(|| anyhow!("no commitment roots served"))?;
+        let (i, b) = if fabricated { (0, head_bits[0]) } else { sig.find_garbage(&p.bytes, &head_bits, &commits).ok_or_else(|| anyhow!("entry {k} is soundly signed"))? };
+        let data = sig.data(k as usize, i, b, &self.headers(), &p.bytes, &commits);
+        self.store.put(&TicTacToeFc::sig_key(GAME_ID, r), data);
+        self.escalated = true;
+        let prior = self.board_before(k)?;
+        let code = if r == Role::User { lngap_tictactoe::TicTacToe::USER_WINS } else { lngap_tictactoe::TicTacToe::HUB_WINS };
+        let q = QueuedClaim { kind: ClaimKind::Sig, depth: k, prior: self.program.state_bits(&prior), mv: vec![false; 4], new: None, code: Some(code) };
+        self.h.party(r).queue_claim(ID_GAME, q);
         Ok(())
     }
 

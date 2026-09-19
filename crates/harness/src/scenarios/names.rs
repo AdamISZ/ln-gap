@@ -30,7 +30,7 @@ fn contracts(h: &Harness) -> usize {
     h.user.channel.current_state().contracts.len()
 }
 fn disproof(h: &Harness) -> Option<String> {
-    party_txs(h).into_iter().find(|r| r.starts_with("cpred_") || r.starts_with("simple_") || r.starts_with("round_") || r.starts_with("sched_") || r.starts_with("block_") || r.starts_with("ccopy_") || r.starts_with("ckeep_") || r.starts_with("re_"))
+    party_txs(h).into_iter().find(|r| r.starts_with("cpred_") || r.starts_with("flat_") || r.starts_with("simple_") || r.starts_with("round_") || r.starts_with("sched_") || r.starts_with("block_") || r.starts_with("ccopy_") || r.starts_with("ckeep_") || r.starts_with("re_"))
 }
 fn output_of(h: &Harness, role: &str) -> Amount {
     let s = h.seen.iter().find(|s| s.role == role).unwrap();

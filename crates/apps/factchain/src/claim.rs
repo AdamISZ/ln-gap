@@ -38,10 +38,11 @@ const N_NIBBLES: usize = 40;
 const RATE_NIBBLES: usize = 20;
 
 /// Number of compression steps per header:
-/// 48 bytes = 96 nibbles. Using 2 words (16 nibbles) per step,
-/// 96 / 16 = 6 absorb steps + 1 padding = 7 steps.
+/// 56 bytes = 112 nibbles. Using 2 words (16 nibbles) per step,
+/// 112 / 16 = 7 absorb steps + 1 padding = 8 steps.
 /// The 4-nibble gap per step (20-16=4) is zero-filled in the rate.
-const STEPS_PER_HEADER: usize = 7;
+const STEPS_PER_HEADER: usize = crate::HEADER_ABSORBS + 1;
+const ABSORBS_PER_HEADER: usize = crate::HEADER_ABSORBS;
 
 /// The fact-chain checkpoint: a 20-byte digest.
 pub type Checkpoint = [u8; 20];
@@ -57,19 +58,20 @@ fn target_le(target: [u8; 20]) -> [u8; 32] {
 
 /// Convert a 48-byte header to rate blocks (each 20 nibbles = 10 bytes).
 /// Returns 5 blocks of 10 bytes + 1 padding block.
-fn header_to_rate_blocks(header: &[u8; 48]) -> Vec<Vec<u8>> {
+#[allow(dead_code)]
+fn header_to_rate_blocks(header: &[u8; crate::HEADER_BYTES]) -> Vec<Vec<u8>> {
     let nibbles: Vec<u8> = header
         .iter()
         .flat_map(|&b| [(b >> 4) & 0xF, b & 0xF])
         .collect();
     let mut blocks = Vec::new();
-    // 4 full rate blocks (20 nibbles each)
-    for i in 0..4 {
+    // 9 full rate blocks (20 nibbles each)
+    for i in 0..9 {
         blocks.push(nibbles_to_bytes(&nibbles[i * 20..(i + 1) * 20]));
     }
-    // 1 partial block (16 nibbles, padded to 20 with zeros)
+    // 1 partial block (12 nibbles, padded to 20 with zeros)
     let mut last = vec![0u8; 20];
-    last[..16].copy_from_slice(&nibbles[80..96]);
+    last[..12].copy_from_slice(&nibbles[180..192]);
     blocks.push(last);
     // 1 padding block: 0x01 followed by zeros (n4bit padding: ADD 1 to state[0])
     let mut pad = vec![0u8; 20];
@@ -147,18 +149,18 @@ impl FactChainShape {
         }
     }
 
-    /// Build ClaimData from raw 48-byte headers.
-    /// 7 steps per header: 6 absorb (2 words each = 12 header words)
+    /// Build ClaimData from raw headers.
+    /// 8 steps per header: 7 absorb (2 words each = 14 header words)
     /// + 1 padding (2 zero words). Each step provides 16 nibbles;
     /// the 4-nibble gap to the 20-nibble rate is zero-filled.
-    pub fn data(&self, headers: &[[u8; 48]]) -> ClaimData {
+    pub fn data(&self, headers: &[[u8; crate::HEADER_BYTES]]) -> ClaimData {
         assert_eq!(headers.len(), self.n_headers);
         let mut data = Vec::new();
         for h in headers {
             let w = words(h);
-            // 6 absorb steps (2 words each = 12 words = all header data);
+            // 7 absorb steps (2 words each = 14 words = all header data);
             // the padding step has constant sources and takes no data
-            for b in 0..6 {
+            for b in 0..ABSORBS_PER_HEADER {
                 data.push(vec![w[b * 2], w[b * 2 + 1]]);
             }
         }
@@ -180,10 +182,10 @@ impl FactChainShape {
         let mut steps = Vec::new();
 
         for h in 0..self.n_headers {
-            // 7 compression steps per header (6 absorb + 1 padding)
+            // 8 compression steps per header (7 absorb + 1 padding)
             for b in 0..STEPS_PER_HEADER {
                 let init = if h == 0 && b == 0 { Init::Iv } else { Init::D };
-                let block = if b < 6 {
+                let block = if b < ABSORBS_PER_HEADER {
                     // Each absorb step uses 2 data words (local indices 0, 1)
                     vec![Src::Data(0), Src::Data(1)]
                 } else {

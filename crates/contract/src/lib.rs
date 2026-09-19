@@ -52,6 +52,18 @@ pub struct EndBind {
     pub word: usize,
 }
 
+/// A Move's depth reveal bound to a claim register: the low `nibbles`
+/// nibbles of end-state word `word`, read as a number, must equal the
+/// revealed depth (the depth-independent stall leaf, VENUE.md §10c).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DepthBind {
+    pub word: usize,
+    pub nibbles: usize,
+}
+
+/// Bits of the depth field a stall leaf reveals.
+pub const DEPTH_BITS: usize = 8;
+
 /// What a Move leaf requires beyond the prover's own commitments.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MoveExtras {
@@ -62,6 +74,12 @@ pub struct MoveExtras {
     pub bind_end: Option<EndBind>,
     /// Bind the state nibbles of an end-state word to the prior reveal.
     pub bind_prior: Option<EndBind>,
+    /// Bind an end-state word to the depth reveal (stall graphs).
+    pub bind_depth: Option<DepthBind>,
+    /// The leaf reveals only the outcome code and the claim's end state:
+    /// the prior, the move and the state live in the end state's registers
+    /// and the disprove leaves read them from there (chess).
+    pub wots_only: bool,
 }
 
 /// The shape of a contract's pre-signed graph.
@@ -77,6 +95,17 @@ pub enum GraphShape {
     /// further move exists. Moves are played elsewhere (a venue); Bitcoin
     /// sees one claim and at most one answer.
     Star,
+    /// `C → stall_r → S_r` and `C → lie_r → L_r` for each role `r`: a
+    /// stall proof and a lie exhibit per role with fixed keys, the depth a
+    /// revealed field bound to a depth-independent claim
+    /// ([`Contract::stall_claim`], [`Contract::lie_claim`]). Off a stall
+    /// output: the splits, the dispute chain, and the disprove leaves
+    /// against the claimant's move (the counterparty spends them). Off a
+    /// lie output: the dispute chain (the liar), the disprove leaves
+    /// against the exhibited move (the victim, after one window), and the
+    /// splits (the liar, after a longer one). The keys vector holds four
+    /// entries: `[stall_U, stall_H, lie_U, lie_H]` (`Role::BOTH` order).
+    Stall,
 }
 
 /// How `V` is divided for an outcome.
@@ -183,6 +212,43 @@ pub trait Contract: Send + Sync + Debug + 'static {
         let _ = keys;
         self.claim(from, depth)
     }
+    /// Stall graphs: `role`'s depth-independent stall claim.
+    fn stall_claim(&self, role: Role) -> Option<claim::ClaimSpec> {
+        let _ = role;
+        None
+    }
+    /// The served prover data for that claim.
+    fn stall_claim_data(&self, role: Role) -> claim::ClaimData {
+        let _ = role;
+        vec![]
+    }
+    /// Stall graphs: `role`'s lie exhibit, a claim proving the
+    /// counterparty's move at slot `d` and `role`'s own at `d - 1`.
+    fn lie_claim(&self, role: Role) -> Option<claim::ClaimSpec> {
+        let _ = role;
+        None
+    }
+    fn lie_claim_data(&self, role: Role) -> claim::ClaimData {
+        let _ = role;
+        vec![]
+    }
+    /// Stall graphs: `role`'s signature exhibit, a claim proving that the
+    /// counterparty's entry at slot `d` publishes, for one signed bit, a
+    /// preimage that does not open its commitment (D31).
+    fn sig_claim(&self, role: Role) -> Option<claim::ClaimSpec> {
+        let _ = role;
+        None
+    }
+    fn sig_claim_data(&self, role: Role) -> claim::ClaimData {
+        let _ = role;
+        vec![]
+    }
+    /// `wots_only` programs: the `(prior, move, state)` bits a claim's end
+    /// state registers hold.
+    fn state_from_end(&self, end: &[u32]) -> Option<(Vec<bool>, Vec<bool>, Vec<bool>)> {
+        let _ = end;
+        None
+    }
 
     fn describe_state(&self, s: &Self::State) -> String {
         format!("{s:?}")
@@ -209,6 +275,13 @@ pub trait Program: Send + Sync + Debug {
     fn claim_data(&self, from: &[bool], depth: u32) -> claim::ClaimData;
     fn graph_shape(&self) -> GraphShape;
     fn claim_bound(&self, from: &[bool], depth: u32, keys: &[instance::DepthKeys]) -> Option<claim::ClaimSpec>;
+    fn stall_claim(&self, role: Role) -> Option<claim::ClaimSpec>;
+    fn stall_claim_data(&self, role: Role) -> claim::ClaimData;
+    fn lie_claim(&self, role: Role) -> Option<claim::ClaimSpec>;
+    fn lie_claim_data(&self, role: Role) -> claim::ClaimData;
+    fn sig_claim(&self, role: Role) -> Option<claim::ClaimSpec>;
+    fn sig_claim_data(&self, role: Role) -> claim::ClaimData;
+    fn state_from_end(&self, end: &[u32]) -> Option<(Vec<bool>, Vec<bool>, Vec<bool>)>;
     fn describe_state_bits(&self, s: &[bool]) -> String;
     fn describe_move_bits(&self, m: &[bool]) -> String;
 
@@ -269,6 +342,27 @@ impl<C: Contract> Program for C {
     fn claim_bound(&self, from: &[bool], depth: u32, keys: &[instance::DepthKeys]) -> Option<claim::ClaimSpec> {
         Contract::claim_bound(self, from, depth, keys)
     }
+    fn stall_claim(&self, role: Role) -> Option<claim::ClaimSpec> {
+        Contract::stall_claim(self, role)
+    }
+    fn stall_claim_data(&self, role: Role) -> claim::ClaimData {
+        Contract::stall_claim_data(self, role)
+    }
+    fn lie_claim(&self, role: Role) -> Option<claim::ClaimSpec> {
+        Contract::lie_claim(self, role)
+    }
+    fn lie_claim_data(&self, role: Role) -> claim::ClaimData {
+        Contract::lie_claim_data(self, role)
+    }
+    fn sig_claim(&self, role: Role) -> Option<claim::ClaimSpec> {
+        Contract::sig_claim(self, role)
+    }
+    fn sig_claim_data(&self, role: Role) -> claim::ClaimData {
+        Contract::sig_claim_data(self, role)
+    }
+    fn state_from_end(&self, end: &[u32]) -> Option<(Vec<bool>, Vec<bool>, Vec<bool>)> {
+        Contract::state_from_end(self, end)
+    }
     fn describe_state_bits(&self, s: &[bool]) -> String {
         match self.state_from_bits(s) {
             Ok(st) => self.describe_state(&st),
@@ -290,7 +384,7 @@ pub fn bits_str(b: &[bool]) -> String {
 /// Re-exports used by contract authors.
 pub mod prelude {
     pub use crate::leaves::{Claim, DisproveSpec, LeafBuilder, LeafCtx};
-    pub use crate::{Contract, EndBind, Extra, GraphShape, Invalid, MoveExtras, Outcome, Payout};
+    pub use crate::{Contract, DepthBind, EndBind, Extra, GraphShape, Invalid, MoveExtras, Outcome, Payout, DEPTH_BITS};
     pub use bitcoin::opcodes::all::*;
     pub use lngap_channel::Role;
     pub use lngap_lamport::{bits_to_uint, uint_to_bits};

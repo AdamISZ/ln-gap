@@ -64,6 +64,13 @@ challenge window. The bisection never runs; the resolution is by chain
 length, encoded structurally: the depth-3 claim commits to n_headers+1
 headers from the same checkpoint.
 
+> **2026-09-16 (D29).** The n4bit round leaf and flat terminal measured
+> below were sizes only: the Script round did not compute the native
+> round and the flat leaf's stack sequence could not verify its inputs.
+> Both are fixed and the flat leaf is now spent on regtest at 8.4 to 9.4
+> kvB for a 5-word register file (`crates/apps/factchain/tests/regtest_flat.rs`);
+> scenario N8 ends at it. The header is 56 bytes since D28 (seven absorbs).
+
 ## 3. Dispute chain measurement
 
   cargo test -p lngap-harness --test fc_stage2_measure -- --nocapture

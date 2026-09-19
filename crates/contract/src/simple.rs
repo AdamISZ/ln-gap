@@ -20,7 +20,7 @@ use lngap_btc::tx::Timelock;
 use lngap_channel::{CommitCtx, Role};
 use lngap_lamport::winternitz::WotsExt;
 
-use crate::claim::{cur_sources, next_sources, park, timeout_leaf, unpark, ClaimKeys, ClaimSpec, Pred, Stage, Step};
+use crate::claim::{cur_sources, next_sources, park, timeout_leaf, unpark, ClaimKeys, ClaimSpec, Cmp, Pred, Stage, Step};
 use crate::inner::{mismatch_leaf, wait_re_cur_tree, wait_re_next_tree};
 use crate::script_hash::push_scriptnum;
 
@@ -37,6 +37,20 @@ fn le_order() -> Vec<usize> {
     v
 }
 
+/// Push the big-endian number of the `len` nibbles at `off` (each picked
+/// from depth `d(off + k)`, the running number sitting above them).
+fn push_number(mut bb: Builder, d: &dyn Fn(usize) -> i64, off: usize, len: usize) -> Builder {
+    assert!((1..=7).contains(&len), "a register number is 1..=7 nibbles");
+    bb = bb.push_int(d(off)).push_opcode(OP_PICK);
+    for k in 1..len {
+        for _ in 0..4 {
+            bb = bb.push_opcode(OP_DUP).push_opcode(OP_ADD);
+        }
+        bb = bb.push_int(d(off + k) + 1).push_opcode(OP_PICK).push_opcode(OP_ADD);
+    }
+    bb
+}
+
 /// Emit the predicate checks over a nibble space of `n` elements on the
 /// stack (element `i` at depth `n - 1 - i`, nothing else above); each
 /// result goes to the altstack. Returns the number of results.
@@ -46,6 +60,51 @@ pub(crate) fn preds_script(b: &mut Builder, preds: &[Pred], n: usize) -> usize {
     let mut bb = std::mem::replace(b, Builder::new());
     for p in preds {
         match p {
+            Pred::NeConst { off, nibbles } => {
+                // all equal, then negated: one result
+                for (k, c) in nibbles.iter().enumerate() {
+                    bb = bb.push_int(d(off + k) + k as i64).push_opcode(OP_PICK);
+                    bb = push_scriptnum(bb, *c).push_opcode(OP_EQUAL);
+                }
+                for _ in 1..nibbles.len() {
+                    bb = bb.push_opcode(OP_BOOLAND);
+                }
+                bb = bb.push_opcode(OP_NOT).push_opcode(OP_TOALTSTACK);
+                results += 1;
+            }
+            Pred::NeNibbles { a, b: bo, n: len } => {
+                // all equal, then negated: one result
+                for k in 0..*len {
+                    bb = bb.push_int(d(a + k) + k as i64).push_opcode(OP_PICK).push_int(d(bo + k) + k as i64 + 1).push_opcode(OP_PICK).push_opcode(OP_EQUAL);
+                }
+                for _ in 1..*len {
+                    bb = bb.push_opcode(OP_BOOLAND);
+                }
+                bb = bb.push_opcode(OP_NOT).push_opcode(OP_TOALTSTACK);
+                results += 1;
+            }
+            Pred::InRange { off, n: len, lo, hi } => {
+                bb = push_number(bb, &d, *off, *len);
+                bb = bb.push_int(i64::from(*lo)).push_int(i64::from(*hi)).push_opcode(OP_WITHIN).push_opcode(OP_TOALTSTACK);
+                results += 1;
+            }
+            Pred::If { off, n: len, cmp, value, then } => {
+                let k = p.n_results();
+                bb = push_number(bb, &d, *off, *len);
+                bb = bb.push_int(i64::from(*value)).push_opcode(match cmp {
+                    Cmp::Eq => OP_NUMEQUAL,
+                    Cmp::Ge => OP_GREATERTHANOREQUAL,
+                });
+                bb = bb.push_opcode(OP_IF);
+                let inner = preds_script(&mut bb, then, n);
+                assert_eq!(inner, k);
+                bb = bb.push_opcode(OP_ELSE);
+                for _ in 0..k {
+                    bb = bb.push_opcode(OP_PUSHNUM_1).push_opcode(OP_TOALTSTACK);
+                }
+                bb = bb.push_opcode(OP_ENDIF);
+                results += k;
+            }
             Pred::EqConst { off, nibbles } => {
                 for (k, c) in nibbles.iter().enumerate() {
                     bb = bb.push_int(d(off + k)).push_opcode(OP_PICK);
@@ -205,4 +264,78 @@ pub fn check_chain(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec: &Claim
     let whats = [format!("{q} picks a segment in round {rr} (a simple step)"), format!("{prover} re-commits the step's input state"), format!("{prover} re-commits the step's output state")];
     let stages = leaves.into_iter().zip(trees.iter().cloned()).zip(whats).map(|((leaf, next), what)| Stage { leaf, next, what }).collect();
     Ok((stages, trees))
+}
+
+#[cfg(test)]
+mod pred_tests {
+    //! Every predicate kind's script against its native evaluation, through
+    //! the interpreter, on random nibble spaces.
+    use super::*;
+    use crate::claim::nibbles_number;
+    use lngap_script32::sim;
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+    }
+
+    /// Run the predicates over `space` and return whether the leaf would
+    /// accept, i.e. whether some predicate fails (the disprove verdict).
+    fn disproves(preds: &[Pred], space: &[u8]) -> bool {
+        let mut b = Builder::new();
+        let results = preds_script(&mut b, preds, space.len());
+        let script = finish_results(b, results).into_script();
+        let stack: Vec<i64> = space.iter().map(|&x| i64::from(x)).collect();
+        let out = sim::run_nums(&script, stack).unwrap_or_else(|e| panic!("script error: {e}"));
+        *out.last().unwrap() != 0
+    }
+
+    #[test]
+    fn gates_ranges_and_not_equal_match_native() {
+        let mut rng = Rng(0xabcdef1234567);
+        let n = 40;
+        for round in 0..400 {
+            let mut space: Vec<u8> = (0..n).map(|_| rng.below(16) as u8).collect();
+            // keep small numbers likely: the gate register is nibbles 30..32
+            if round % 2 == 0 {
+                space[30] = 0;
+                space[31] = rng.below(12) as u8;
+            }
+            let value = rng.below(12) as u32;
+            let c: Vec<u8> = (0..4).map(|_| rng.below(16) as u8).collect();
+            let preds = vec![
+                Pred::If { off: 30, n: 2, cmp: Cmp::Eq, value, then: vec![Pred::EqConst { off: 0, nibbles: c.clone() }, Pred::EqNibbles { a: 4, b: 8, n: 3 }] },
+                Pred::If { off: 30, n: 2, cmp: Cmp::Ge, value, then: vec![Pred::NeConst { off: 12, nibbles: c.clone() }] },
+                Pred::InRange { off: 30, n: 2, lo: 1, hi: 9 },
+                Pred::NeConst { off: 16, nibbles: vec![space[16], space[17]] },
+                Pred::NeNibbles { a: 4, b: 8, n: 3 },
+                Pred::NeNibbles { a: 24, b: 26, n: 2 },
+                Pred::If { off: 20, n: 1, cmp: Cmp::Eq, value: u32::from(space[20]), then: vec![Pred::If { off: 21, n: 1, cmp: Cmp::Ge, value: 8, then: vec![Pred::EqConst { off: 22, nibbles: vec![space[22]] }] }] },
+            ];
+            // sometimes force predicates to hold, so both verdicts are exercised
+            if round % 3 == 0 {
+                space[0..4].copy_from_slice(&c);
+                let tmp = space[4..7].to_vec();
+                space[8..11].copy_from_slice(&tmp);
+                space[31] = 3;
+                space[30] = 0;
+            }
+            for p in &preds {
+                let native = !p.holds(&space);
+                let script = disproves(std::slice::from_ref(p), &space);
+                assert_eq!(script, native, "{} on {:?}", p.name(), &space[..32]);
+            }
+            let native_all = preds.iter().any(|p| !p.holds(&space));
+            assert_eq!(disproves(&preds, &space), native_all);
+            assert_eq!(nibbles_number(&space, 30, 2), u32::from(space[30]) * 16 + u32::from(space[31]));
+        }
+    }
 }

@@ -6,10 +6,10 @@
 //! trivial (one hash compression) and isolates the header-chain cost — the
 //! unknown we are validating.
 //!
-//! # Header format (48 bytes)
+//! # Header format (96 bytes)
 //!
 //! ```text
-//! prev(20)  root(20)  height(4)  nonce(4)  = 48 bytes
+//! prev(20)  root(20)  head(48)  height(4)  nonce(4)  = 96 bytes
 //! ```
 //!
 //! - `prev`: 160-bit digest of the parent header (the claim-native n4bit
@@ -17,12 +17,17 @@
 //!   header bytes computes exactly this digest).
 //! - `root`: 160-bit hash of the block's single entry (stage 1), or the
 //!   Merkle root of the ledger tree (stage 2+).
+//! - `head`: the entry's first [`HEAD_BYTES`] bytes (zero-padded; zero
+//!   for an empty block), so that a claim can read what a slot holds, and
+//!   that it holds nothing of someone's, from header data alone
+//!   ([`stall`]). Consensus: `head == entry[..48]`. A game entry's head is
+//!   its 8-byte content (game, depth, mover, move) and 40 bytes of state:
+//!   tic-tac-toe uses the first four of those, chess a whole position.
 //! - `height`: block height (u32 little-endian).
 //! - `nonce`: PoW nonce (u32 little-endian).
 //!
-//! One n4bit compression block is 10 bytes (rate = 20 nibbles). A 48-byte
-//! header is 96 nibbles = 5 absorption blocks. This is the unit of work
-//! for the claim's header-chain steps.
+//! The claim-native hash absorbs 16 nibbles (8 bytes) per step, so a
+//! header is exactly 12 absorb steps, the head being steps 5 to 10.
 //!
 //! # PoW
 //!
@@ -32,25 +37,48 @@
 
 pub mod claim;
 pub mod slot;
+pub mod sig;
+pub mod stall;
 
 use lngap_n4bit::{hash_claim as hash, meets_target, target_from_difficulty, Digest, DIGEST_BYTES};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Header size in bytes.
-pub const HEADER_BYTES: usize = 48;
+pub const HEADER_BYTES: usize = 96;
+/// Bytes of the entry carried in the header.
+pub const HEAD_BYTES: usize = 48;
+/// Claim-native absorb steps per header (8 bytes each).
+pub const HEADER_ABSORBS: usize = HEADER_BYTES / 8;
+
+/// The head a block's header carries for `entry`: its first [`HEAD_BYTES`]
+/// bytes, zero-padded.
+pub fn entry_head(entry: &[u8]) -> [u8; HEAD_BYTES] {
+    let mut h = [0u8; HEAD_BYTES];
+    let n = entry.len().min(HEAD_BYTES);
+    h[..n].copy_from_slice(&entry[..n]);
+    h
+}
 
 /// A block's entry hashes in two levels, so that a claim can verify the
 /// digest of each 20-byte chunk (a published Lamport preimage) against a
 /// pinned commitment without hashing the chunk itself: the entry's first
 /// `ENTRY_HEAD` bytes, then the claim-native digest of each following
-/// `CHUNK`-byte chunk padded to `CHUNK_PAD`, zero-padded to `STREAM_BYTES`
-/// (at most `MAX_CHUNKS` chunks). The root is the claim-native hash of
-/// that stream, `64` absorb blocks for every entry.
+/// `CHUNK`-byte chunk padded to `CHUNK_PAD`, zero-padded to at least
+/// `MIN_CHUNKS` chunks (`STREAM_BYTES`, `64` absorb blocks: the length the
+/// per-depth tic-tac-toe slot claim absorbs) and growing beyond that with
+/// the entry (a chess entry has 336 chunks). The root is the claim-native
+/// hash of that stream.
 pub const ENTRY_HEAD: usize = 8;
 pub const CHUNK: usize = 20;
 pub const CHUNK_PAD: usize = 24;
-pub const MAX_CHUNKS: usize = 21;
-pub const STREAM_BYTES: usize = ENTRY_HEAD + MAX_CHUNKS * CHUNK_PAD;
+pub const MIN_CHUNKS: usize = 21;
+/// The old name of [`MIN_CHUNKS`].
+pub const MAX_CHUNKS: usize = MIN_CHUNKS;
+pub const STREAM_BYTES: usize = ENTRY_HEAD + MIN_CHUNKS * CHUNK_PAD;
+/// The stream length for an entry of `n_chunks` chunks.
+pub fn stream_bytes(n_chunks: usize) -> usize {
+    ENTRY_HEAD + n_chunks.max(MIN_CHUNKS) * CHUNK_PAD
+}
 
 /// The chunks after the head, the last zero-padded.
 pub fn entry_chunks(entry: &[u8]) -> Vec<[u8; CHUNK]> {
@@ -67,8 +95,7 @@ pub fn entry_chunks(entry: &[u8]) -> Vec<[u8; CHUNK]> {
 /// The stream whose claim-native hash is the entry's root.
 pub fn entry_stream(entry: &[u8]) -> Vec<u8> {
     let chunks = entry_chunks(entry);
-    assert!(chunks.len() <= MAX_CHUNKS, "entry of {} bytes has more than {MAX_CHUNKS} chunks", entry.len());
-    let mut s = vec![0u8; STREAM_BYTES];
+    let mut s = vec![0u8; stream_bytes(chunks.len())];
     let n = entry.len().min(ENTRY_HEAD);
     s[..n].copy_from_slice(&entry[..n]);
     for (i, c) in chunks.iter().enumerate() {
@@ -95,14 +122,15 @@ pub fn pow_target() -> [u8; DIGEST_BYTES] {
 pub struct Header(pub [u8; HEADER_BYTES]);
 
 mod serde_bytes48 {
+    use super::HEADER_BYTES;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    pub fn serialize<S: Serializer>(v: &[u8; 48], s: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(v: &[u8; HEADER_BYTES], s: S) -> Result<S::Ok, S::Error> {
         hex::encode(v).serialize(s)
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 48], D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; HEADER_BYTES], D::Error> {
         let h = <String as Deserialize>::deserialize(d)?;
         let b = hex::decode(h).map_err(serde::de::Error::custom)?;
-        b.try_into().map_err(|_| serde::de::Error::custom("48 bytes"))
+        b.try_into().map_err(|_| serde::de::Error::custom("header bytes"))
     }
 }
 
@@ -119,11 +147,12 @@ impl<'de> Deserialize<'de> for Header {
 
 impl Header {
     /// Build a header from its fields (without mining — nonce is 0).
-    pub fn new(prev: &Digest, root: &Digest, height: u32) -> Header {
+    pub fn new(prev: &Digest, root: &Digest, head: &[u8; HEAD_BYTES], height: u32) -> Header {
         let mut h = [0u8; HEADER_BYTES];
         h[0..20].copy_from_slice(prev);
         h[20..40].copy_from_slice(root);
-        h[40..44].copy_from_slice(&height.to_le_bytes());
+        h[40..88].copy_from_slice(head);
+        h[88..92].copy_from_slice(&height.to_le_bytes());
         // nonce = 0
         Header(h)
     }
@@ -134,14 +163,17 @@ impl Header {
     pub fn root(&self) -> Digest {
         self.0[20..40].try_into().unwrap()
     }
+    pub fn head(&self) -> [u8; HEAD_BYTES] {
+        self.0[40..88].try_into().unwrap()
+    }
     pub fn height(&self) -> u32 {
-        u32::from_le_bytes(self.0[40..44].try_into().unwrap())
+        u32::from_le_bytes(self.0[88..92].try_into().unwrap())
     }
     pub fn nonce(&self) -> u32 {
-        u32::from_le_bytes(self.0[44..48].try_into().unwrap())
+        u32::from_le_bytes(self.0[92..96].try_into().unwrap())
     }
     pub fn set_nonce(&mut self, n: u32) {
-        self.0[44..48].copy_from_slice(&n.to_le_bytes());
+        self.0[92..96].copy_from_slice(&n.to_le_bytes());
     }
 
     /// The n4bit hash of the header bytes.
@@ -169,19 +201,23 @@ pub struct Block {
 }
 
 impl Block {
-    /// Build a block (unmined, nonce = 0). The root is the hash of the entry.
+    /// Build a block (unmined, nonce = 0). The root is the hash of the
+    /// entry; the head its first bytes.
     pub fn new(prev: &Digest, height: u32, entry: &[u8]) -> Block {
         let root = entry_root(entry);
         Block {
-            header: Header::new(prev, &root, height),
+            header: Header::new(prev, &root, &entry_head(entry), height),
             entry: entry.to_vec(),
         }
     }
 
-    /// Verify the block: PoW, root = hash(entry), prev link.
+    /// Verify the block: PoW, root = hash(entry), head = entry's head, prev link.
     pub fn verify(&self, expected_prev: &Digest) -> Result<(), String> {
         if !self.header.meets_pow() {
             return Err(format!("PoW failed at height {}", self.header.height()));
+        }
+        if self.header.head() != entry_head(&self.entry) {
+            return Err(format!("head mismatch at height {}", self.header.height()));
         }
         let computed_root = entry_root(&self.entry);
         if computed_root != self.header.root() {
@@ -208,7 +244,7 @@ impl Block {
 pub fn genesis() -> Block {
     let entry = vec![];
     let root = entry_root(&entry);
-    let mut header = Header::new(&[0u8; DIGEST_BYTES], &root, 0);
+    let mut header = Header::new(&[0u8; DIGEST_BYTES], &root, &[0u8; HEAD_BYTES], 0);
     // Mine the genesis
     mine(&mut header);
     Block { header, entry }
@@ -489,7 +525,7 @@ mod tests {
     #[test]
     fn invalid_pow_rejected() {
         let g = genesis();
-        let mut bad_header = Header::new(&g.header.digest(), &hash(&[0u8; 64]), 1);
+        let mut bad_header = Header::new(&g.header.digest(), &hash(&[0u8; 64]), &[0u8; HEAD_BYTES], 1);
         bad_header.set_nonce(0); // probably not a valid PoW
         // Don't mine — just check it fails
         assert!(!bad_header.meets_pow() || bad_header.digest() == bad_header.digest());
@@ -511,8 +547,8 @@ mod tests {
 
     #[test]
     fn header_digest_is_deterministic() {
-        let h1 = Header::new(&[1u8; 20], &[2u8; 20], 42);
-        let h2 = Header::new(&[1u8; 20], &[2u8; 20], 42);
+        let h1 = Header::new(&[1u8; 20], &[2u8; 20], &[3u8; HEAD_BYTES], 42);
+        let h2 = Header::new(&[1u8; 20], &[2u8; 20], &[3u8; HEAD_BYTES], 42);
         assert_eq!(h1.digest(), h2.digest());
     }
 

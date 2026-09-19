@@ -16,3 +16,6 @@ bitcoin = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+lngap-btc = { path = "../../btc" }

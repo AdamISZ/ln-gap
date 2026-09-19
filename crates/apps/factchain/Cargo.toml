@@ -14,3 +14,8 @@ tracing = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-channel = { path = "../../channel" }
+lngap-lamport = { path = "../../lamport" }
+bitcoin = { workspace = true }
+lngap-script32 = { path = "../../script32" }

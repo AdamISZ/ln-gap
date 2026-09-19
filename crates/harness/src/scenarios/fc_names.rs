@@ -236,6 +236,7 @@ pub const FC_N7: Scenario = Scenario {
 fn disproof(roles: &[String]) -> Option<String> {
     roles.iter().find(|r| {
         r.starts_with("cpred_")
+            || r.starts_with("flat_")
             || r.starts_with("simple_")
             || r.starts_with("round_")
             || r.starts_with("sched_")

@@ -27,7 +27,7 @@ fn secrets(prover: Role, seed: u8, prog: &dyn Program) -> (DepthSecrets, DepthKe
         state: SecretKey::from_entropy(prog.n_state_bits(), [seed + 1; 32]),
         code: SecretKey::from_entropy(CODE_BITS, [seed + 2; 32]),
     };
-    let k = DepthKeys { prover, mv: s.mv.public(), state: s.state.public(), code: s.code.public(), claim: None };
+    let k = DepthKeys { prover, mv: s.mv.public(), state: s.state.public(), code: s.code.public(), claim: None, prior: None, state_n4: vec![], depth: None };
     (s, k)
 }
 

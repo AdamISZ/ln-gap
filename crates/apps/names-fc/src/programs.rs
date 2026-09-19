@@ -144,6 +144,8 @@ impl Contract for NRegFc {
                 expects: vec![],
                 bind_end: None,
                 bind_prior: None,
+                bind_depth: None,
+                wots_only: false,
             }
         } else {
             MoveExtras::default()

@@ -9,3 +9,6 @@ hex = { workspace = true }
 bitcoin = { workspace = true }
 lngap-btc = { path = "../btc" }
 lngap-lamport = { path = "../lamport" }
+
+[dev-dependencies]
+lngap-script32 = { path = "../script32" }

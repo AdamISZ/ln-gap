@@ -163,6 +163,7 @@ fn measure_dispute(
         &parent_tree,
         parent_op,
         &parent_prevout,
+        None,
     )?;
     let elapsed = t0.elapsed();
 

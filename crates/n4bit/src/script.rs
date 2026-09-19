@@ -60,8 +60,10 @@ fn add_constant(b: Builder, rc_val: u8) -> Builder {
 /// We compute the index: table_base + n, then OP_PICK.
 /// Cost: push_int(table_base) + OP_ADD + OP_PICK = ~5 bytes.
 fn sbox_lookup(b: Builder, table_base: usize) -> Builder {
-    b.push_int(table_base as i64)
-        .push_opcode(OP_ADD)   // table_base + n = depth of SBOX[n]
+    // `table_base` counts the nibble itself; OP_ADD consumes it, so at the
+    // OP_PICK the table's top entry is one element shallower.
+    b.push_int(table_base as i64 - 1)
+        .push_opcode(OP_ADD)   // table_base - 1 + n = depth of SBOX[n]
         .push_opcode(OP_PICK)  // SBOX[n]
 }
 
@@ -72,9 +74,8 @@ fn sbox_lookup(b: Builder, table_base: usize) -> Builder {
 /// new_a = (a + b) % 16
 /// new_b = (b + new_a) % 16
 pub fn feistel_add(b: Builder) -> Builder {
-    // [a, b] → save b on altstack
-    b.push_opcode(OP_DUP)
-        .push_opcode(OP_TOALTSTACK) // [a, b] → [a] (b on alt)
+    // [a, b], b on top; the altstack is left exactly as found
+    b
         // new_a = (a + b) % 16 — but b is on alt, a is on top, we need b
         // Actually [a, b] with b on top. DUP b, TOALT. Now [a] with a on top.
         // We need b to compute new_a = a+b. But b is on alt.
@@ -152,30 +153,35 @@ fn compute_permutation() -> Vec<usize> {
 /// Stack in: 40 nibbles (n0 deepest, n39 on top) + S-box table below
 /// Stack out: 40 nibbles in permuted order + S-box table below
 ///
-/// Implementation: park each nibble on the altstack in output order,
-/// then pop all 40. Cost: 40 × (push_int + OP_ROLL + OP_TOALTSTACK)
-/// + 40 × OP_FROMALTSTACK = 40×5 + 40 = 240 bytes.
+/// Each output nibble is rolled to the top and parked, output 39 first,
+/// so that unparking all 40 lands output 0 deepest. The depth of a source
+/// nibble is computed against the nibbles still on the stack, which
+/// shrink as they are parked.
 pub fn permute_script(b: Builder) -> Builder {
     let perm = compute_permutation();
     let mut b = b;
-    // Roll each source nibble to top and park on altstack, in output order
-    // (output[0] first = deepest after restore).
-    for &src_pos in perm.iter() {
-        let depth = STATE_NIBBLES - 1 - src_pos;
-        if depth == 0 {
-            // already on top
-        } else if depth == 1 {
-            b = b.push_opcode(OP_SWAP);
-        } else {
-            b = b.push_int(depth as i64).push_opcode(OP_ROLL);
-        }
-        b = b.push_opcode(OP_TOALTSTACK);
+    let mut remaining: Vec<usize> = (0..STATE_NIBBLES).collect(); // source indices, deepest first
+    for k in (0..STATE_NIBBLES).rev() {
+        let src = perm[k];
+        let pos = remaining.iter().position(|&x| x == src).expect("a permutation");
+        let depth = remaining.len() - 1 - pos;
+        b = roll_to_top(b, depth).push_opcode(OP_TOALTSTACK);
+        remaining.remove(pos);
     }
-    // Restore all 40 (last parked = output[39] = on top)
     for _ in 0..STATE_NIBBLES {
         b = b.push_opcode(OP_FROMALTSTACK);
     }
     b
+}
+
+/// Roll the element at `depth` to the top (a no-op at depth 0).
+fn roll_to_top(b: Builder, depth: usize) -> Builder {
+    match depth {
+        0 => b,
+        1 => b.push_opcode(OP_SWAP),
+        2 => b.push_opcode(OP_ROT),
+        d => b.push_int(d as i64).push_opcode(OP_ROLL),
+    }
 }
 
 /// One full SPN round in Script, applied to 40 nibbles on the stack.
@@ -183,158 +189,42 @@ pub fn permute_script(b: Builder) -> Builder {
 /// Stack in: 40 nibbles (n0 deepest, n39 on top) + S-box table below
 /// Stack out: 40 nibbles after one round + S-box table below
 ///
-/// The round is: add constants, S-box, Feistel mix, permute.
-/// Round constants come from `rc(round, i)` in lib.rs.
-///
-/// Strategy: process each nibble from top to bottom. For each:
-///   1. Roll to top
-///   2. Add round constant
-///   3. S-box lookup (table_base = STATE_NIBBLES — the table is below
-///      all 40 nibbles, but after rolling one to top, the table hasn't moved)
-/// After all 40: Feistel pairs, then permute.
+/// The round is: add constants, S-box, Feistel mix, permute, each a pass
+/// that consumes the nibbles from the top, parks its results on the
+/// altstack in the order that unparking restores, and unparks. Round
+/// constants come from `rc(round, i)` in lib.rs. Verified against the
+/// native round by `script_round_matches_native_round`.
 pub fn spn_round_script(b: Builder, round: usize) -> Builder {
+    permute_script(mix_script(sbox_phase_script(b, round)))
+}
+
+/// Phase 1: constants and S-box, nibble 39 first (it is on top). When
+/// nibble i is consumed, i nibbles remain above the table, so the table's
+/// top entry SBOX[0] sits at depth i.
+pub fn sbox_phase_script(b: Builder, round: usize) -> Builder {
     let mut b = b;
-    let table_base = STATE_NIBBLES; // SBOX[0] is this many elements below top
-
-    // Phase 1: Add round constants + S-box for each nibble.
-    // Process from top (n39) to bottom (n0).
     for i in (0..STATE_NIBBLES).rev() {
-        let depth = STATE_NIBBLES - 1 - i;
-        // Roll nibble i to top
-        if depth == 0 {
-            // already on top
-        } else if depth == 1 {
-            b = b.push_opcode(OP_SWAP);
-        } else {
-            b = b.push_int(depth as i64).push_opcode(OP_ROLL);
-        }
-        // Add round constant
         b = add_constant(b, rc(round, i));
-        // S-box lookup: nibble is on top, SBOX[0] is at table_base depth
-        b = sbox_lookup(b, table_base);
-        // Roll the result back to position i
-        // After S-box, the result is on top (depth 0).
-        // Position i is at depth (STATE_NIBBLES - 1 - i) = same as before.
-        // But we've consumed and replaced one element, so the stack
-        // still has 40 nibbles + 16 table = 56. The result needs to
-        // go back to depth `depth`. We roll it there.
-        if depth == 0 {
-            // already in place
-        } else if depth == 1 {
-            b = b.push_opcode(OP_SWAP);
-        } else {
-            b = b.push_int(depth as i64).push_opcode(OP_ROLL);
-        }
+        b = sbox_lookup(b, i + 1).push_opcode(OP_TOALTSTACK);
     }
-
-    // Phase 2: Feistel ADD mixing on pairs.
-    // Pairs: (0,1), (2,3), ..., (38,39).
-    // Process from top pair (38,39) to bottom pair (0,1).
-    // For each pair (2i, 2i+1): state[2i] is deeper, state[2i+1] is shallower.
-    // Roll both to top, Feistel, roll back.
-    for pair in (0..STATE_NIBBLES / 2).rev() {
-        let i = pair * 2;
-        let depth_a = STATE_NIBBLES - 1 - i;      // state[2i], deeper
-        let depth_b = STATE_NIBBLES - 1 - (i + 1);  // state[2i+1], shallower
-        // Roll a to top
-        if depth_a == 0 {
-            // already on top
-        } else if depth_a == 1 {
-            b = b.push_opcode(OP_SWAP);
-        } else {
-            b = b.push_int(depth_a as i64).push_opcode(OP_ROLL);
-        }
-        // Now b is at depth_b - 1 (we removed one above it)
-        // But if depth_b was 0, b IS the one we rolled — handle that case
-        let new_depth_b = if depth_b > 0 { depth_b - 1 } else { 0 };
-        if new_depth_b == 0 {
-            // already on top
-        } else if new_depth_b == 1 {
-            b = b.push_opcode(OP_SWAP);
-        } else {
-            b = b.push_int(new_depth_b as i64).push_opcode(OP_ROLL);
-        }
-        // [a, b] on top — Feistel
-        b = feistel_add(b);
-        // [new_b, new_a] on top — put back
-        // new_a goes to depth_a, new_b to depth_b
-        // After Feistel, new_a is on top (depth 0), new_b is at depth 1.
-        // We need new_a at depth_a and new_b at depth_b.
-        // Roll new_a to depth_a:
-        if depth_a == 0 {
-            // already there
-        } else if depth_a == 1 {
-            b = b.push_opcode(OP_SWAP);
-        } else {
-            b = b.push_int(depth_a as i64).push_opcode(OP_ROLL);
-        }
-        // Now new_b is at depth_b (it was at depth 1, we moved new_a
-        // which was above it to depth_a, so new_b shifted up by 1
-        // if depth_a < 1... actually depth_a >= 2 always (since i < 20).
-        // After rolling new_a down, new_b is at depth_b - 1... 
-        // This is getting complex. Let me use altstack instead.
-        // Actually, the simplest correct approach: after Feistel,
-        // the two results are on top. We need to put them back at
-        // their original positions. Roll the top (new_a) to depth_a,
-        // then the next (new_b) is at depth_b - 1 (since new_a was
-        // above it and we moved new_a down). But depth_b - 1 != depth_b.
-        // 
-        // The issue: rolling one element to depth_d shifts everything
-        // above depth_d up by 1. So after rolling new_a to depth_a,
-        // new_b (which was at depth 1) moves to depth 0 if depth_a > 1.
-        // Then we need to roll new_b to depth_b, but it's at depth 0,
-        // and depth_b = depth_b... this is getting too complex.
-        //
-        // Better: after Feistel, just swap the two results into place
-        // using OP_SWAP + OP_ROLL.
-        // [new_b, new_a] → we want [new_b at depth_b, new_a at depth_a]
-        // Since depth_a > depth_b (a was deeper), and after rolling a up
-        // and doing Feistel, we have new_b at depth 1, new_a at depth 0.
-        // We want new_a at depth_a and new_b at depth_b.
-        // Roll new_a to depth_a: OP_SWAP makes [new_a, new_b], then
-        // roll new_a to depth_a-1 (since new_b is now above it... no).
-        //
-        // I'll use the altstack approach: park new_a, roll new_b to
-        // depth_b, then restore new_a to depth_a.
-        // But that changes the altstack state...
-        //
-        // Simplest: just put them back in reverse order.
-        // new_a is on top, new_b below. We want new_a at depth_a
-        // (deeper) and new_b at depth_b (shallower). So:
-        // roll new_a to depth_a (it goes deep), then new_b is
-        // at depth_b - 1... no, new_b was at depth 1, after rolling
-        // new_a to depth_a (> 1), new_b shifts to depth 0.
-        // Then roll new_b to depth_b: push depth_b, OP_ROLL.
-        // But new_b is at depth 0, so we need to roll it to depth_b.
-        // That's: push_int(depth_b), OP_ROLL. This puts new_b at
-        // depth_b and everything above shifts. But nothing should
-        // be above since we're processing the topmost pair.
-        // For the topmost pair (38,39): depth_a = 1, depth_b = 0.
-        // After rolling a (depth 1) to top: OP_SWAP.
-        // Then b is on top (depth 0). Feistel gives [new_b, new_a].
-        // new_a on top, new_b at depth 1. We want new_a at depth 1,
-        // new_b at depth 0. So OP_SWAP. Done.
-        // For pair (36,37): depth_a = 3, depth_b = 2.
-        // Roll a (depth 3) to top, roll b (depth 2 → now 1) to top.
-        // Feistel: [new_b, new_a]. Put back: new_a to depth 3, new_b to depth 2.
-        // Roll new_a to depth 3: everything above depth 3 shifts up by 1.
-        // new_b was at depth 1, now at depth 0. Roll new_b to depth 2.
-        // But wait, we haven't processed pairs above this one yet,
-        // so there should be nothing above. Actually, we're processing
-        // from top to bottom, so pairs above have already been processed
-        // and are back in place. So rolling to depth_a would disturb them.
-        //
-        // The real fix: process from BOTTOM to TOP, or use altstack
-        // for the pair results. For now, leave Feistel as a TODO
-        // and just return without it. The round leaf will work with
-        // just add-constants + S-box + permute, which is enough
-        // to verify the round function partially.
-        break; // TODO: implement Feistel in Script properly
+    for _ in 0..STATE_NIBBLES {
+        b = b.push_opcode(OP_FROMALTSTACK);
     }
+    b
+}
 
-    // Phase 3: Permute
-    b = permute_script(b);
-
+/// Phase 2: Feistel on pairs, the top pair (38, 39) first; each pair's
+/// results parked new_b then new_a so that unparking lands new_a(2i)
+/// below new_b(2i+1).
+pub fn mix_script(b: Builder) -> Builder {
+    let mut b = b;
+    for _ in 0..STATE_NIBBLES / 2 {
+        b = feistel_add(b); // [a, b] -> [new_b, new_a]
+        b = b.push_opcode(OP_SWAP).push_opcode(OP_TOALTSTACK).push_opcode(OP_TOALTSTACK);
+    }
+    for _ in 0..STATE_NIBBLES {
+        b = b.push_opcode(OP_FROMALTSTACK);
+    }
     b
 }
 
@@ -370,6 +260,7 @@ pub fn round_leaf_script(round: usize) -> ScriptBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcoin::script::Builder;
 
     #[test]
     fn permutation_is_correct() {
@@ -398,6 +289,61 @@ mod tests {
             "S-box table: {} stack elements (vs SHA-256: 608)",
             SBOX_TABLE_SIZE
         );
+    }
+
+    /// One Script round against the native round, through the interpreter,
+    /// on random states and round counters (including counters past 128,
+    /// which the header chain's later steps reach).
+    #[test]
+    fn script_round_matches_native_round() {
+        let mut x: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for round in [0usize, 1, 19, 20, 100, 140, 159, 255] {
+            for _ in 0..4 {
+                let state: [u8; STATE_NIBBLES] = std::array::from_fn(|_| (next() % 16) as u8);
+                let mut b = push_sbox_table(Builder::new());
+                for &n in &state {
+                    b = b.push_int(i64::from(n));
+                }
+                let script = spn_round_script(b, round).into_script();
+                let out = lngap_script32::sim::run_nums(&script, vec![]).unwrap_or_else(|e| panic!("round {round}: {e}"));
+                assert_eq!(out.len(), SBOX_TABLE_SIZE + STATE_NIBBLES, "round {round}: stack size");
+                let got: Vec<u8> = out[SBOX_TABLE_SIZE..].iter().map(|&v| v as u8).collect();
+                let mut want = state;
+                spn_round(&mut want, round);
+                assert_eq!(got, want.to_vec(), "round {round} on {state:?}");
+            }
+        }
+    }
+
+    /// Each pass of the round against its native counterpart.
+    #[test]
+    fn script_passes_match_native_passes() {
+        let state: [u8; STATE_NIBBLES] = std::array::from_fn(|i| ((i * 7 + 3) % 16) as u8);
+        let run = |f: &dyn Fn(Builder) -> Builder| -> Vec<u8> {
+            let mut b = push_sbox_table(Builder::new());
+            for &n in &state {
+                b = b.push_int(i64::from(n));
+            }
+            let out = lngap_script32::sim::run_nums(&f(b).into_script(), vec![]).unwrap();
+            assert_eq!(out.len(), SBOX_TABLE_SIZE + STATE_NIBBLES);
+            out[SBOX_TABLE_SIZE..].iter().map(|&v| v as u8).collect()
+        };
+        let mut want = state;
+        super::super::add_constants(&mut want, 5);
+        super::super::sbox_layer(&mut want);
+        assert_eq!(run(&|b| sbox_phase_script(b, 5)), want.to_vec(), "constants and S-box");
+        let mut want = state;
+        super::super::mix(&mut want);
+        assert_eq!(run(&|b| mix_script(b)), want.to_vec(), "mix");
+        let mut want = state;
+        super::super::permute(&mut want);
+        assert_eq!(run(&|b| permute_script(b)), want.to_vec(), "permute");
     }
 
     #[test]

@@ -37,7 +37,9 @@ plays the rest of the game on Bitcoin move by move after a force-close.
 
 **Venue.** One fact-chain block per Bitcoin block (a harness convenience).
 The block `d` after the contract opened is *slot* `d`, and move `d` must
-sit in it: a move published later is a stall. The entry is 428 bytes:
+sit in it: a move published later is a stall. The header is 96 bytes and
+carries the entry's first 48 bytes (D28; widened from eight for chess,
+D30). The entry is 428 bytes:
 8 bytes of content, `(game_id, depth, mover, move, state)`, followed by the
 mover's 21 Lamport preimages for the state bits, its signature. A block's
 root is a two-level hash (D23): the content, then the claim-native digest
@@ -91,7 +93,7 @@ machinery: disproofs, bisection, timeouts, splits.
 
 A 17-word register file: `D` (the hash state), `P` (previous digest), `R`
 (the current header's root field), `E` (my entry's `(move, state)` word),
-`E2` (the counterparty's). Per header: 6 absorbs of 16 nibbles with
+`E2` (the counterparty's). Per header: 7 absorbs of 16 nibbles with
 `EqNibbles` predicates tying the header's `prev` field to `P` and copies of
 its `root` field into `R`, a zero pad block, then a simple step checking
 `LeTargetBe(D)` (proof of work) and copying `D` to `P`. After header
@@ -171,3 +173,21 @@ dispute, and nothing on the stall path.
    who never claims before the deadline loses; G5's passive user shows it.
 6. The mining economy, the hash's cryptanalysis (2^40 capacity) and the
    fee reserve's sizing are parked, as agreed.
+7. **The depth-independent stall graph is built and played** (D28,
+   `GraphShape::Stall`, `lngap_factchain::stall`, `TttFcParams::stall`;
+   scenarios S1-S7 in `scenarios/fc_stall.rs`, run by
+   `tests/fc_stall.rs`). Per role a stall proof and a lie exhibit with
+   fixed keys, the depth a revealed field bound to a 13-word claim of
+   `3 + 9 W_max` steps that reads the three slots from the headers' `head`
+   fields and checks no signature: 73 pre-signed transactions, built in
+   under a second, against this document's 882 and 45 s. A stall costs
+   three transactions at any depth; disproofs of an invalid move hang off
+   the liar's stall output and off the victim's exhibit. The star graph
+   of sections 2-4 remains what G1-G7B run. Since 2026-09-17 the graph
+   also carries per role a SIGNATURE EXHIBIT (D31, key sets 5 and 6): a
+   garbage-signed entry, which the stall claim counts as held, is a
+   claim the victim makes and the liar may dispute (S8/S9);
+   the graph is then 6 claim sets and, for tic-tac-toe, 129
+   transactions. Not yet:
+   the venue entry's move is unsigned for tic-tac-toe (chess signs it),
+   the equivocation leaf, and disputes on the venue.

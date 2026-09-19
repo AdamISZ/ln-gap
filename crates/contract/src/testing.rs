@@ -26,7 +26,7 @@ pub fn depth_secrets(prover: Role, seed: u8, prog: &dyn Program) -> (DepthSecret
         state: SecretKey::from_entropy(prog.n_state_bits(), [seed.wrapping_add(1); 32]),
         code: SecretKey::from_entropy(CODE_BITS, [seed.wrapping_add(2); 32]),
     };
-    let k = DepthKeys { prover, mv: s.mv.public(), state: s.state.public(), code: s.code.public(), claim: None, prior: None, state_n4: vec![] };
+    let k = DepthKeys { prover, mv: s.mv.public(), state: s.state.public(), code: s.code.public(), claim: None, prior: None, state_n4: vec![], depth: None };
     (s, k)
 }
 

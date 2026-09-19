@@ -32,16 +32,18 @@
 //! E2  word  16      nibbles 128..136  the counterparty's entry's word 1
 //! ```
 //!
-//! Steps: per header `hdr_b0..hdr_b5`, `hdr_pad`, `hdr_end` (PoW, `D -> P`);
+//! Steps: per header `hdr_b0..hdr_b11`, `hdr_pad`, `hdr_end` (PoW, `D -> P`);
 //! after header `d-1` the counterparty's entry (`pe_*`), after header `d`
 //! mine (`oe_*`): 64 absorbs of the 512-byte entry stream (the content
-//! block, then 3 blocks per digest), `_pad`, `_root`. `8 d + 66` steps for
-//! a depth-1 claim, `8 d + 132` from depth 2, padded to a power of two.
+//! block, then 3 blocks per digest), `_pad`, `_root`. `14 d + 66` steps for
+//! a depth-1 claim, `14 d + 132` from depth 2, padded to a power of two.
+//! This is the per-depth claim the built tic-tac-toe path uses; the
+//! depth-independent one is [`crate::stall`].
 
 use lngap_contract::claim::{ClaimData, ClaimSpec, Copy, HashKind, Init, Pred, Src, Step};
 use lngap_n4bit::{claim_blocks, hash_claim, Digest, DIGEST_BYTES};
 
-use crate::{entry_stream, CHUNK, CHUNK_PAD, ENTRY_HEAD, STREAM_BYTES};
+use crate::{entry_stream, CHUNK, CHUNK_PAD, ENTRY_HEAD, HEADER_BYTES, STREAM_BYTES};
 
 pub const N_WORDS: usize = 17;
 pub const NB: usize = 8 * N_WORDS;
@@ -57,8 +59,8 @@ pub const E2_WORD: usize = 16;
 pub const STATE_BITS: usize = 21;
 /// Bytes of an encoded [`SlotEntry`]: the 8-byte content and one preimage per state bit.
 pub const ENTRY_BYTES: usize = ENTRY_HEAD + STATE_BITS * CHUNK;
-/// Steps per header (6 absorbs, the pad block, the end check).
-pub const STEPS_PER_HEADER: usize = 8;
+/// Steps per header (12 absorbs, the pad block, the end check).
+pub const STEPS_PER_HEADER: usize = crate::HEADER_ABSORBS + 2;
 /// Steps per entry (64 stream absorbs, the pad block, the root check).
 pub const ENTRY_STEPS: usize = STREAM_BYTES / 8 + 2;
 
@@ -148,7 +150,7 @@ impl SlotClaim {
     /// The prover's data, in step order: each header's 6 word pairs, the
     /// counterparty's entry stream (64 pairs) after header `depth - 1`,
     /// mine after header `depth`. A missing entry streams as empty.
-    pub fn data(&self, headers: &[[u8; 48]], prev_entry: Option<&[u8]>, own_entry: &[u8]) -> ClaimData {
+    pub fn data(&self, headers: &[[u8; HEADER_BYTES]], prev_entry: Option<&[u8]>, own_entry: &[u8]) -> ClaimData {
         assert_eq!(headers.len(), self.depth, "slot claim needs {} headers", self.depth);
         let mut data = Vec::new();
         for (h, hdr) in headers.iter().enumerate() {
@@ -180,7 +182,7 @@ impl SlotClaim {
 
     fn header_steps(steps: &mut Vec<Step>, target: &Digest) {
         let data = || vec![Src::Data(0), Src::Data(1)];
-        for b in 0..6 {
+        for b in 0..crate::HEADER_ABSORBS {
             let init = if b == 0 { Init::Iv } else { Init::D };
             let mut step = Step::compress(&format!("hdr_b{b}"), init, data());
             // prev field: header nibbles 0..40 = steps 0, 1 and half of 2; root field: 40..80
@@ -273,7 +275,7 @@ mod tests {
         SlotEntry { game_id: 7, depth, mover: (depth % 2 == 0) as u8, mv: 4, state, sigs: key.sign(state) }
     }
 
-    fn chain(entries: &[Vec<u8>]) -> (Digest, Vec<[u8; 48]>) {
+    fn chain(entries: &[Vec<u8>]) -> (Digest, Vec<[u8; HEADER_BYTES]>) {
         let g = genesis();
         let mut miner = Miner::new(g.header.digest(), 0);
         let mut client = ChainClient::from_checkpoint(0, g.header.digest());

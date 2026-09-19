@@ -578,7 +578,7 @@ impl FcWorld {
         drop(hub);
         // Convert FactData (headers + entry) to ClaimData (Vec<Vec<u32>>)
         let fc_shape = lngap_factchain::claim::FactChainShape::from_fact_shape(&shape);
-        let raw_headers: Vec<[u8; 48]> = data.headers.iter().map(|h| h.0).collect();
+        let raw_headers: Vec<[u8; lngap_factchain::HEADER_BYTES]> = data.headers.iter().map(|h| h.0).collect();
         let claim_data = fc_shape.data(&raw_headers);
         self.store.put(&format!("{req_id}/incl"), claim_data);
         self.say(format!("proof data for request {req_id} served ({} headers)", raw_headers.len()));
@@ -664,7 +664,7 @@ impl FcWorld {
             // genesis, so build_data's client-relative indexing lines up.)
             let data = shape.build_data(&self.alice_fc, &p.entry);
             let fc_shape = lngap_factchain::claim::FactChainShape::from_fact_shape(&shape);
-            let raw_headers: Vec<[u8; 48]> = data.headers.iter().map(|h| h.0).collect();
+            let raw_headers: Vec<[u8; lngap_factchain::HEADER_BYTES]> = data.headers.iter().map(|h| h.0).collect();
             self.store.put(&key, fc_shape.data(&raw_headers));
             self.say(format!(
                 "the real chain is heavier than the hub's fork: refutation data served for request {req_id} ({} headers)",

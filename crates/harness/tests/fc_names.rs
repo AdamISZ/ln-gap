@@ -294,6 +294,7 @@ fn n8_fabricated_proof_disproved_by_bisection() -> Result<()> {
         roles.iter().any(|r| {
             r.starts_with("round_")
                 || r.starts_with("cpred_")
+            || r.starts_with("flat_")
                 || r.starts_with("simple_")
                 || r.starts_with("sched_")
                 || r.starts_with("block_")
@@ -319,6 +320,7 @@ fn n8_fabricated_proof_disproved_by_bisection() -> Result<()> {
     let d = roles.iter().find(|r| {
         r.starts_with("round_")
             || r.starts_with("cpred_")
+            || r.starts_with("flat_")
             || r.starts_with("simple_")
             || r.starts_with("block_")
             || r.starts_with("ckeep_")

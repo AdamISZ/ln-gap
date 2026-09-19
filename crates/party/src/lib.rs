@@ -25,7 +25,7 @@ use lngap_channel::{ChannelParams, ChannelState, PartyKeys, PartyPubKeys, Role};
 use lngap_contract::instance::key_label;
 use lngap_contract::leaves::move_witness_args;
 use lngap_contract::onchain::{check_claim, decode_claim, parse_move_witness, MoveReveals};
-use lngap_contract::{Claim, ContractInstance, Extra, GraphShape, ProgramRegistry, CODE_BITS};
+use lngap_contract::{Claim, ContractInstance, Extra, GraphShape, ProgramRegistry, CODE_BITS, DEPTH_BITS};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::{uint_to_bits, PublicKey, Reveal, PREIMAGE_LEN};
 use tracing::{info, warn};
@@ -124,15 +124,44 @@ pub type CancelPolicy = Box<dyn Fn(&MoveCtx) -> bool + Send + Sync>;
 /// settled elsewhere)? `None` while the game is on.
 pub type FoldPolicy = Box<dyn Fn(&MoveCtx) -> Option<[Amount; 2]> + Send + Sync>;
 
-/// A claim this party intends to make on-chain in a star-graph contract:
-/// the depth-`depth` Move from the doubly signed state, leaving from
-/// `prior` (the counterparty's state at depth `depth - 1`, revealed by
-/// `prior_reveal`; both empty at depth 1).
+/// What kind of on-chain claim a party queues.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClaimKind {
+    /// Star graphs: the depth-`depth` Move (a timeout or result claim).
+    Star,
+    /// Stall graphs: my move at venue depth `depth`, the counterparty's
+    /// slot `depth + 1` empty of its move.
+    Stall,
+    /// Stall graphs: the counterparty's move at venue depth `depth`,
+    /// exhibited as invalid from my state at `depth - 1`.
+    Lie,
+    /// Stall graphs: the counterparty's entry at venue depth `depth`,
+    /// exhibited as garbage-signed (D31); the claim carries the bit.
+    Sig,
+}
+
+/// A claim this party intends to make on-chain: at venue depth `depth`,
+/// leaving from `prior` (the state before the claimed move; the initial
+/// state at depth 1), the move `mv`. `new` is the state the mover claimed
+/// when it differs from the program's transition (a stall claimant's own
+/// invalid move, or the exhibited move's published state); `None` means
+/// the transition.
 #[derive(Clone, Debug)]
 pub struct QueuedClaim {
+    pub kind: ClaimKind,
     pub depth: u32,
     pub prior: Vec<bool>,
     pub mv: Vec<bool>,
+    pub new: Option<Vec<bool>>,
+    /// The outcome code to reveal, when it is not the resolution of the
+    /// claimed state (a signature exhibit names the outcome it earns).
+    pub code: Option<u8>,
+}
+
+impl QueuedClaim {
+    pub fn star(depth: u32, prior: Vec<bool>, mv: Vec<bool>) -> QueuedClaim {
+        QueuedClaim { kind: ClaimKind::Star, depth, prior, mv, new: None, code: None }
+    }
 }
 
 /// What the change-acceptance policy sees for a counterparty's draft.
@@ -164,6 +193,9 @@ struct Live {
     dispute: Option<DisputeLive>,
     /// Graph label prefix of this output's spends (`r{d}/` after a refutation).
     prefix: String,
+    /// Stall graphs, my own lie exhibit: the claim and reveals to disprove
+    /// with once the liar's dispute window has passed.
+    exhibit: Option<(Claim, MoveReveals)>,
 }
 
 /// A statement key this party may need to learn preimages for.
@@ -379,7 +411,13 @@ impl Party {
     /// Intend to claim on-chain in star-graph contract `id`: force-close
     /// once the claim's leaf is spendable, then make the depth-`depth` Move.
     pub fn queue_claim(&mut self, id: u32, claim: QueuedClaim) {
-        self.say(format!("contract {id}: will claim on-chain at depth {} ({} bits of prior, move {})", claim.depth, claim.prior.len(), lngap_contract::bits_str(&claim.mv)));
+        let what = match claim.kind {
+            ClaimKind::Star => "claim",
+            ClaimKind::Stall => "prove a stall",
+            ClaimKind::Lie => "exhibit a lie",
+            ClaimKind::Sig => "exhibit a garbage signature",
+        };
+        self.say(format!("contract {id}: will {what} on-chain at depth {} ({} bits of prior, move {})", claim.depth, claim.prior.len(), lngap_contract::bits_str(&claim.mv)));
         self.claims.insert(id, claim);
     }
     pub fn has_queued_claim(&self, id: u32) -> bool {
@@ -413,7 +451,9 @@ impl Party {
         ensure!(self.channel.closing.is_none(), "channel is closing");
         ensure!(self.channel.pending_seq().is_none() && self.pending_draft.is_none(), "an update is in flight");
         let mut spec = apply_change(self.channel.current_state(), &change, &self.programs)?;
+        let t0 = std::time::Instant::now();
         fill_my_keys(&mut spec, self.role, &mut self.keystore, &self.programs)?;
+        info!(party = %self.role, keys_ms = t0.elapsed().as_millis(), "generated my keys for the proposal");
         let mut extra_reveals = Vec::new();
         if let Change::Move { id, .. } = &change {
             let inst = downcast(self.channel.current_state().contract(*id).ok_or_else(|| anyhow!("no contract {id}"))?).clone();
@@ -478,7 +518,7 @@ impl Party {
                     }
                 }
             }
-            if shape == GraphShape::Star {
+            if matches!(shape, GraphShape::Star | GraphShape::Stall) {
                 // the game is played elsewhere; the contract's state never moves off-chain
                 continue;
             }
@@ -588,7 +628,9 @@ impl Party {
             self.learn_reveal(&l, r)?;
         }
         let mut full = spec;
+        let t0 = std::time::Instant::now();
         let keys = fill_my_keys(&mut full, self.role, &mut self.keystore, &self.programs)?;
+        info!(party = %self.role, keys_ms = t0.elapsed().as_millis(), "generated my keys for the draft");
         ensure!(full.contracts.iter().all(|c| c.complete()), "draft incomplete after adding my keys");
         let seq = full.seq;
         let state = full.into_state(&self.programs)?;
@@ -692,6 +734,7 @@ impl Party {
                     resolved: false,
                     dispute: None,
                     prefix: String::new(),
+                    exhibit: None,
                 });
             }
         }
@@ -726,6 +769,10 @@ impl Party {
                 let d: u32 = name[5..].parse()?;
                 self.on_move_confirmed(idx, d, &tx, height)
             }
+            Some(name) if ContractInstance::stall_graph_index(name).is_some() => {
+                let d = ContractInstance::stall_graph_index(name).unwrap();
+                self.on_move_confirmed(idx, d, &tx, height)
+            }
             Some("dispute") => self.on_dispute_started(idx, &tx, height),
             Some(name) => {
                 self.live[idx].resolved = true;
@@ -743,24 +790,58 @@ impl Party {
     fn on_move_confirmed(&mut self, idx: usize, d: u32, tx: &Transaction, height: u32) -> Result<()> {
         let inst = self.instance(&self.live[idx]);
         let keys = inst.depth_keys(d).clone();
-        let extras = inst.move_extras(d).expects;
+        let ex = inst.move_extras(d);
+        let wots_only = ex.wots_only;
+        let extras = ex.expects;
         let extra_bits: Vec<usize> = extras.iter().map(|e| e.pk.n_bits()).collect();
         let claim_params = inst.claim_keys(d).map(|c| c.end.params);
-        let reveals = parse_move_witness(&tx.input[0].witness, inst.prior_bits(d), inst.program.n_move_bits(), inst.program.n_state_bits(), &extra_bits, claim_params)?;
+        let reveals = if wots_only {
+            parse_move_witness(&tx.input[0].witness, None, 0, 0, None, &extra_bits, claim_params)?
+        } else {
+            parse_move_witness(&tx.input[0].witness, inst.prior_bits(d), inst.program.n_move_bits(), inst.program.n_state_bits(), inst.depth_keys(d).depth.as_ref().map(|k| k.n_bits()), &extra_bits, claim_params)?
+        };
         for (e, r) in extras.iter().zip(&reveals.extras) {
             self.learn_reveal(&e.label, r.clone())?;
         }
-        // the state the move leaves from: the previous prover's reveal in the
-        // witness (star graphs), else this output's state
-        let prior = match (&reveals.prior, inst.prior_key(d)) {
-            (Some(r), Some(pk)) => pk.decode_bits(r).context("prior reveal in the move witness")?,
-            _ => self.live[idx].state.clone(),
+        let stall = inst.graph_shape() == GraphShape::Stall;
+        let sig = stall && ContractInstance::is_sig_index(d);
+        let mut claim = if sig {
+            // a signature exhibit carries no move: the outcome code is its
+            // only reveal, the bit and depth live in the claim's end state
+            let code = lngap_lamport::bits_to_uint(&keys.code.decode_bits(&reveals.code)?) as u8;
+            let state = self.live[idx].state.clone();
+            Claim { prior: state.clone(), mv: vec![false; inst.program.n_move_bits()], new: state, code, mover: keys.prover }
+        } else if wots_only {
+            // the prior, move and state are the claim's end-state registers
+            let ckeys = inst.claim_keys(d).expect("claim keys");
+            let end_sig = reveals.claim_end.as_ref().ok_or_else(|| anyhow!("no end-state signature"))?;
+            let end = lngap_contract::claim::state_from_msg(&ckeys.end.verify(end_sig)?);
+            let (prior, mv, new) = inst.program.state_from_end(&end).ok_or_else(|| anyhow!("the end state does not decode to a claim"))?;
+            let code = lngap_lamport::bits_to_uint(&keys.code.decode_bits(&reveals.code)?) as u8;
+            Claim { prior, mv, new, code, mover: keys.prover }
+        } else {
+            // the state the move leaves from: the previous prover's reveal in the
+            // witness (star graphs), else this output's state
+            let prior = match (&reveals.prior, inst.prior_key(d)) {
+                (Some(r), Some(pk)) => pk.decode_bits(r).context("prior reveal in the move witness")?,
+                _ => self.live[idx].state.clone(),
+            };
+            decode_claim(&*inst.program, &keys, prior, &reveals)?
         };
-        let claim = decode_claim(&*inst.program, &keys, prior, &reveals)?;
         let ctx = self.channel.commit_ctx(self.live[idx].seq, self.live[idx].version)?;
         let star = inst.graph_shape() == GraphShape::Star;
+        if stall {
+            // a lie exhibit judges the counterparty's move
+            claim.mover = ContractInstance::judged_mover(d);
+        }
+        let venue_depth = match (&reveals.depth, &keys.depth) {
+            (Some(r), Some(pk)) => Some(pk.decode_uint(r).context("depth reveal in the witness")?),
+            _ => None,
+        };
         let from_root = self.live[idx].depth == 0;
-        let (tree, prefix) = if star && !from_root {
+        let (tree, prefix) = if stall {
+            (inst.stall_graph_tree(&ctx, d)?, ContractInstance::stall_graph_prefix(d))
+        } else if star && !from_root {
             (inst.refuted_tree(&ctx, d)?, format!("r{}/", self.live[idx].depth))
         } else {
             (inst.depth_tree(&ctx, d)?, String::new())
@@ -783,12 +864,19 @@ impl Party {
         self.channel.watch(op);
         let id = self.live[idx].id;
         let outcome = inst.program.outcome_by_code(claim.code).map(|o| o.name).unwrap_or_else(|_| "?".into());
+        let leaf_name = if stall { ContractInstance::stall_graph_leaf_name(d) } else { format!("move_{d}") };
+        let at = venue_depth.map(|v| format!(" at venue depth {v}")).unwrap_or_default();
+        if sig {
+            self.say(format!("contract {id}: {leaf_name} by {} confirmed: {} exhibits {}'s entry as garbage-signed, claimed outcome {outcome}", keys.prover, keys.prover, claim.mover));
+        } else {
         self.say(format!(
-            "contract {id}: move_{d} by {} confirmed: move {}, claimed state {}, claimed outcome {outcome}",
+            "contract {id}: {leaf_name} by {} confirmed{at}: move {} by {}, claimed state {}, claimed outcome {outcome}",
             keys.prover,
             inst.program.describe_move_bits(&claim.mv),
+            claim.mover,
             inst.program.describe_state_bits(&claim.new)
         ));
+        }
         // a bisection claim: the end state the prover committed
         if let (Some(spec), Some(end_sig)) = (inst.claim_spec(d), reveals.claim_end.clone()) {
             let ckeys = inst.claim_keys(d).expect("claim keys");
@@ -836,17 +924,40 @@ impl Party {
                 return self.broadcast_graph(&l, &format!("{}d{d}/dispute", l.prefix), &[]);
             }
         }
-        if keys.prover == self.role {
+        if sig {
+            // judged by the claim alone: a false exhibit was disputed above;
+            // a true one pays the victim by its code after `delta`
+            if keys.prover == self.role {
+                self.say(format!("contract {id}: my signature exhibit is on-chain; the split pays by my code unless the counterparty disputes"));
+            } else {
+                self.say(format!("contract {id}: counterparty exhibits my entry as garbage-signed{}", if self.live[idx].dispute.as_ref().is_some_and(|dl| dl.stage != Stage::Resolved) { "" } else { "; if the claim holds, the split pays it" }));
+            }
             return Ok(());
         }
+        if keys.prover == self.role {
+            if stall && ContractInstance::is_lie_index(d) {
+                // my exhibit: disprove the exhibited move once the liar's window has passed
+                let verdict = check_claim(&*inst.program, &claim);
+                self.say(format!("contract {id}: my exhibit is on-chain; the exhibited move is {}", match &verdict { Ok(()) => "consistent (nothing to disprove)".to_string(), Err(r) => format!("INVALID ({r})") }));
+                self.live[idx].exhibit = Some((claim, reveals));
+            }
+            return Ok(());
+        }
+        if stall && ContractInstance::is_lie_index(d) {
+            // the counterparty exhibits my move: only a false claim (disputed above) helps me
+            let verdict = check_claim(&*inst.program, &claim);
+            self.say(format!("contract {id}: counterparty exhibits my move as a lie; natively it is {}", match &verdict { Ok(()) => "consistent: the exhibit will fail".to_string(), Err(r) => format!("INVALID ({r}): the exhibit will succeed") }));
+            return Ok(());
+        }
+        let what = if stall { "stall proof" } else { "move" };
         match check_claim(&*inst.program, &claim) {
             Ok(()) => {
-                self.say(format!("contract {id}: counterparty's move_{d} is consistent with the program"));
-                self.disprove(idx, d, &claim, &reveals, false)
+                self.say(format!("contract {id}: counterparty's {what} {leaf_name} is consistent with the program"));
+                self.disprove(idx, d, &claim, &reveals, false).map(|_| ())
             }
             Err(reason) => {
-                self.say(format!("contract {id}: counterparty's move_{d} is INVALID ({reason}); disproving"));
-                self.disprove(idx, d, &claim, &reveals, true)
+                self.say(format!("contract {id}: counterparty's {what} {leaf_name} is INVALID ({reason}); disproving"));
+                self.disprove(idx, d, &claim, &reveals, true).map(|_| ())
             }
         }
     }
@@ -854,7 +965,7 @@ impl Party {
     /// Use the first disprove leaf whose native check fires and whose needs
     /// I can satisfy. With `expect_one` a consistent claim may still be
     /// refutable by a statement I hold (e.g. an attestation).
-    fn disprove(&mut self, idx: usize, d: u32, claim: &Claim, reveals: &MoveReveals, expect_one: bool) -> Result<()> {
+    fn disprove(&mut self, idx: usize, d: u32, claim: &Claim, reveals: &MoveReveals, expect_one: bool) -> Result<bool> {
         let inst = self.instance(&self.live[idx]);
         let specs = inst.disprove_specs(d);
         let mut chosen = None;
@@ -882,23 +993,27 @@ impl Party {
             if expect_one {
                 self.say(format!("contract {}: no disprove leaf applies — cannot punish", self.live[idx].id));
             }
-            return Ok(());
+            return Ok(false);
+        };
+        let exhibit = match &spec.exhibit {
+            Some(f) => f(claim).unwrap_or_default(),
+            None => vec![],
         };
         let l = &self.live[idx];
         let leaf_name = format!("disprove_{}", spec.name);
         let leaf = l.tree.leaf(&leaf_name)?.clone();
         let fee = self.channel.params.presign_fee;
-        let mut tx = build_spend(l.outpoint, &Timelock::NONE, vec![TxOut { value: l.prevout.value - fee, script_pubkey: self.channel.my_payout_spk() }]);
+        let mut tx = build_spend(l.outpoint, &leaf.timelock, vec![TxOut { value: l.prevout.value - fee, script_pubkey: self.channel.my_payout_spk() }]);
         let sig = sign_tapscript(&self.channel.keys.payment, &tx, 0, std::slice::from_ref(&l.prevout), &leaf.script)?;
         let mut w = WitnessStack::new();
-        w.push(sig.as_ref().to_vec()).extend(spec.witness_args(l.prior_state_reveal.as_ref(), &reveals.mv, &reveals.state, &reveals.code, &needs));
+        w.push(sig.as_ref().to_vec()).extend(spec.witness_args_with(l.prior_state_reveal.as_ref(), &reveals.mv, &reveals.state, &reveals.code, &needs, reveals.claim_end.as_ref(), &exhibit));
         tx.input[0].witness = w.build(&leaf.script, &l.tree.control_block(&leaf_name)?);
         let op = l.outpoint;
         let id = l.id;
         self.channel.mark_swept(op);
         self.channel.broadcast(&tx, &leaf_name)?;
         self.say(format!("contract {id}: broadcast {leaf_name} taking {} sats", tx.output[0].value));
-        Ok(())
+        Ok(true)
     }
 
     /// Timers: force-close on stall or missed counterparty deadline; make my
@@ -925,6 +1040,10 @@ impl Party {
                 // a queued claim whose leaf is (or is about to be) spendable: escalate
                 let ready: Option<u32> = self.channel.current_state().contracts.iter().map(|c| downcast(c)).find(|i| {
                     self.claims.get(&i.id).is_some_and(|q| {
+                        // stall graphs carry no CLTV: the venue's clock is in the claim
+                        if i.graph_shape() == GraphShape::Stall {
+                            return true;
+                        }
                         let cltv = i.move_extras(q.depth).cltv.unwrap_or(0);
                         height + u32::from(self.channel.params.to_self_delay) >= cltv
                     })
@@ -980,6 +1099,22 @@ impl Party {
                         return Ok(());
                     }
                 }
+            } else if inst.graph_shape() == GraphShape::Stall {
+                if let Some(q) = self.claims.get(&l.id).cloned() {
+                    if !self.faults.passive_onchain && self.height < inst.deadline {
+                        let index = match q.kind {
+                            ClaimKind::Lie => ContractInstance::lie_index(self.role),
+                            ClaimKind::Sig => ContractInstance::sig_index(self.role),
+                            _ => ContractInstance::stall_index(self.role),
+                        };
+                        let leaf = l.tree.leaf(&ContractInstance::stall_graph_leaf_name(index))?;
+                        if self.timelock_ready(&l, &leaf.timelock) {
+                            self.claims.remove(&l.id);
+                            return self.broadcast_stall_claim(idx, index, q);
+                        }
+                        return Ok(());
+                    }
+                }
             } else {
                 let my_turn = inst.turn() == Some(self.role);
                 if my_turn && !self.faults.passive_onchain && self.height < inst.deadline {
@@ -1002,6 +1137,20 @@ impl Party {
         let d = l.depth;
         let prover = inst.prover_at(d);
         let code = l.claim_code.expect("depth ≥ 1 has a claim");
+        // my lie exhibit: once the liar's dispute window has passed, disprove the exhibited move
+        if inst.graph_shape() == GraphShape::Stall && ContractInstance::is_lie_index(d) && prover == self.role {
+            if let Some((claim, reveals)) = l.exhibit.clone() {
+                if self.timelock_ready(&l, &Timelock::csv(params.delta)) {
+                    self.live[idx].exhibit = None;
+                    if self.disprove(idx, d, &claim, &reveals, true)? {
+                        return Ok(());
+                    }
+                    self.say(format!("contract {}: my exhibit does not hold; the split will pay the counterparty", l.id));
+                } else {
+                    return Ok(());
+                }
+            }
+        }
         let next_leaf = format!("move_{}", d + 1);
         let my_move = prover != self.role && inst.program.turn_bits(&l.state)? == Some(self.role) && d < inst.max_depth() && !self.faults.passive_onchain && l.tree.leaf(&next_leaf).is_ok();
         if my_move {
@@ -1083,11 +1232,71 @@ impl Party {
         let key = GraphKey { version: l.version, contract_id: l.id, label };
         let rec = self.channel.record(l.seq).ok_or_else(|| anyhow!("no record"))?;
         let ptx = rec.graph.get(&key).ok_or_else(|| anyhow!("no graph tx {key}"))?;
-        let tx = ptx.finalize(&move_witness_args(prior_reveal.as_ref(), &mv_r, &st_r, &code_r, &extras, end_sig.as_ref()))?;
+        let tx = ptx.finalize(&move_witness_args(prior_reveal.as_ref(), &mv_r, &st_r, &code_r, None, &extras, end_sig.as_ref()))?;
         self.pop_move(l.id);
         self.channel.mark_swept(l.outpoint);
         self.say(format!("contract {}: broadcasting move_{d}: {} -> state {}, outcome code {}", l.id, inst.program.describe_move_bits(&claim.mv), inst.program.describe_state_bits(&claim.new), claim.code));
         self.channel.broadcast(&tx, &format!("move_{d}"))?;
+        Ok(())
+    }
+
+    /// Stall graphs: spend `C` through my stall proof or lie exhibit (key
+    /// set `index`) for the queued claim `q`.
+    fn broadcast_stall_claim(&mut self, idx: usize, index: u32, q: QueuedClaim) -> Result<()> {
+        let l = self.live[idx].clone();
+        let inst = self.instance(&l);
+        let d = index;
+        let mover = ContractInstance::judged_mover(d);
+        let new = match q.new {
+            Some(n) => n,
+            None if q.kind == ClaimKind::Sig => q.prior.clone(),
+            None => inst.program.transition_bits(&q.prior, &q.mv, mover).context("the claimed move is invalid and no claimed state was given")?,
+        };
+        let code = match q.code {
+            Some(c) => c,
+            None => inst.program.resolution_bits(&new)?.code,
+        };
+        let mut claim = Claim { prior: q.prior, mv: q.mv, new, code, mover };
+        if let Some(cheat) = &self.faults.cheat_move {
+            claim = cheat(&claim);
+            self.say(format!("contract {}: CHEATING in the claim: move {} state {} code {}", l.id, inst.program.describe_move_bits(&claim.mv), inst.program.describe_state_bits(&claim.new), claim.code));
+        }
+        let ks = inst.keys_seq;
+        let wots_only = inst.move_extras(d).wots_only;
+        let empty = Reveal { preimages: vec![] };
+        let (prior_reveal, mv_r, st_r, depth_r) = if wots_only {
+            (None, empty.clone(), empty.clone(), None)
+        } else {
+            (
+                Some(self.keystore.reveal_bits(&key_label(l.id, ks, d, "prior"), &claim.prior)?),
+                self.keystore.reveal_bits(&key_label(l.id, ks, d, "move"), &claim.mv)?,
+                self.keystore.reveal_bits(&key_label(l.id, ks, d, "state"), &claim.new)?,
+                Some(self.keystore.reveal_bits(&key_label(l.id, ks, d, "depth"), &uint_to_bits(q.depth, DEPTH_BITS))?),
+            )
+        };
+        let code_r = self.keystore.reveal_bits(&key_label(l.id, ks, d, "code"), &uint_to_bits(u32::from(claim.code), CODE_BITS))?;
+        let spec = inst.claim_spec(d).ok_or_else(|| anyhow!("stall graph without a claim at index {d}"))?;
+        let data = self.claim_data(&inst, d);
+        ensure!(!data.is_empty(), "no served data for my claim at index {d}");
+        let mut end = spec.states(&data).last().unwrap().clone();
+        if let Some(cheat) = &self.faults.cheat_claim {
+            end = cheat(&end);
+            self.say(format!("contract {}: CHEATING: claiming a false end state", l.id));
+        }
+        let end_sig = self.keystore.sign_wots(&lngap_contract::claim::end_label(l.id, ks, d), &lngap_contract::claim::words_bytes(&end))?;
+        let label = ContractInstance::stall_graph_leaf_name(d);
+        let key = GraphKey { version: l.version, contract_id: l.id, label: label.clone() };
+        let rec = self.channel.record(l.seq).ok_or_else(|| anyhow!("no record"))?;
+        let ptx = rec.graph.get(&key).ok_or_else(|| anyhow!("no graph tx {key}"))?;
+        let tx = ptx.finalize(&move_witness_args(prior_reveal.as_ref(), &mv_r, &st_r, &code_r, depth_r.as_ref(), &[], Some(&end_sig)))?;
+        self.channel.mark_swept(l.outpoint);
+        if ContractInstance::is_sig_index(d) {
+            self.say(format!("contract {}: broadcasting {label}: exhibiting {mover}'s entry at venue depth {} as garbage-signed, outcome code {}", l.id, q.depth, claim.code));
+        } else {
+            let what = if ContractInstance::is_lie_index(d) { "exhibiting" } else { "proving a stall with" };
+            self.say(format!("contract {}: broadcasting {label}: {what} move {} by {mover} at venue depth {} -> state {}, outcome code {}", l.id, inst.program.describe_move_bits(&claim.mv), q.depth, inst.program.describe_state_bits(&claim.new), claim.code));
+        }
+        self.channel.broadcast(&tx, &label)?;
         Ok(())
     }
 
@@ -1286,7 +1495,7 @@ impl Party {
                 self.say(format!("contract {id}: dispute resolved by timeout ({})", tx.compute_txid()));
                 return Ok(());
             }
-            n if n.starts_with("step_") || n.starts_with("sched_") || n.starts_with("round_") || n.starts_with("block_") || n.starts_with("re_") || n.starts_with("simple_") || n == "compress_copy" => {
+            n if n.starts_with("step_") || n.starts_with("sched_") || n.starts_with("round_") || n.starts_with("block_") || n.starts_with("re_") || n.starts_with("simple_") || n.starts_with("flat_") || n.starts_with("cpred_") || n.starts_with("ckeep_") || n.starts_with("ccopy_") || n == "compress_copy" => {
                 self.live[idx].dispute.as_mut().unwrap().stage = Stage::Resolved;
                 self.live[idx].resolved = true;
                 self.say(format!("contract {id}: disproved by {n} ({})", tx.compute_txid()));
@@ -1540,10 +1749,9 @@ impl Party {
                 let in_sig = disp.inner_sig(0)?;
                 let block_sigs = (0..bw as u32).map(|j| disp.word_sig(j)).collect::<Result<Vec<_>>>()?;
                 let args = lngap_contract::inner::flat_round_witness(&out_sig, in_sig.as_ref(), &block_sigs);
-                let leaf_name = disp.tree.leaves().iter()
-                    .find(|l| l.name.starts_with("flat_"))
-                    .map(|l| l.name.clone())
-                    .ok_or_else(|| anyhow!("no flat terminal leaf in tree"))?;
+                // the flat leaf of this step: one leaf per distinct (init, round counter)
+                let (leaf_name, _) = lngap_contract::inner::flat_round_leaf(&ctx, disp.prover, &keys, &disp.spec, step as usize);
+                ensure!(disp.tree.leaves().iter().any(|l| l.name == leaf_name), "no flat terminal leaf {leaf_name} in the tree");
                 self.say(format!("contract {id}: flat compression step {step} is wrong"));
                 self.broadcast_disproof(idx, &disp, &leaf_name, args)
             }

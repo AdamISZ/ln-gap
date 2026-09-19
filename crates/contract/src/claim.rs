@@ -103,6 +103,48 @@ pub enum Pred {
     /// by a register bit, e.g. a Lamport bit's two commitments chosen by the
     /// message bit an entry states.
     EqConstBit { nib: usize, bit: u8, off: usize, if0: Vec<u8>, if1: Vec<u8> },
+    /// Nibbles `[off, off + nibbles.len())` differ from the constant in at
+    /// least one nibble (non-inclusion: "this slot's entry is not yours").
+    NeConst { off: usize, nibbles: Vec<u8> },
+    /// Nibbles `[a, a + n)` differ from `[b, b + n)` in at least one nibble.
+    NeNibbles { a: usize, b: usize, n: usize },
+    /// Nibbles `[off, off + n)` read as a big-endian number lie in
+    /// `lo..hi` (exclusive). At most 7 nibbles (script numbers).
+    InRange { off: usize, n: usize, lo: u32, hi: u32 },
+    /// Nibbles `[off, off + n)` read as a big-endian number compare with
+    /// `value` by `cmp`; if so, `then` must all hold, else the predicate
+    /// holds trivially. The gate that makes a claim's length fixed: a step's
+    /// checks switch on a register (the depth) against the step's own index.
+    If { off: usize, n: usize, cmp: Cmp, value: u32, then: Vec<Pred> },
+}
+
+/// A comparison of a register number against a constant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Cmp {
+    Eq,
+    Ge,
+}
+
+impl Pred {
+    /// A gate on the register number at `[off, off + n)`.
+    pub fn gate(off: usize, n: usize, cmp: Cmp, value: u32, then: Vec<Pred>) -> Pred {
+        Pred::If { off, n, cmp, value, then }
+    }
+    /// How many booleans this predicate's script leaves on the altstack.
+    pub fn n_results(&self) -> usize {
+        match self {
+            Pred::EqConst { nibbles, .. } => nibbles.len(),
+            Pred::EqNibbles { n, .. } => *n,
+            Pred::LeTarget { .. } | Pred::LeTargetBe { .. } | Pred::NeConst { .. } | Pred::NeNibbles { .. } | Pred::InRange { .. } => 1,
+            Pred::EqConstBit { if0, .. } => if0.len(),
+            Pred::If { then, .. } => then.iter().map(Pred::n_results).sum(),
+        }
+    }
+}
+
+/// The big-endian number of `n` nibbles at `off`.
+pub fn nibbles_number(space: &[u8], off: usize, n: usize) -> u32 {
+    space[off..off + n].iter().fold(0u32, |acc, x| (acc << 4) | u32::from(*x))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,6 +421,20 @@ impl Pred {
                 let c = if (n[*nib] >> bit) & 1 == 1 { if1 } else { if0 };
                 n[*off..*off + c.len()] == c[..]
             }
+            Pred::NeConst { off, nibbles } => n[*off..*off + nibbles.len()] != nibbles[..],
+            Pred::NeNibbles { a, b, n: len } => n[*a..*a + *len] != n[*b..*b + *len],
+            Pred::InRange { off, n: len, lo, hi } => {
+                let v = nibbles_number(n, *off, *len);
+                *lo <= v && v < *hi
+            }
+            Pred::If { off, n: len, cmp, value, then } => {
+                let v = nibbles_number(n, *off, *len);
+                let on = match cmp {
+                    Cmp::Eq => v == *value,
+                    Cmp::Ge => v >= *value,
+                };
+                !on || then.iter().all(|p| p.holds(n))
+            }
         }
     }
     pub fn name(&self) -> String {
@@ -388,6 +444,10 @@ impl Pred {
             Pred::LeTarget { .. } => "le_target".into(),
             Pred::LeTargetBe { off, target } => format!("le_be@{off}x{}", target.len()),
             Pred::EqConstBit { nib, bit, off, if0, .. } => format!("eq_bit@{nib}.{bit}->{off}x{}", if0.len()),
+            Pred::NeConst { off, nibbles } => format!("ne_const@{off}x{}", nibbles.len()),
+            Pred::NeNibbles { a, b, n } => format!("ne@{a}!={b}x{n}"),
+            Pred::InRange { off, n, lo, hi } => format!("range@{off}x{n}[{lo},{hi})"),
+            Pred::If { off, n, cmp, value, then } => format!("if@{off}x{n}{}{value}[{}]", match cmp { Cmp::Eq => "==", Cmp::Ge => ">=" }, then.iter().map(Pred::name).collect::<Vec<_>>().join(",")),
         }
     }
 }
@@ -798,6 +858,7 @@ pub fn q_round_witness(index: &Reveal) -> Vec<Vec<u8>> {
 }
 
 /// One stage of a pre-signed chain: the leaf spent, the tree of the new output, a description.
+#[derive(Clone, Debug)]
 pub struct Stage {
     pub leaf: String,
     pub next: TapTree,
@@ -826,6 +887,24 @@ pub(crate) fn chain_stages(out: &mut Vec<PresignedTx>, ctx: &CommitCtx, mut op: 
 /// `dispute` leaf). Labels: `dispute`, `p_round_r`, `q_round_r`, then the
 /// inner chain (`p_re_cur`, `p_re_next`, `p_sched`, `p_inner_r`, `q_inner_r`)
 /// and the check chain (`q_round_R_check`, `c_re_cur`, `c_re_next`).
+/// The terminal stages of a dispute chain (the inner chain for compression
+/// steps, the check chain for simple steps): they depend on the keys and
+/// the spec, not on the outpoint or the commitment version, so a graph
+/// builder computes them once per claim and reuses them.
+pub type TerminalStages = (Vec<Stage>, Vec<Stage>);
+
+pub fn terminal_stages(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, ck: &ChallengerKeys, spec: &ClaimSpec) -> Result<TerminalStages> {
+    ensure!(spec.inner, "terminal stages are the inner and check chains");
+    let t0 = std::time::Instant::now();
+    let (inner, _) = crate::inner::compress_chain(ctx, prover, keys, ck, spec)?;
+    let t_inner = t0.elapsed();
+    let t0 = std::time::Instant::now();
+    let (check, _) = crate::simple::check_chain(ctx, prover, keys, spec)?;
+    tracing::debug!(steps = spec.steps.len(), words = spec.n_words, inner_ms = t_inner.as_millis(), check_ms = t0.elapsed().as_millis(), "built a dispute chain's terminal trees");
+    Ok((inner, check))
+}
+
+/// `terminal` supplies precomputed terminal stages (see [`terminal_stages`]).
 #[allow(clippy::too_many_arguments)]
 pub fn dispute_graph(
     ctx: &CommitCtx,
@@ -836,6 +915,7 @@ pub fn dispute_graph(
     parent_tree: &TapTree,
     parent_op: OutPoint,
     parent_prevout: &TxOut,
+    terminal: Option<&TerminalStages>,
 ) -> Result<Vec<PresignedTx>> {
     let fee = ctx.params.presign_fee;
     let rounds = spec.rounds();
@@ -876,10 +956,12 @@ pub fn dispute_graph(
     }
     // the last index: into the inner chain (compression steps), the check chain (simple steps), or the flat terminal
     if spec.inner {
-        let (stages, _) = crate::inner::compress_chain(ctx, prover, keys, ck, spec)?;
-        chain_stages(&mut out, ctx, op, prevout.clone(), tree.clone(), stages)?;
-        let (stages, _) = crate::simple::check_chain(ctx, prover, keys, spec)?;
-        chain_stages(&mut out, ctx, op, prevout, tree, stages)?;
+        let (inner, check) = match terminal {
+            Some(t) => t.clone(),
+            None => terminal_stages(ctx, prover, keys, ck, spec)?,
+        };
+        chain_stages(&mut out, ctx, op, prevout.clone(), tree.clone(), inner)?;
+        chain_stages(&mut out, ctx, op, prevout, tree, check)?;
     } else {
         let stages = vec![Stage { leaf: format!("q_round_{rounds}"), next: crate::flat::terminal_tree(ctx, prover, keys, spec)?, what: format!("{} picks a segment in round {rounds}", prover.other()) }];
         chain_stages(&mut out, ctx, op, prevout, tree, stages)?;

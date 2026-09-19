@@ -698,7 +698,7 @@ pub fn flat_terminal_tree(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, spec:
 /// compression step `step_idx`. Verifies input state, block words, and
 /// output state via WOTS, absorbs the block, runs all rounds in Script,
 /// and compares the computed output against the committed output.
-fn flat_round_leaf(
+pub fn flat_round_leaf(
     ctx: &CommitCtx,
     prover: Role,
     keys: &ClaimKeys,
@@ -717,69 +717,56 @@ fn flat_round_leaf(
     let init = match step { Step::Compress { init, .. } => *init, _ => unreachable!() };
 
     let mut b = Builder::new().checksigverify(&q);
+    let bn = bw * 8;
+    let non_rate = d_nibbles - bn;
 
-    // 1. Verify and park output state (d_nibbles) from re_next
+    // 1. The claimed output: verify re_next, keep its D, park it.
     b = load_d_of(b, &ik.re_next, n_words, d_words);
-
-    // 2. Load input state: constant IV or WOTS-verified re_cur, parked on alt
-    b = match init {
-        Init::Iv => park(nibbles(&crate::script_hash::state_bytes(&IV)).into_iter().fold(b, push_scriptnum), d_nibbles),
-        Init::D => load_d_of(b, &ik.re_cur, n_words, d_words),
-    };
-
-    // 3. Unpark input state onto main stack: [state(40)] (state[39] on top)
-    b = unpark(b, d_nibbles);
-
-    // 4. Absorb block: for each block word j, verify it and ADD its nibbles
-    //    to the corresponding state rate nibbles.
-    for j in 0..bw {
-        // wots_verify puts 8 nibbles on stack (nib[0] deepest, nib[7] on top)
-        b = b.wots_verify(&ik.block[j]);
-        // Stack: [state(remaining), block_word_j(8)]
-        // Process k = 7 down to 0:
-        //   k=7: depth = d_nibbles - 8*j (state nibble is below all 8 block nibbles)
-        //   k<7: depth = k + 1 (after consuming k=7, block nibbles are on top)
-        for k in (0..8u32).rev() {
-            let depth: usize = if k == 7 { d_nibbles - 8 * j } else { (k + 1) as usize };
-            b = b.push_int(depth as i64).push_opcode(OP_ROLL);  // state nibble to top
-            b = b.push_opcode(OP_SWAP);                          // block nibble on top
-            b = b.push_opcode(OP_ADD);                            // state + block
-            b = mod16_leaf(b);                                    // (state + block) % 16
-            b = b.push_opcode(OP_TOALTSTACK);                     // save result
-        }
+    // 2. The input: verify re_cur and park its D (alt: next, cur).
+    if init == Init::D {
+        b = load_d_of(b, &ik.re_cur, n_words, d_words);
     }
-    // After absorption: main has [state[block_nibbles..d_nibbles-1]] (non-rate, 24 nibbles)
-    // Alt (top to bottom): result[0]..result[15], output(40)
-
-    // 5. Park non-rate state on alt
-    let non_rate = d_nibbles - bw * 8;
+    // 3. The block words, last word first (the witness carries them in that
+    //    order), each verified and parked, so that unparking them all lands
+    //    word 0's nibble 0 deepest and word 1's nibble 7 on top.
+    for j in (0..bw).rev() {
+        b = park(b.wots_verify(&ik.block[j]), 8);
+    }
+    b = unpark(b, bn);
+    // 4. The input state on top of them: unparked, or the hash's initial
+    //    state (SHA-256's IV, all zeros for n4bit).
+    b = match init {
+        Init::Iv => match spec.hash {
+            HashKind::Sha256 => nibbles(&crate::script_hash::state_bytes(&IV)).into_iter().fold(b, push_scriptnum),
+            HashKind::N4Bit => (0..d_nibbles).fold(b, |b, _| push_scriptnum(b, 0)),
+        },
+        Init::D => unpark(b, d_nibbles),
+    };
+    // 5. Park the non-rate part (alt: next, non-rate). Main: block(16), rate(16).
     b = park(b, non_rate);
-    // Alt: non_rate(top).., result[0]..result[15], output(40)
-
-    // 6. Push S-box table
+    // 6. Absorb: rate nibble k (on top) plus block nibble k (at depth k+1),
+    //    mod 16, parked; from k = 15 down to 0, so that r_0 ends on top of
+    //    the altstack.
+    for k in (0..bn).rev() {
+        b = b.push_int(k as i64 + 1).push_opcode(OP_ROLL).push_opcode(OP_ADD);
+        b = mod16_leaf(b).push_opcode(OP_TOALTSTACK);
+    }
+    // 7. The S-box table, then the state above it: rate (r_0 first) then
+    //    the non-rate, so nibble 39 ends on top.
     b = script::push_sbox_table(b);
-
-    // 7. Unpark results (16) on top of S-box
-    b = unpark(b, bw * 8);
-    // Main: [S-box(16), result[0]..result[15]] (result[15] on top)
-
-    // 8. Unpark non-rate state on top
+    b = unpark(b, bn);
     b = unpark(b, non_rate);
-    // Main: [S-box(16), result[0]..result[15], non_rate(24)] (state[39] on top)
-
-    // 9. Run all SPN rounds
+    // 8. All SPN rounds.
     for r in 0..n_rounds {
         b = script::spn_round_script(b, round_counter + r);
     }
-
-    // 10. Park computed, drop S-box table, unpark computed
+    // 9. Park the computed state, drop the table, bring it back.
     b = park(b, d_nibbles);
     for _ in 0..script::SBOX_TABLE_SIZE {
         b = b.push_opcode(OP_DROP);
     }
     b = unpark(b, d_nibbles);
-
-    // 11. Unpark output state
+    // 10. The claimed output under it... on top of it: computed (deeper), claimed (top).
     b = unpark(b, d_nibbles);
 
     // 12. Compare computed vs output (true iff any differs)
@@ -802,7 +789,8 @@ fn mod16_leaf(b: Builder) -> Builder {
 }
 
 /// Witness args for the flat terminal leaf (after Q's signature):
-/// output state sig, then input state sig (if init=D), then block word sigs.
+/// output state sig, then input state sig (if init=D), then the block word
+/// sigs, last word first.
 pub fn flat_round_witness(
     out_sig: &WotsSig,
     in_sig: Option<&WotsSig>,
@@ -812,7 +800,7 @@ pub fn flat_round_witness(
     if let Some(s) = in_sig {
         v.extend(s.consumption_order());
     }
-    for s in block_sigs {
+    for s in block_sigs.iter().rev() {
         v.extend(s.consumption_order());
     }
     v

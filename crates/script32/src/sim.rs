@@ -85,7 +85,12 @@ pub fn run_trace(script: &Script, mut stack: Vec<Vec<u8>>, trace: bool) -> Resul
                     if skipping {
                         skip.push(true);
                     } else {
-                        let c = truthy(&pop(&mut stack)?);
+                        let v = pop(&mut stack)?;
+                        // tapscript MINIMALIF: the condition must be exactly empty or 0x01
+                        if !(v.is_empty() || v == [1]) {
+                            return Err(format!("MINIMALIF: {op:?} on {} at instruction {pc}", hex::encode(&v)));
+                        }
+                        let c = truthy(&v);
                         skip.push(if op == OP_IF { !c } else { c });
                     }
                     continue;
@@ -130,6 +135,19 @@ pub fn run_trace(script: &Script, mut stack: Vec<Vec<u8>>, trace: bool) -> Resul
                         stack.push(v);
                     }
                     OP_ADD => { let b = popn(&mut stack)?; let a = popn(&mut stack)?; stack.push(encode(a + b)); }
+                    OP_1ADD => { let a = popn(&mut stack)?; stack.push(encode(a + 1)); }
+                    OP_1SUB => { let a = popn(&mut stack)?; stack.push(encode(a - 1)); }
+                    OP_ABS => { let a = popn(&mut stack)?; stack.push(encode(a.abs())); }
+                    OP_MAX => { let b = popn(&mut stack)?; let a = popn(&mut stack)?; stack.push(encode(a.max(b))); }
+                    OP_GREATERTHAN => { let b = popn(&mut stack)?; let a = popn(&mut stack)?; stack.push(encode(i64::from(a > b))); }
+                    OP_LESSTHANOREQUAL => { let b = popn(&mut stack)?; let a = popn(&mut stack)?; stack.push(encode(i64::from(a <= b))); }
+                    OP_0NOTEQUAL => { let a = popn(&mut stack)?; stack.push(encode(i64::from(a != 0))); }
+                    OP_NUMNOTEQUAL => { let b = popn(&mut stack)?; let a = popn(&mut stack)?; stack.push(encode(i64::from(a != b))); }
+                    OP_WITHIN => { let max = popn(&mut stack)?; let min = popn(&mut stack)?; let x = popn(&mut stack)?; stack.push(encode(i64::from(min <= x && x < max))); }
+                    OP_DEPTH => { stack.push(encode(stack.len() as i64)); }
+                    OP_2SWAP => { let l = stack.len(); if l < 4 { return Err("underflow".into()); } stack.swap(l - 4, l - 2); stack.swap(l - 3, l - 1); }
+                    OP_2OVER => { let l = stack.len(); if l < 4 { return Err("underflow".into()); } let (a, b) = (stack[l - 4].clone(), stack[l - 3].clone()); stack.push(a); stack.push(b); }
+                    OP_3DUP => { let l = stack.len(); if l < 3 { return Err("underflow".into()); } for i in 0..3 { stack.push(stack[l - 3 + i].clone()); } }
                     OP_SUB => { let b = popn(&mut stack)?; let a = popn(&mut stack)?; stack.push(encode(a - b)); }
                     OP_NEGATE => { let a = popn(&mut stack)?; stack.push(encode(-a)); }
                     OP_MIN => { let b = popn(&mut stack)?; let a = popn(&mut stack)?; stack.push(encode(a.min(b))); }

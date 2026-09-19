@@ -364,7 +364,7 @@ impl Stack {
             // hi part from x'_{j-1}
             if j == 0 {
                 if rotate {
-                    self.pick(7 - 7 + 1); // x'_7 at depth 0, plus the lo value on top -> depth 1
+                    self.pick(1); // x'_7 at depth 0, plus the lo value on top -> depth 1
                     self.hi_shift(s);
                 } else {
                     self.int(0);
