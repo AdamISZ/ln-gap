@@ -1,0 +1,15 @@
+[package]
+name = "lngap-ec-wots"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bitcoin.workspace = true
+secp256k1.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+lngap-btc = { path = "../btc" }
+lngap-script32 = { path = "../script32" }
+rand.workspace = true

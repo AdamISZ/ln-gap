@@ -344,6 +344,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-chess"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "lngap-btc",
+ "lngap-script32",
+]
+
+[[package]]
+name = "lngap-chess-fc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-chess",
+ "lngap-contract",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-names",
+ "lngap-script32",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lngap-contract"
 version = "0.1.0"
 dependencies = [
@@ -362,13 +390,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-ec-wots"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-script32",
+ "rand",
+ "secp256k1",
+]
+
+[[package]]
 name = "lngap-factchain"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitcoin",
  "hex",
+ "lngap-btc",
+ "lngap-channel",
  "lngap-contract",
+ "lngap-lamport",
  "lngap-n4bit",
+ "lngap-script32",
  "serde",
  "serde_json",
  "tracing",
@@ -384,6 +429,8 @@ dependencies = [
  "hex",
  "lngap-btc",
  "lngap-channel",
+ "lngap-chess",
+ "lngap-chess-fc",
  "lngap-contract",
  "lngap-factchain",
  "lngap-lamport",
@@ -420,6 +467,7 @@ dependencies = [
  "hex",
  "lngap-btc",
  "lngap-lamport",
+ "lngap-script32",
 ]
 
 [[package]]
@@ -520,6 +568,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "lngap-btc",
  "lngap-channel",
  "lngap-contract",
  "lngap-factchain",
