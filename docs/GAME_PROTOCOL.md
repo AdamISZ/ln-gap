@@ -186,8 +186,8 @@ dispute, and nothing on the stall path.
    of sections 2-4 remains what G1-G7B run. Since 2026-09-17 the graph
    also carries per role a SIGNATURE EXHIBIT (D31, key sets 5 and 6): a
    garbage-signed entry, which the stall claim counts as held, is a
-   claim the victim makes and the liar may dispute (S8/S9);
+   claim the victim makes and the liar may dispute (S8/S9; chess C8/C9);
    the graph is then 6 claim sets and, for tic-tac-toe, 129
-   transactions. Not yet:
+   transactions. Chess plays on the same graph (D30, C1-C9). Not yet:
    the venue entry's move is unsigned for tic-tac-toe (chess signs it),
    the equivocation leaf, and disputes on the venue.

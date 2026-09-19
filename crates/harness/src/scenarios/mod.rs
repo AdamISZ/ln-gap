@@ -6,6 +6,7 @@ pub mod names;
 pub mod fc_names;
 pub mod fc_game;
 pub mod fc_stall;
+pub mod fc_chess;
 pub mod tictactoe;
 
 use anyhow::Result;
@@ -62,5 +63,6 @@ pub fn all() -> Vec<Scenario> {
     v.extend(fc_names::scenarios());
     v.extend(fc_game::scenarios());
     v.extend(fc_stall::scenarios());
+    v.extend(fc_chess::scenarios());
     v
 }

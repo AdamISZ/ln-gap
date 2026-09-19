@@ -3888,3 +3888,751 @@ block 237: simple_pre_chk_8b498d57 955043df07e3bc080f4421eee0bd4e45c1742fcf5249f
 ```
 </details>
 
+## C1 — Chess: a cooperative game, the hub resigns, folded off-chain
+
+**Expected:** six moves on the fact chain, no Bitcoin transaction; the user takes both stakes and its reserve
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 0 sat, hub 0 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `6eb22356429f93746f9714099f936399f60d759789c7fb5e1334eb467561e7db` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub publishes move 2: e7e5
+[world @ 206 / slot 2] slot 2 mined with hub's move (rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0)
+[world @ 207 / slot 2] user publishes move 3: g1f3
+[world @ 207 / slot 3] slot 3 mined with user's move (rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 0)
+[world @ 208 / slot 3] hub publishes move 4: b8c6
+[world @ 208 / slot 4] slot 4 mined with hub's move (r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 0)
+[world @ 209 / slot 4] user publishes move 5: f1c4
+[world @ 209 / slot 5] slot 5 mined with user's move (r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 0)
+[world @ 210 / slot 5] hub publishes move 6: g8f6
+[world @ 210 / slot 6] slot 6 mined with hub's move (r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 0)
+[world @ 210 / slot 6] the hub resigns after move 6: fold user 0.00115000 BTC / hub 0.00015000 BTC
+--- on-chain ---
+block 204: funding 6eb22356429f93746f9714099f936399f60d759789c7fb5e1334eb467561e7db (harness) 203 vB / 812 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 210] propose seq 2: fold contract 31: user 0.00115000 BTC / hub 0.00015000 BTC
+[user @ 210] state 2 signed by both
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 210] accept draft seq 2: fold contract 31: user 0.00115000 BTC / hub 0.00015000 BTC
+[hub @ 210] state 2 signed by both
+```
+</details>
+
+## C2 — Chess: the hub stalls at move 2
+
+**Expected:** commitment, stall_user binding the whole position after 1.e4 in its WOTS end state, stall_user/split_1_UserWins
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 161000 sat, hub 34000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `7a39c9094f6456ca7ab610beaf273cc5553dfaed2e4cf141844700114be0cdb5` |
+| 209 | `commitment_1` | user | `d478a99a66dae6d59e972dc4ec5f0be7e30d018dcd5c1ac98a0a65e5b80783d1` |
+| 210 | `claim_to_remote` | hub | `fd0b65c8c58236d48121a88e5329e0ae18ed3ca24039f34c933e578c23969153` |
+| 215 | `claim_to_local` | user | `8a3fbb8cd354cefc95744b488523af563c6c9a5491a62c3ddd71a623d76bf4c3` |
+| 215 | `stall_user` | user | `82d4772dead6807a1062de42314c96be8db571e390e0a57b58ec95def0f3403e` |
+| 227 | `stall_user/split_1_UserWins` | user | `5e120997624e305feed6741a4f05437b12cbe0b0f5e225a55f258c7febacf6b3` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub STALLS: does not publish move 2
+[world @ 206 / slot 2] slot 2 mined EMPTY
+[world @ 207 / slot 2] user: hub published nothing at slot 2; proving a stall at depth 1
+--- on-chain ---
+block 204: funding 7a39c9094f6456ca7ab610beaf273cc5553dfaed2e4cf141844700114be0cdb5 (harness) 203 vB / 812 WU
+block 209: commitment_1 d478a99a66dae6d59e972dc4ec5f0be7e30d018dcd5c1ac98a0a65e5b80783d1 (user) 240 vB / 958 WU
+block 210: claim_to_remote fd0b65c8c58236d48121a88e5329e0ae18ed3ca24039f34c933e578c23969153 (hub) 129 vB / 513 WU
+block 215: claim_to_local 8a3fbb8cd354cefc95744b488523af563c6c9a5491a62c3ddd71a623d76bf4c3 (user) 137 vB / 548 WU
+block 215: stall_user 82d4772dead6807a1062de42314c96be8db571e390e0a57b58ec95def0f3403e (user) 6060 vB / 24237 WU
+block 227: stall_user/split_1_UserWins 5e120997624e305feed6741a4f05437b12cbe0b0f5e225a55f258c7febacf6b3 (user) 209 vB / 834 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 207] contract 31: will prove a stall on-chain at depth 1 (320 bits of prior, move 0000011100001100)
+[user @ 208] contract 31: force-closing to claim on-chain at depth 1
+[user @ 209] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 214] contract 31: broadcasting stall_user: proving a stall with move e2e4 by user at venue depth 1 -> state depth 1 after e2e4: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0, outcome code 0
+[user @ 215] contract 31: stall_user by user confirmed: move e2e4 by user, claimed state depth 1 after e2e4: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0, claimed outcome UserWins
+[user @ 215] contract 31: claimed end state e5f1c199.. is correct
+[user @ 226] contract 31: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
+[user @ 227] contract 31 resolved by split_UserWins (5e120997624e305feed6741a4f05437b12cbe0b0f5e225a55f258c7febacf6b3)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 209] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 215] contract 31: stall_user by user confirmed: move e2e4 by user, claimed state depth 1 after e2e4: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0, claimed outcome UserWins
+[hub @ 215] contract 31: claimed end state e5f1c199.. is correct
+[hub @ 215] contract 31: counterparty's stall proof stall_user is consistent with the program
+[hub @ 226] contract 31: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
+[hub @ 227] contract 31 resolved by split_UserWins (5e120997624e305feed6741a4f05437b12cbe0b0f5e225a55f258c7febacf6b3)
+```
+</details>
+
+## C3 — Chess: the loser refuses the fold
+
+**Expected:** the hub, to move after 5, refuses the fold and does not move; the user proves it has no move after 5: stall_user, split_1_UserWins
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 161000 sat, hub 34000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `2f5731042e82783fd9fa376f81d3ce348f277d1b109d27fb0961c123a3fcf5f2` |
+| 213 | `commitment_1` | user | `a6a42a52b22661a7652e3e80f0e0b17468afc482d827e8229a502799862d5c94` |
+| 214 | `claim_to_remote` | hub | `2e9f61cecd015ae48e2ff59c45799f8bb0db1cd3c7aceb134dc2f06f672b49bf` |
+| 219 | `claim_to_local` | user | `b92b417424dd0c8412d2b25aace25b0507ec2ecf33cb4edaf79fb60e181c3f87` |
+| 219 | `stall_user` | user | `4ff26f3bde59878f0bf595477da21120baf61dbccd0965bfa2faea944a01b096` |
+| 231 | `stall_user/split_1_UserWins` | user | `65cc20b7fe2c8f4b048f4eece527f6d4aa93bf459f09af835a1a79e731f13fb2` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub publishes move 2: e7e5
+[world @ 206 / slot 2] slot 2 mined with hub's move (rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0)
+[world @ 207 / slot 2] user publishes move 3: g1f3
+[world @ 207 / slot 3] slot 3 mined with user's move (rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 0)
+[world @ 208 / slot 3] hub publishes move 4: b8c6
+[world @ 208 / slot 4] slot 4 mined with hub's move (r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 0)
+[world @ 209 / slot 4] user publishes move 5: f1c4
+[world @ 209 / slot 5] slot 5 mined with user's move (r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 0)
+[world @ 209 / slot 5] the hub resigns after move 5: fold user 0.00115000 BTC / hub 0.00015000 BTC
+[world @ 211 / slot 6] user: the fold was refused; proving on-chain that hub has no move after 5
+--- on-chain ---
+block 204: funding 2f5731042e82783fd9fa376f81d3ce348f277d1b109d27fb0961c123a3fcf5f2 (harness) 203 vB / 812 WU
+block 213: commitment_1 a6a42a52b22661a7652e3e80f0e0b17468afc482d827e8229a502799862d5c94 (user) 240 vB / 958 WU
+block 214: claim_to_remote 2e9f61cecd015ae48e2ff59c45799f8bb0db1cd3c7aceb134dc2f06f672b49bf (hub) 129 vB / 513 WU
+block 219: claim_to_local b92b417424dd0c8412d2b25aace25b0507ec2ecf33cb4edaf79fb60e181c3f87 (user) 137 vB / 548 WU
+block 219: stall_user 4ff26f3bde59878f0bf595477da21120baf61dbccd0965bfa2faea944a01b096 (user) 6062 vB / 24245 WU
+block 231: stall_user/split_1_UserWins 65cc20b7fe2c8f4b048f4eece527f6d4aa93bf459f09af835a1a79e731f13fb2 (user) 209 vB / 834 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 209] propose seq 2: fold contract 31: user 0.00115000 BTC / hub 0.00015000 BTC
+[user @ 209] draft seq 2 rejected by counterparty: I refuse to fold
+[user @ 211] contract 31: will prove a stall on-chain at depth 5 (320 bits of prior, move 0000011010000101)
+[user @ 212] contract 31: force-closing to claim on-chain at depth 5
+[user @ 213] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 213] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 218] contract 31: broadcasting stall_user: proving a stall with move f1c4 by user at venue depth 5 -> state depth 5 after f1c4: r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 0, outcome code 0
+[user @ 219] contract 31: stall_user by user confirmed: move f1c4 by user, claimed state depth 5 after f1c4: r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 0, claimed outcome UserWins
+[user @ 219] contract 31: claimed end state e5f1c199.. is correct
+[user @ 230] contract 31: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
+[user @ 231] contract 31 resolved by split_UserWins (65cc20b7fe2c8f4b048f4eece527f6d4aa93bf459f09af835a1a79e731f13fb2)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 209] rejecting draft seq 2: I refuse to fold
+[hub @ 213] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 213] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 219] contract 31: stall_user by user confirmed: move f1c4 by user, claimed state depth 5 after f1c4: r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 0, claimed outcome UserWins
+[hub @ 219] contract 31: claimed end state e5f1c199.. is correct
+[hub @ 219] contract 31: counterparty's stall proof stall_user is consistent with the program
+[hub @ 230] contract 31: challenge window (12 blocks) after move_1 passed; broadcasting split_UserWins
+[hub @ 231] contract 31 resolved by split_UserWins (65cc20b7fe2c8f4b048f4eece527f6d4aa93bf459f09af835a1a79e731f13fb2)
+```
+</details>
+
+## C4 — Chess: an illegal move claimed as a stall proof is disproved off the stall output
+
+**Expected:** after 1.e4 the hub plays Qd8-h4 through its own pawn and proves a stall; the user spends disprove_chess_ray with exhibit j = 1 off stall_hub
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 162000 sat, hub 33000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `e34a2e22009d9173ff9abd6f873748b158fdd075fb3ce9a9dc4bec9df871cf71` |
+| 210 | `commitment_1` | hub | `ed18b13922c9fffd34ab4f49bc3ac0a574c37488fa6aae9c4d9a84ffe2f64bef` |
+| 211 | `claim_to_remote` | user | `13630312e5b9532880dd8c119bc8ae30cd29b1bb4b273cebc7b2e67281df5831` |
+| 216 | `claim_to_local` | hub | `0f7291320d2c4bb40a698f8cc30cfeefbcd412bc391da78cbcb52e0a5c37674f` |
+| 216 | `stall_hub` | hub | `bee1efacc22806053b850764d9464ec87235aa202b5d00c054c48e7f0035fccd` |
+| 217 | `disprove_chess_ray` | user | `fc6c4b06199a3344a40626d9f1aa1179dec14b723b4af60c502ead7b25e0d5ed` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub publishes an ILLEGAL move 2: d8h4
+[world @ 206 / slot 2] slot 2 mined with hub's move (illegal)
+[world @ 207 / slot 3] slot 3 mined EMPTY
+[world @ 208 / slot 3] hub proves a stall with its ILLEGAL move 2: user published nothing at 3
+--- on-chain ---
+block 204: funding e34a2e22009d9173ff9abd6f873748b158fdd075fb3ce9a9dc4bec9df871cf71 (harness) 203 vB / 812 WU
+block 210: commitment_1 ed18b13922c9fffd34ab4f49bc3ac0a574c37488fa6aae9c4d9a84ffe2f64bef (hub) 240 vB / 958 WU
+block 211: claim_to_remote 13630312e5b9532880dd8c119bc8ae30cd29b1bb4b273cebc7b2e67281df5831 (user) 129 vB / 513 WU
+block 216: claim_to_local 0f7291320d2c4bb40a698f8cc30cfeefbcd412bc391da78cbcb52e0a5c37674f (hub) 137 vB / 548 WU
+block 216: stall_hub bee1efacc22806053b850764d9464ec87235aa202b5d00c054c48e7f0035fccd (hub) 6062 vB / 24245 WU
+block 217: disprove_chess_ray fc6c4b06199a3344a40626d9f1aa1179dec14b723b4af60c502ead7b25e0d5ed (user) 6107 vB / 24427 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 210] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[user @ 210] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 216] contract 31: stall_hub by hub confirmed: move d8h4 by hub, claimed state depth 2 after d8h4: rnb1kbnr/pppppppp/8/8/4P2q/8/PPPP1PPP/RNBQKBNR w KQkq - 1 0, claimed outcome HubWins
+[user @ 216] contract 31: claimed end state e5f1c199.. is correct
+[user @ 216] contract 31: counterparty's stall proof stall_hub is INVALID (invalid move: invalid move: RayBlocked { sq: e7 }); disproving
+[user @ 216] contract 31: broadcast disprove_chess_ray taking 0.00128000 BTC sats
+[user @ 217] contract 31 resolved by disprove_chess_ray (fc6c4b06199a3344a40626d9f1aa1179dec14b723b4af60c502ead7b25e0d5ed)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 208] contract 31: will prove a stall on-chain at depth 2 (320 bits of prior, move 0000011111111011)
+[hub @ 209] contract 31: force-closing to claim on-chain at depth 2
+[hub @ 210] my commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 210] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 215] contract 31: broadcasting stall_hub: proving a stall with move d8h4 by hub at venue depth 2 -> state depth 2 after d8h4: rnb1kbnr/pppppppp/8/8/4P2q/8/PPPP1PPP/RNBQKBNR w KQkq - 1 0, outcome code 1
+[hub @ 216] contract 31: stall_hub by hub confirmed: move d8h4 by hub, claimed state depth 2 after d8h4: rnb1kbnr/pppppppp/8/8/4P2q/8/PPPP1PPP/RNBQKBNR w KQkq - 1 0, claimed outcome HubWins
+[hub @ 216] contract 31: claimed end state e5f1c199.. is correct
+[hub @ 217] contract 31 resolved by disprove_chess_ray (fc6c4b06199a3344a40626d9f1aa1179dec14b723b4af60c502ead7b25e0d5ed)
+```
+</details>
+
+## C5 — Chess: an illegal move is exhibited by the victim
+
+**Expected:** after 1.e4 the hub plays Qd8-h4 through its pawn and does nothing; the user exhibits it (lie_user) and, after the hub's window, spends disprove_chess_ray off its exhibit
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 161000 sat, hub 34000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `c86825c3e210fcc17ae948a64c07d5d6fadeb7c4e80ae616b36283617e1623ef` |
+| 209 | `commitment_1` | user | `e4da9ae8f085df1e118b1245ef7d443aad66eab277f04f3f1815fbdc3fe708fa` |
+| 210 | `claim_to_remote` | hub | `246b5e5493b9ebdae269ef495d34fe33487ef74a0bc6c65c1ffb103c2cb3bd14` |
+| 215 | `claim_to_local` | user | `0464e313a10b8a7ee1d3272010165823baa2e5c1ec429ac68f823fa7cadc38c8` |
+| 215 | `lie_user` | user | `17c80b9bc4e863c52a23adfb8832eb5b1e438975a76efc71d5d5ff02ed7e9530` |
+| 221 | `disprove_chess_ray` | user | `0432751b42ab65d0144516675fa4bbf2a4ad44d33189bc0808d0b4e8ebbca5fb` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub publishes an ILLEGAL move 2: d8h4
+[world @ 206 / slot 2] slot 2 mined with hub's move (illegal)
+[world @ 207 / slot 2] user: hub's move 2 is illegal; exhibiting it
+--- on-chain ---
+block 204: funding c86825c3e210fcc17ae948a64c07d5d6fadeb7c4e80ae616b36283617e1623ef (harness) 203 vB / 812 WU
+block 209: commitment_1 e4da9ae8f085df1e118b1245ef7d443aad66eab277f04f3f1815fbdc3fe708fa (user) 240 vB / 958 WU
+block 210: claim_to_remote 246b5e5493b9ebdae269ef495d34fe33487ef74a0bc6c65c1ffb103c2cb3bd14 (hub) 129 vB / 513 WU
+block 215: claim_to_local 0464e313a10b8a7ee1d3272010165823baa2e5c1ec429ac68f823fa7cadc38c8 (user) 137 vB / 548 WU
+block 215: lie_user 17c80b9bc4e863c52a23adfb8832eb5b1e438975a76efc71d5d5ff02ed7e9530 (user) 6062 vB / 24245 WU
+block 221: disprove_chess_ray 0432751b42ab65d0144516675fa4bbf2a4ad44d33189bc0808d0b4e8ebbca5fb (user) 6108 vB / 24430 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 207] contract 31: will exhibit a lie on-chain at depth 2 (320 bits of prior, move 0000011111111011)
+[user @ 208] contract 31: force-closing to claim on-chain at depth 2
+[user @ 209] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 214] contract 31: broadcasting lie_user: exhibiting move d8h4 by hub at venue depth 2 -> state depth 2 after d8h4: rnb1kbnr/pppppppp/8/8/4P2q/8/PPPP1PPP/RNBQKBNR w KQkq - 1 0, outcome code 1
+[user @ 215] contract 31: lie_user by user confirmed: move d8h4 by hub, claimed state depth 2 after d8h4: rnb1kbnr/pppppppp/8/8/4P2q/8/PPPP1PPP/RNBQKBNR w KQkq - 1 0, claimed outcome HubWins
+[user @ 215] contract 31: claimed end state e5f1c199.. is correct
+[user @ 215] contract 31: my exhibit is on-chain; the exhibited move is INVALID (invalid move: invalid move: RayBlocked { sq: e7 })
+[user @ 220] contract 31: broadcast disprove_chess_ray taking 0.00128000 BTC sats
+[user @ 221] contract 31 resolved by disprove_chess_ray (0432751b42ab65d0144516675fa4bbf2a4ad44d33189bc0808d0b4e8ebbca5fb)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 209] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 215] contract 31: lie_user by user confirmed: move d8h4 by hub, claimed state depth 2 after d8h4: rnb1kbnr/pppppppp/8/8/4P2q/8/PPPP1PPP/RNBQKBNR w KQkq - 1 0, claimed outcome HubWins
+[hub @ 215] contract 31: claimed end state e5f1c199.. is correct
+[hub @ 215] contract 31: counterparty exhibits my move as a lie; natively it is INVALID (invalid move: invalid move: RayBlocked { sq: e7 }): the exhibit will succeed
+[hub @ 221] contract 31 resolved by disprove_chess_ray (0432751b42ab65d0144516675fa4bbf2a4ad44d33189bc0808d0b4e8ebbca5fb)
+```
+</details>
+
+## C6 — Chess: a baseless exhibit pays the framed party
+
+**Expected:** the user exhibits the hub's legal 1...e5 as a lie; no challenge leaf fires; after the window the split pays the hub
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 33000 sat, hub 162000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `4a1b9710799f943755c7684ad56e26788f010e52d6115eca8d1e2d09c33cdfc3` |
+| 209 | `commitment_1` | user | `d51d14225db36cf2e05e082f8f94d3eeb259586b041121e8c2aa5e98e5528462` |
+| 210 | `claim_to_remote` | hub | `c33ada5d7328bd05b804f1c5a1b250a76de80e1d99a7023bd9198c28bd9bee9d` |
+| 215 | `claim_to_local` | user | `caf5c8e36db220c9fa0979ec5645ae137403c2d2d3d1824ea45f6a7b3b9f1c96` |
+| 215 | `lie_user` | user | `3a67ecc6531d3f870e1c2c4ffdf7e0e4e94674a9baeda31e5b2a3de9a98f3d30` |
+| 227 | `lie_user/split_3_HubWins` | user | `6052f42c00df3460114f2a801f41ee88d8cd0d0269db3eb5be52d05b95e52a12` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub publishes move 2: e7e5
+[world @ 206 / slot 2] slot 2 mined with hub's move (rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0)
+[world @ 207 / slot 2] user FRAMES hub's legal move 2 as a lie
+--- on-chain ---
+block 204: funding 4a1b9710799f943755c7684ad56e26788f010e52d6115eca8d1e2d09c33cdfc3 (harness) 203 vB / 812 WU
+block 209: commitment_1 d51d14225db36cf2e05e082f8f94d3eeb259586b041121e8c2aa5e98e5528462 (user) 240 vB / 958 WU
+block 210: claim_to_remote c33ada5d7328bd05b804f1c5a1b250a76de80e1d99a7023bd9198c28bd9bee9d (hub) 129 vB / 513 WU
+block 215: claim_to_local caf5c8e36db220c9fa0979ec5645ae137403c2d2d3d1824ea45f6a7b3b9f1c96 (user) 137 vB / 548 WU
+block 215: lie_user 3a67ecc6531d3f870e1c2c4ffdf7e0e4e94674a9baeda31e5b2a3de9a98f3d30 (user) 6062 vB / 24245 WU
+block 227: lie_user/split_3_HubWins 6052f42c00df3460114f2a801f41ee88d8cd0d0269db3eb5be52d05b95e52a12 (user) 209 vB / 834 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 207] contract 31: will exhibit a lie on-chain at depth 2 (320 bits of prior, move 0000100100110100)
+[user @ 208] contract 31: force-closing to claim on-chain at depth 2
+[user @ 209] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 214] contract 31: broadcasting lie_user: exhibiting move e7e5 by hub at venue depth 2 -> state depth 2 after e7e5: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0, outcome code 1
+[user @ 215] contract 31: lie_user by user confirmed: move e7e5 by hub, claimed state depth 2 after e7e5: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0, claimed outcome HubWins
+[user @ 215] contract 31: claimed end state e5f1c199.. is correct
+[user @ 215] contract 31: my exhibit is on-chain; the exhibited move is consistent (nothing to disprove)
+[user @ 220] contract 31: no disprove leaf applies — cannot punish
+[user @ 220] contract 31: my exhibit does not hold; the split will pay the counterparty
+[user @ 226] contract 31: challenge window (12 blocks) after move_3 passed; broadcasting split_HubWins
+[user @ 227] contract 31 resolved by split_HubWins (6052f42c00df3460114f2a801f41ee88d8cd0d0269db3eb5be52d05b95e52a12)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 209] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 215] contract 31: lie_user by user confirmed: move e7e5 by hub, claimed state depth 2 after e7e5: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0, claimed outcome HubWins
+[hub @ 215] contract 31: claimed end state e5f1c199.. is correct
+[hub @ 215] contract 31: counterparty exhibits my move as a lie; natively it is consistent: the exhibit will fail
+[hub @ 226] contract 31: challenge window (12 blocks) after move_3 passed; broadcasting split_HubWins
+[hub @ 227] contract 31 resolved by split_HubWins (6052f42c00df3460114f2a801f41ee88d8cd0d0269db3eb5be52d05b95e52a12)
+```
+</details>
+
+## C7 — Chess: a fabricated stall proof is disputed
+
+**Expected:** the hub's slot 2 is empty; it proves a stall with 1...e5 anyway; the head check at slot 2 fails; the user disputes and wins the ten-round bisection with cpred_h2_b5, taking the pot net of fees
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 140485 sat, hub 33000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `0d6d6bcbdbbafee75000e10452386f4f49415c0085a61a19259376ef2451e98f` |
+| 210 | `commitment_1` | hub | `04f55c9906400ba42f5fd4fcb36b694705b864057472002d0d98813f10baf596` |
+| 211 | `claim_to_remote` | user | `45e7ea2147839bf3a9ab69172e1a2f1eab7c4db0200c36ea8436528f6ffeefd6` |
+| 216 | `claim_to_local` | hub | `632ee447fe1a81aa0f72a6b3c2284e05506ac6876c8c7b79ac8bccc73b3acf1c` |
+| 216 | `stall_hub` | hub | `1d88af6533780e6b72a07239ef710aa4797b014a587a8b0f07923d78ab295645` |
+| 217 | `stall_hub/d2/dispute` | user | `3bcef33e1ca0db28803a15db0fecf82da36464492b457667a8e000469b3c70ef` |
+| 218 | `p_round_1` | hub | `d676a4258d86e16fae410c87a58a8f5a078a686fb3b4d8315e704bf69fea8913` |
+| 219 | `q_round_1` | user | `50ae1039e4fdf8d7d21749e09864888344b5ca98d21714447207b84fd4d337fe` |
+| 220 | `p_round_2` | hub | `0e8eb3c3cc541ed69336e534479ebe169c5b2cc00dc25c345f666dbab7d3381d` |
+| 221 | `q_round_2` | user | `e575b73e13391ccd6c0494d2a580c96717ac5428c9c90a1db0725098f33fef54` |
+| 222 | `p_round_3` | hub | `be42153948036efef7c6f0bbf30e5dad7197226d43241d62925c57fc0c824281` |
+| 223 | `q_round_3` | user | `0d5b0c070864c248dc4e6bb92b795ba91b962fb9e211699014ca957962bc5ad9` |
+| 224 | `p_round_4` | hub | `06896b3c38756fb1fe99474159af3ba008999fe7df9384101fe8612e6e85c933` |
+| 225 | `q_round_4` | user | `c1a529c4b7070ccd307d703b0ef14c2b508eeb715c421eca48d00764a38dc2b9` |
+| 226 | `p_round_5` | hub | `bdbaf37378de5f0c4d0a4f6834322e27b8e6ddc33a0d457c65528fa664d4d817` |
+| 227 | `q_round_5` | user | `85d15f80ffe9778f0c86ef371e8d02497e74ebf0f313443620e1b4d9600f2bcd` |
+| 228 | `p_round_6` | hub | `515a4a3441b8dbb6f2bedb41a763aa0177f72611babeea0915d2f3f6bfe53400` |
+| 229 | `q_round_6` | user | `176829cb46f985152e54cfb3749f00bad53a4ea2866514f2bd8ec8b1cb938339` |
+| 230 | `p_round_7` | hub | `be1ccac2f67930041877f7dfce26534015167d4295888f5b8de06dd729d264c6` |
+| 231 | `q_round_7` | user | `b387d2c25fa2de55eaf69b66da07598d6a3d1b1877526ffc2fcea8c174aec613` |
+| 232 | `p_round_8` | hub | `89a76c3be2f1eb7676e18ac7856fc85cf60c9d45fd521afb15b6edbe524919e0` |
+| 233 | `q_round_8` | user | `4b486ec444130095ec3246b1abfb8933a4725cd9d266e809ecae6cfeaa769d9c` |
+| 234 | `p_round_9` | hub | `888b84317abba01aea1d48ecda2513cb9e8a84218a8e068f64c6434e7809bb7c` |
+| 235 | `q_round_9` | user | `978eeb54a916ffb57f218d544f244163d89cc9699467d0cba18a1715ad43b2a0` |
+| 236 | `p_re_cur` | hub | `772e6907d385ce133c5a4df49efbaf799166dc2723389f076ed4ee6f45b138e1` |
+| 237 | `p_re_next` | hub | `f0a174e93877bd6e793472ed2e1586cd1052e5b6c5676251385879ddd8aa6393` |
+| 238 | `cpred_h2_b5_82f5cd16` | user | `bd4678994ff02b4326e36a3d3459b955c6ba424375ab7f9e9ca74418aa6c5919` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub does not publish move 2 (will prove a stall with it anyway)
+[world @ 206 / slot 2] slot 2 mined EMPTY
+[world @ 207 / slot 3] slot 3 mined EMPTY
+[world @ 208 / slot 3] hub proves a stall with move 2 (e7e5) although it never published it
+--- on-chain ---
+block 204: funding 0d6d6bcbdbbafee75000e10452386f4f49415c0085a61a19259376ef2451e98f (harness) 203 vB / 812 WU
+block 210: commitment_1 04f55c9906400ba42f5fd4fcb36b694705b864057472002d0d98813f10baf596 (hub) 240 vB / 958 WU
+block 211: claim_to_remote 45e7ea2147839bf3a9ab69172e1a2f1eab7c4db0200c36ea8436528f6ffeefd6 (user) 129 vB / 513 WU
+block 216: claim_to_local 632ee447fe1a81aa0f72a6b3c2284e05506ac6876c8c7b79ac8bccc73b3acf1c (hub) 137 vB / 548 WU
+block 216: stall_hub 1d88af6533780e6b72a07239ef710aa4797b014a587a8b0f07923d78ab295645 (hub) 6062 vB / 24245 WU
+block 217: stall_hub/d2/dispute 3bcef33e1ca0db28803a15db0fecf82da36464492b457667a8e000469b3c70ef (user) 186 vB / 742 WU
+block 218: p_round_1 d676a4258d86e16fae410c87a58a8f5a078a686fb3b4d8315e704bf69fea8913 (hub) 6008 vB / 24032 WU
+block 219: q_round_1 50ae1039e4fdf8d7d21749e09864888344b5ca98d21714447207b84fd4d337fe (user) 181 vB / 721 WU
+block 220: p_round_2 0e8eb3c3cc541ed69336e534479ebe169c5b2cc00dc25c345f666dbab7d3381d (hub) 6008 vB / 24031 WU
+block 221: q_round_2 e575b73e13391ccd6c0494d2a580c96717ac5428c9c90a1db0725098f33fef54 (user) 181 vB / 721 WU
+block 222: p_round_3 be42153948036efef7c6f0bbf30e5dad7197226d43241d62925c57fc0c824281 (hub) 6008 vB / 24032 WU
+block 223: q_round_3 0d5b0c070864c248dc4e6bb92b795ba91b962fb9e211699014ca957962bc5ad9 (user) 181 vB / 721 WU
+block 224: p_round_4 06896b3c38756fb1fe99474159af3ba008999fe7df9384101fe8612e6e85c933 (hub) 6008 vB / 24031 WU
+block 225: q_round_4 c1a529c4b7070ccd307d703b0ef14c2b508eeb715c421eca48d00764a38dc2b9 (user) 181 vB / 721 WU
+block 226: p_round_5 bdbaf37378de5f0c4d0a4f6834322e27b8e6ddc33a0d457c65528fa664d4d817 (hub) 5999 vB / 23994 WU
+block 227: q_round_5 85d15f80ffe9778f0c86ef371e8d02497e74ebf0f313443620e1b4d9600f2bcd (user) 181 vB / 721 WU
+block 228: p_round_6 515a4a3441b8dbb6f2bedb41a763aa0177f72611babeea0915d2f3f6bfe53400 (hub) 5998 vB / 23992 WU
+block 229: q_round_6 176829cb46f985152e54cfb3749f00bad53a4ea2866514f2bd8ec8b1cb938339 (user) 181 vB / 721 WU
+block 230: p_round_7 be1ccac2f67930041877f7dfce26534015167d4295888f5b8de06dd729d264c6 (hub) 6007 vB / 24028 WU
+block 231: q_round_7 b387d2c25fa2de55eaf69b66da07598d6a3d1b1877526ffc2fcea8c174aec613 (user) 181 vB / 721 WU
+block 232: p_round_8 89a76c3be2f1eb7676e18ac7856fc85cf60c9d45fd521afb15b6edbe524919e0 (hub) 6008 vB / 24029 WU
+block 233: q_round_8 4b486ec444130095ec3246b1abfb8933a4725cd9d266e809ecae6cfeaa769d9c (user) 181 vB / 721 WU
+block 234: p_round_9 888b84317abba01aea1d48ecda2513cb9e8a84218a8e068f64c6434e7809bb7c (hub) 6008 vB / 24032 WU
+block 235: q_round_9 978eeb54a916ffb57f218d544f244163d89cc9699467d0cba18a1715ad43b2a0 (user) 189 vB / 753 WU
+block 236: p_re_cur 772e6907d385ce133c5a4df49efbaf799166dc2723389f076ed4ee6f45b138e1 (hub) 6490 vB / 25959 WU
+block 237: p_re_next f0a174e93877bd6e793472ed2e1586cd1052e5b6c5676251385879ddd8aa6393 (hub) 6008 vB / 24032 WU
+block 238: cpred_h2_b5_82f5cd16 bd4678994ff02b4326e36a3d3459b955c6ba424375ab7f9e9ca74418aa6c5919 (user) 6711 vB / 26844 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 210] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[user @ 210] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 216] contract 31: stall_hub by hub confirmed: move e7e5 by hub, claimed state depth 2 after e7e5: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0, claimed outcome HubWins
+[user @ 216] contract 31: claimed end state e5f1c199.. is correct; a predicate of the claim FAILS
+[user @ 216] contract 31: disputing the claim
+[user @ 217] contract 31: dispute opened at depth 2; waiting for the prover's round 1
+[user @ 218] contract 31: prover's round 1 commitments confirmed
+[user @ 218] contract 31: round 1: first bad segment is 0
+[user @ 219] contract 31: challenger picked segment 0 in round 1: steps 0..256
+[user @ 220] contract 31: prover's round 2 commitments confirmed
+[user @ 220] contract 31: round 2: first bad segment is 0
+[user @ 221] contract 31: challenger picked segment 0 in round 2: steps 0..128
+[user @ 222] contract 31: prover's round 3 commitments confirmed
+[user @ 222] contract 31: round 3: first bad segment is 0
+[user @ 223] contract 31: challenger picked segment 0 in round 3: steps 0..64
+[user @ 224] contract 31: prover's round 4 commitments confirmed
+[user @ 224] contract 31: round 4: first bad segment is 0
+[user @ 225] contract 31: challenger picked segment 0 in round 4: steps 0..32
+[user @ 226] contract 31: prover's round 5 commitments confirmed
+[user @ 226] contract 31: round 5: first bad segment is 1
+[user @ 227] contract 31: challenger picked segment 1 in round 5: steps 16..32
+[user @ 228] contract 31: prover's round 6 commitments confirmed
+[user @ 228] contract 31: round 6: first bad segment is 1
+[user @ 229] contract 31: challenger picked segment 1 in round 6: steps 24..32
+[user @ 230] contract 31: prover's round 7 commitments confirmed
+[user @ 230] contract 31: round 7: first bad segment is 1
+[user @ 231] contract 31: challenger picked segment 1 in round 7: steps 28..32
+[user @ 232] contract 31: prover's round 8 commitments confirmed
+[user @ 232] contract 31: round 8: first bad segment is 1
+[user @ 233] contract 31: challenger picked segment 1 in round 8: steps 30..32
+[user @ 234] contract 31: prover's round 9 commitments confirmed
+[user @ 234] contract 31: round 9: first bad segment is 0
+[user @ 235] contract 31: challenger picked segment 0 in round 9: steps 30..31
+[user @ 235] contract 31: isolated step 30 is h2_b5
+[user @ 236] contract 31: prover re-committed the step's input state and block words
+[user @ 237] contract 31: prover re-committed the step's output state
+[user @ 237] contract 31: a predicate of step 30 (h2_b5) fails
+[user @ 237] contract 31: broadcasting cpred_h2_b5_82f5cd16 (26466 B witness, 6711 vB)
+[user @ 238] contract 31: disproved by cpred_h2_b5_82f5cd16 (bd4678994ff02b4326e36a3d3459b955c6ba424375ab7f9e9ca74418aa6c5919)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 208] contract 31: will prove a stall on-chain at depth 2 (320 bits of prior, move 0000100100110100)
+[hub @ 209] contract 31: force-closing to claim on-chain at depth 2
+[hub @ 210] my commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 210] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 215] contract 31: broadcasting stall_hub: proving a stall with move e7e5 by hub at venue depth 2 -> state depth 2 after e7e5: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0, outcome code 1
+[hub @ 216] contract 31: stall_hub by hub confirmed: move e7e5 by hub, claimed state depth 2 after e7e5: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0, claimed outcome HubWins
+[hub @ 216] contract 31: claimed end state e5f1c199.. is correct; a predicate of the claim FAILS
+[hub @ 217] contract 31: dispute opened at depth 2; waiting for the prover's round 1
+[hub @ 217] contract 31: answering dispute round 1 with states at steps [256]
+[hub @ 218] contract 31: prover's round 1 commitments confirmed
+[hub @ 219] contract 31: challenger picked segment 0 in round 1: steps 0..256
+[hub @ 219] contract 31: answering dispute round 2 with states at steps [128]
+[hub @ 220] contract 31: prover's round 2 commitments confirmed
+[hub @ 221] contract 31: challenger picked segment 0 in round 2: steps 0..128
+[hub @ 221] contract 31: answering dispute round 3 with states at steps [64]
+[hub @ 222] contract 31: prover's round 3 commitments confirmed
+[hub @ 223] contract 31: challenger picked segment 0 in round 3: steps 0..64
+[hub @ 223] contract 31: answering dispute round 4 with states at steps [32]
+[hub @ 224] contract 31: prover's round 4 commitments confirmed
+[hub @ 225] contract 31: challenger picked segment 0 in round 4: steps 0..32
+[hub @ 225] contract 31: answering dispute round 5 with states at steps [16]
+[hub @ 226] contract 31: prover's round 5 commitments confirmed
+[hub @ 227] contract 31: challenger picked segment 1 in round 5: steps 16..32
+[hub @ 227] contract 31: answering dispute round 6 with states at steps [24]
+[hub @ 228] contract 31: prover's round 6 commitments confirmed
+[hub @ 229] contract 31: challenger picked segment 1 in round 6: steps 24..32
+[hub @ 229] contract 31: answering dispute round 7 with states at steps [28]
+[hub @ 230] contract 31: prover's round 7 commitments confirmed
+[hub @ 231] contract 31: challenger picked segment 1 in round 7: steps 28..32
+[hub @ 231] contract 31: answering dispute round 8 with states at steps [30]
+[hub @ 232] contract 31: prover's round 8 commitments confirmed
+[hub @ 233] contract 31: challenger picked segment 1 in round 8: steps 30..32
+[hub @ 233] contract 31: answering dispute round 9 with states at steps [31]
+[hub @ 234] contract 31: prover's round 9 commitments confirmed
+[hub @ 235] contract 31: challenger picked segment 0 in round 9: steps 30..31
+[hub @ 235] contract 31: isolated step 30 is h2_b5
+[hub @ 235] contract 31: re-committing the input state of step 30
+[hub @ 236] contract 31: prover re-committed the step's input state and block words
+[hub @ 236] contract 31: re-committing the output state of step 30
+[hub @ 237] contract 31: prover re-committed the step's output state
+[hub @ 238] contract 31: disproved by cpred_h2_b5_82f5cd16 (bd4678994ff02b4326e36a3d3459b955c6ba424375ab7f9e9ca74418aa6c5919)
+```
+</details>
+
+## C8 — Chess: a garbage-signed entry is exhibited
+
+**Expected:** the hub publishes a legal 1...e5 with one garbage preimage; the stall claim would count the slot as held, so the user exhibits the signature (sig_user, D31); the hub cannot dispute; after delta the split pays the user
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 161000 sat, hub 34000 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `68f4d11ec374b0ccaa1359efe6e856c37a63e423be1c48d036adf5e786ec52ac` |
+| 209 | `commitment_1` | user | `2a4ead2d8b5e09f3fdbcceaeeca306ef5ac92fcebbb044dbc75bedac88429eb1` |
+| 210 | `claim_to_remote` | hub | `22f23635099523ba9414ffc117feeefaa790cbbe895cb5f455518337d89502af` |
+| 215 | `claim_to_local` | user | `0f2cdfbd76514547145bd77fbaabc54f5bc6ebe2da54168cbac393aa1fddb920` |
+| 215 | `sig_user` | user | `e980ff327d97d9f27d52976b14f239d98748532e10b911783f5d81d63ad55af8` |
+| 221 | `sig_user/split_5_UserWins` | user | `96fd9e31933e2da7889870e939fd958f950c9d909ada36dccf0a0d2f99058531` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub publishes move 2: e7e5
+[world @ 206 / slot 1] hub publishes move 2 with a GARBAGE preimage for signed bit 7
+[world @ 206 / slot 2] slot 2 mined with hub's move (illegal)
+[world @ 207 / slot 2] user: hub's entry 2 is garbage-signed; exhibiting it
+--- on-chain ---
+block 204: funding 68f4d11ec374b0ccaa1359efe6e856c37a63e423be1c48d036adf5e786ec52ac (harness) 203 vB / 812 WU
+block 209: commitment_1 2a4ead2d8b5e09f3fdbcceaeeca306ef5ac92fcebbb044dbc75bedac88429eb1 (user) 240 vB / 958 WU
+block 210: claim_to_remote 22f23635099523ba9414ffc117feeefaa790cbbe895cb5f455518337d89502af (hub) 129 vB / 513 WU
+block 215: claim_to_local 0f2cdfbd76514547145bd77fbaabc54f5bc6ebe2da54168cbac393aa1fddb920 (user) 137 vB / 548 WU
+block 215: sig_user e980ff327d97d9f27d52976b14f239d98748532e10b911783f5d81d63ad55af8 (user) 4533 vB / 18131 WU
+block 221: sig_user/split_5_UserWins 96fd9e31933e2da7889870e939fd958f950c9d909ada36dccf0a0d2f99058531 (user) 193 vB / 770 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 207] contract 31: will exhibit a garbage signature on-chain at depth 2 (320 bits of prior, move 0000000000000000)
+[user @ 208] contract 31: force-closing to claim on-chain at depth 2
+[user @ 209] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 214] contract 31: broadcasting sig_user: exhibiting hub's entry at venue depth 2 as garbage-signed, outcome code 0
+[user @ 215] contract 31: sig_user by user confirmed: user exhibits hub's entry as garbage-signed, claimed outcome UserWins
+[user @ 215] contract 31: claimed end state e5f1c199.. is correct
+[user @ 215] contract 31: my signature exhibit is on-chain; the split pays by my code unless the counterparty disputes
+[user @ 220] contract 31: challenge window (6 blocks) after move_5 passed; broadcasting split_UserWins
+[user @ 221] contract 31 resolved by split_UserWins (96fd9e31933e2da7889870e939fd958f950c9d909ada36dccf0a0d2f99058531)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 209] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 215] contract 31: sig_user by user confirmed: user exhibits hub's entry as garbage-signed, claimed outcome UserWins
+[hub @ 215] contract 31: claimed end state e5f1c199.. is correct
+[hub @ 215] contract 31: counterparty exhibits my entry as garbage-signed; if the claim holds, the split pays it
+[hub @ 220] contract 31: challenge window (6 blocks) after move_5 passed; broadcasting split_UserWins
+[hub @ 221] contract 31 resolved by split_UserWins (96fd9e31933e2da7889870e939fd958f950c9d909ada36dccf0a0d2f99058531)
+```
+</details>
+
+## C9 — Chess: a baseless signature exhibit is disputed
+
+**Expected:** the user exhibits the hub's soundly signed 1...e5 as garbage-signed; the exhibited digest equals the commitment, so the claim's first check fails; the hub disputes and wins the bisection at simple_pre_chk
+
+**Final balances (Alice's/user's channel; on-chain if closed, else off-chain):** user 33000 sat, hub 136950 sat
+
+| block | tx | broadcast by | txid |
+|---|---|---|---|
+| 204 | `funding` | harness | `0c407a74ea06de60373956a7fd85d7ce111582eaf8f60a2f504ad44d5f97be33` |
+| 209 | `commitment_1` | user | `c0d7203cc060a84cdc71c4a62925865cac56733d034881458ec1e1a8b23634b1` |
+| 210 | `claim_to_remote` | hub | `5ac67f953de2031b89e25d871a8fe572d423c74d8ea3828addd7f20b8193745b` |
+| 215 | `claim_to_local` | user | `f46d19897949e20691d5ddf27a810e0430b1330cb3264f9b18d09ed19f897428` |
+| 215 | `sig_user` | user | `4c51d89b8ea467d0e7b081bcaaaefe3344503d739eb507998080e7f44843fdef` |
+| 216 | `sig_user/d5/dispute` | hub | `f8762d735ccfc291abc40ec3b54529d51cf96b7d6429d12191d4a3453e80cb8b` |
+| 217 | `p_round_1` | user | `a9d2f2b151d0d9b92288fe0e18053413080bf0d613951dabc068ba09cd85ab88` |
+| 218 | `q_round_1` | hub | `f79c7ab971425c930f7cd98ca74d8fa4f99fde9cca2aef2a2f0f5f9a5d41cc48` |
+| 219 | `p_round_2` | user | `07da140492167866f44541b6e233c2a81ef6f21a42a988f04733461e4bb86e9e` |
+| 220 | `q_round_2` | hub | `d6864dfb03804e360c75b23b04d283d2d7a56dd5f91aa87ade277d8360cf43ab` |
+| 221 | `p_round_3` | user | `52c1182d86c356cb125b41c6f708199defb98791f0890ff00bd5a5660458d415` |
+| 222 | `q_round_3` | hub | `daa90d1d6d3d8d32721324158b627c1403089c1cc9ffec317bbb7721522a5c04` |
+| 223 | `p_round_4` | user | `8a6a8b0646f4b857ee16d8ab74824cec80616aaca22f27f18927ddc7cd2aabca` |
+| 224 | `q_round_4` | hub | `d78622db468a0755cfd878be147ad8553e127a7b4b73ec0f0a1ee5b4174277ac` |
+| 225 | `p_round_5` | user | `ba1039bbd8a7e2405720383891c38455dd2d52c5d52e86763c810690c9a18b98` |
+| 226 | `q_round_5` | hub | `47ca9251ca379d34deceaaf1d336e06b4bda7da67e6a172e04504dcfbecb1ff3` |
+| 227 | `p_round_6` | user | `3e450590121906669c0a879cc3cac761016364d0390d8c97d745c1cf01d61e55` |
+| 228 | `q_round_6` | hub | `d78d81b27342641f3805163e06351746eb6a309ce54d259fa9a1bf94d2d74a1c` |
+| 229 | `p_round_7` | user | `93379e12ad6700245f05a455794e1b32c5fcd19d9669ff83ff29d650cead8649` |
+| 230 | `q_round_7` | hub | `33c7a7f253149496351ca7ca77a2df8598a81e00edca2a36e0027977652df4a8` |
+| 231 | `p_round_8` | user | `bbbeb9f9c00e991499225e199c9917a2caf7ebfcc8fe7c657da747ff9e94bab8` |
+| 232 | `q_round_8` | hub | `0895a9958b4c3e5da4a20a54a5ffb8e03e2af095a5ada6f6ea2ee2d27d569064` |
+| 233 | `p_round_9` | user | `cd28c2f30c0ad691228b94bb927b75a36a8e2df5e6f9b929d174d92bee9f5d11` |
+| 234 | `q_round_9` | hub | `ed041125a45494fcaaa6543450b614f15dfd10a9e08a6b0901de093f4d3308f4` |
+| 235 | `p_round_10` | user | `b3d89076e14b3956936e3a6a570b14869200df1792b5f4ca0c1e8d04c64a2f15` |
+| 236 | `q_round_10` | hub | `b2a51d61b0fe2a6eabc47a852dd3d539ac08b23543768e0202989bb9af19f391` |
+| 237 | `p_round_11` | user | `097d950798a8b0f58a17db1aaf9b35e0e7220ac893c5e98cffbf00ce496b10c6` |
+| 238 | `q_round_11_check` | hub | `00bc1a2eca6df778e25e82155bf57dede9aa960decc03d01cb299df0d32c0381` |
+| 239 | `c_re_cur` | user | `dfe1850cff9fc32186668896f32c6544ca9f91a1eb6df85bddec1c8160303519` |
+| 240 | `c_re_next` | user | `2828ba90692f98faf906fc5c7328d5ce18dc7f643937ac8a7762708d8dfd79c2` |
+| 241 | `simple_pre_chk_61f66107` | hub | `35cb3ffe304c0b0f3701d4146f8b78e9af0eddc59d138eb360c8c5a9dbcfbc41` |
+
+<details><summary>narrative</summary>
+
+```
+--- venue ---
+[world @ 204 / slot 0] chess game 2 opened: stakes 0.00050000 BTC + 0.00015000 BTC each, deadline 284, 354 pre-signed transactions
+[world @ 205 / slot 0] user publishes move 1: e2e4
+[world @ 205 / slot 1] slot 1 mined with user's move (rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 0)
+[world @ 206 / slot 1] hub publishes move 2: e7e5
+[world @ 206 / slot 2] slot 2 mined with hub's move (rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 0)
+[world @ 207 / slot 2] user exhibits hub's soundly signed entry 2 as GARBAGE-SIGNED
+--- on-chain ---
+block 204: funding 0c407a74ea06de60373956a7fd85d7ce111582eaf8f60a2f504ad44d5f97be33 (harness) 203 vB / 812 WU
+block 209: commitment_1 c0d7203cc060a84cdc71c4a62925865cac56733d034881458ec1e1a8b23634b1 (user) 240 vB / 958 WU
+block 210: claim_to_remote 5ac67f953de2031b89e25d871a8fe572d423c74d8ea3828addd7f20b8193745b (hub) 129 vB / 513 WU
+block 215: claim_to_local f46d19897949e20691d5ddf27a810e0430b1330cb3264f9b18d09ed19f897428 (user) 137 vB / 548 WU
+block 215: sig_user 4c51d89b8ea467d0e7b081bcaaaefe3344503d739eb507998080e7f44843fdef (user) 4532 vB / 18127 WU
+block 216: sig_user/d5/dispute f8762d735ccfc291abc40ec3b54529d51cf96b7d6429d12191d4a3453e80cb8b (hub) 170 vB / 678 WU
+block 217: p_round_1 a9d2f2b151d0d9b92288fe0e18053413080bf0d613951dabc068ba09cd85ab88 (user) 4480 vB / 17917 WU
+block 218: q_round_1 f79c7ab971425c930f7cd98ca74d8fa4f99fde9cca2aef2a2f0f5f9a5d41cc48 (hub) 181 vB / 721 WU
+block 219: p_round_2 07da140492167866f44541b6e233c2a81ef6f21a42a988f04733461e4bb86e9e (user) 4470 vB / 17880 WU
+block 220: q_round_2 d6864dfb03804e360c75b23b04d283d2d7a56dd5f91aa87ade277d8360cf43ab (hub) 181 vB / 721 WU
+block 221: p_round_3 52c1182d86c356cb125b41c6f708199defb98791f0890ff00bd5a5660458d415 (user) 4471 vB / 17881 WU
+block 222: q_round_3 daa90d1d6d3d8d32721324158b627c1403089c1cc9ffec317bbb7721522a5c04 (hub) 181 vB / 721 WU
+block 223: p_round_4 8a6a8b0646f4b857ee16d8ab74824cec80616aaca22f27f18927ddc7cd2aabca (user) 4470 vB / 17879 WU
+block 224: q_round_4 d78622db468a0755cfd878be147ad8553e127a7b4b73ec0f0a1ee5b4174277ac (hub) 181 vB / 721 WU
+block 225: p_round_5 ba1039bbd8a7e2405720383891c38455dd2d52c5d52e86763c810690c9a18b98 (user) 4471 vB / 17881 WU
+block 226: q_round_5 47ca9251ca379d34deceaaf1d336e06b4bda7da67e6a172e04504dcfbecb1ff3 (hub) 181 vB / 721 WU
+block 227: p_round_6 3e450590121906669c0a879cc3cac761016364d0390d8c97d745c1cf01d61e55 (user) 4471 vB / 17882 WU
+block 228: q_round_6 d78d81b27342641f3805163e06351746eb6a309ce54d259fa9a1bf94d2d74a1c (hub) 181 vB / 721 WU
+block 229: p_round_7 93379e12ad6700245f05a455794e1b32c5fcd19d9669ff83ff29d650cead8649 (user) 4471 vB / 17882 WU
+block 230: q_round_7 33c7a7f253149496351ca7ca77a2df8598a81e00edca2a36e0027977652df4a8 (hub) 181 vB / 721 WU
+block 231: p_round_8 bbbeb9f9c00e991499225e199c9917a2caf7ebfcc8fe7c657da747ff9e94bab8 (user) 4471 vB / 17881 WU
+block 232: q_round_8 0895a9958b4c3e5da4a20a54a5ffb8e03e2af095a5ada6f6ea2ee2d27d569064 (hub) 181 vB / 721 WU
+block 233: p_round_9 cd28c2f30c0ad691228b94bb927b75a36a8e2df5e6f9b929d174d92bee9f5d11 (user) 4467 vB / 17865 WU
+block 234: q_round_9 ed041125a45494fcaaa6543450b614f15dfd10a9e08a6b0901de093f4d3308f4 (hub) 181 vB / 721 WU
+block 235: p_round_10 b3d89076e14b3956936e3a6a570b14869200df1792b5f4ca0c1e8d04c64a2f15 (user) 4471 vB / 17883 WU
+block 236: q_round_10 b2a51d61b0fe2a6eabc47a852dd3d539ac08b23543768e0202989bb9af19f391 (hub) 181 vB / 721 WU
+block 237: p_round_11 097d950798a8b0f58a17db1aaf9b35e0e7220ac893c5e98cffbf00ce496b10c6 (user) 4471 vB / 17883 WU
+block 238: q_round_11_check 00bc1a2eca6df778e25e82155bf57dede9aa960decc03d01cb299df0d32c0381 (hub) 189 vB / 754 WU
+block 239: c_re_cur dfe1850cff9fc32186668896f32c6544ca9f91a1eb6df85bddec1c8160303519 (user) 4471 vB / 17883 WU
+block 240: c_re_next 2828ba90692f98faf906fc5c7328d5ce18dc7f643937ac8a7762708d8dfd79c2 (user) 4471 vB / 17883 WU
+block 241: simple_pre_chk_61f66107 35cb3ffe304c0b0f3701d4146f8b78e9af0eddc59d138eb360c8c5a9dbcfbc41 (hub) 9502 vB / 38007 WU
+--- user ---
+[user @ 204] propose seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[user @ 204] state 1 signed by both
+[user @ 207] contract 31: will exhibit a garbage signature on-chain at depth 2 (320 bits of prior, move 0000000000000000)
+[user @ 208] contract 31: force-closing to claim on-chain at depth 2
+[user @ 209] my commitment for state 1 confirmed with 1 contract output(s)
+[user @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[user @ 214] contract 31: broadcasting sig_user: exhibiting hub's entry at venue depth 2 as garbage-signed, outcome code 0
+[user @ 215] contract 31: sig_user by user confirmed: user exhibits hub's entry as garbage-signed, claimed outcome UserWins
+[user @ 215] contract 31: claimed end state e5f1c199.. is correct; a predicate of the claim FAILS
+[user @ 215] contract 31: my signature exhibit is on-chain; the split pays by my code unless the counterparty disputes
+[user @ 216] contract 31: dispute opened at depth 5; waiting for the prover's round 1
+[user @ 216] contract 31: answering dispute round 1 with states at steps [1024]
+[user @ 217] contract 31: prover's round 1 commitments confirmed
+[user @ 218] contract 31: challenger picked segment 0 in round 1: steps 0..1024
+[user @ 218] contract 31: answering dispute round 2 with states at steps [512]
+[user @ 219] contract 31: prover's round 2 commitments confirmed
+[user @ 220] contract 31: challenger picked segment 0 in round 2: steps 0..512
+[user @ 220] contract 31: answering dispute round 3 with states at steps [256]
+[user @ 221] contract 31: prover's round 3 commitments confirmed
+[user @ 222] contract 31: challenger picked segment 0 in round 3: steps 0..256
+[user @ 222] contract 31: answering dispute round 4 with states at steps [128]
+[user @ 223] contract 31: prover's round 4 commitments confirmed
+[user @ 224] contract 31: challenger picked segment 0 in round 4: steps 0..128
+[user @ 224] contract 31: answering dispute round 5 with states at steps [64]
+[user @ 225] contract 31: prover's round 5 commitments confirmed
+[user @ 226] contract 31: challenger picked segment 0 in round 5: steps 0..64
+[user @ 226] contract 31: answering dispute round 6 with states at steps [32]
+[user @ 227] contract 31: prover's round 6 commitments confirmed
+[user @ 228] contract 31: challenger picked segment 0 in round 6: steps 0..32
+[user @ 228] contract 31: answering dispute round 7 with states at steps [16]
+[user @ 229] contract 31: prover's round 7 commitments confirmed
+[user @ 230] contract 31: challenger picked segment 0 in round 7: steps 0..16
+[user @ 230] contract 31: answering dispute round 8 with states at steps [8]
+[user @ 231] contract 31: prover's round 8 commitments confirmed
+[user @ 232] contract 31: challenger picked segment 0 in round 8: steps 0..8
+[user @ 232] contract 31: answering dispute round 9 with states at steps [4]
+[user @ 233] contract 31: prover's round 9 commitments confirmed
+[user @ 234] contract 31: challenger picked segment 1 in round 9: steps 4..8
+[user @ 234] contract 31: answering dispute round 10 with states at steps [6]
+[user @ 235] contract 31: prover's round 10 commitments confirmed
+[user @ 236] contract 31: challenger picked segment 1 in round 10: steps 6..8
+[user @ 236] contract 31: answering dispute round 11 with states at steps [7]
+[user @ 237] contract 31: prover's round 11 commitments confirmed
+[user @ 238] contract 31: challenger picked segment 0 in round 11: steps 6..7
+[user @ 238] contract 31: isolated step 6 is pre_chk
+[user @ 238] contract 31: re-committing the input state of step 6
+[user @ 239] contract 31: prover re-committed the step's input state
+[user @ 239] contract 31: re-committing the output state of step 6
+[user @ 240] contract 31: prover re-committed the step's output state
+[user @ 241] contract 31: disproved by simple_pre_chk_61f66107 (35cb3ffe304c0b0f3701d4146f8b78e9af0eddc59d138eb360c8c5a9dbcfbc41)
+--- hub ---
+[hub @ 204] accept draft seq 1: open contract 31 (chess-fc:{"game_id":2,"checkpoint":[0,31,77,128,240,140,187,212,213,187,233,122,160,141,107,26,165,87,11,46],"w_max":20}) stakes 0.00065000 BTC/0.00065000 BTC deadline 284
+[hub @ 204] state 1 signed by both
+[hub @ 209] counterparty's commitment for state 1 confirmed with 1 contract output(s)
+[hub @ 209] contract 31 on-chain at depth 0: state depth 0 after a1a1: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0, turn Some(User), deadline 284
+[hub @ 215] contract 31: sig_user by user confirmed: user exhibits hub's entry as garbage-signed, claimed outcome UserWins
+[hub @ 215] contract 31: claimed end state e5f1c199.. is correct; a predicate of the claim FAILS
+[hub @ 215] contract 31: disputing the claim
+[hub @ 216] contract 31: dispute opened at depth 5; waiting for the prover's round 1
+[hub @ 217] contract 31: prover's round 1 commitments confirmed
+[hub @ 217] contract 31: round 1: first bad segment is 0
+[hub @ 218] contract 31: challenger picked segment 0 in round 1: steps 0..1024
+[hub @ 219] contract 31: prover's round 2 commitments confirmed
+[hub @ 219] contract 31: round 2: first bad segment is 0
+[hub @ 220] contract 31: challenger picked segment 0 in round 2: steps 0..512
+[hub @ 221] contract 31: prover's round 3 commitments confirmed
+[hub @ 221] contract 31: round 3: first bad segment is 0
+[hub @ 222] contract 31: challenger picked segment 0 in round 3: steps 0..256
+[hub @ 223] contract 31: prover's round 4 commitments confirmed
+[hub @ 223] contract 31: round 4: first bad segment is 0
+[hub @ 224] contract 31: challenger picked segment 0 in round 4: steps 0..128
+[hub @ 225] contract 31: prover's round 5 commitments confirmed
+[hub @ 225] contract 31: round 5: first bad segment is 0
+[hub @ 226] contract 31: challenger picked segment 0 in round 5: steps 0..64
+[hub @ 227] contract 31: prover's round 6 commitments confirmed
+[hub @ 227] contract 31: round 6: first bad segment is 0
+[hub @ 228] contract 31: challenger picked segment 0 in round 6: steps 0..32
+[hub @ 229] contract 31: prover's round 7 commitments confirmed
+[hub @ 229] contract 31: round 7: first bad segment is 0
+[hub @ 230] contract 31: challenger picked segment 0 in round 7: steps 0..16
+[hub @ 231] contract 31: prover's round 8 commitments confirmed
+[hub @ 231] contract 31: round 8: first bad segment is 0
+[hub @ 232] contract 31: challenger picked segment 0 in round 8: steps 0..8
+[hub @ 233] contract 31: prover's round 9 commitments confirmed
+[hub @ 233] contract 31: round 9: first bad segment is 1
+[hub @ 234] contract 31: challenger picked segment 1 in round 9: steps 4..8
+[hub @ 235] contract 31: prover's round 10 commitments confirmed
+[hub @ 235] contract 31: round 10: first bad segment is 1
+[hub @ 236] contract 31: challenger picked segment 1 in round 10: steps 6..8
+[hub @ 237] contract 31: prover's round 11 commitments confirmed
+[hub @ 237] contract 31: round 11: first bad segment is 0
+[hub @ 238] contract 31: challenger picked segment 0 in round 11: steps 6..7
+[hub @ 238] contract 31: isolated step 6 is pre_chk
+[hub @ 239] contract 31: prover re-committed the step's input state
+[hub @ 240] contract 31: prover re-committed the step's output state
+[hub @ 240] contract 31: step 6 (pre_chk) is wrong
+[hub @ 240] contract 31: broadcasting simple_pre_chk_61f66107 (37629 B witness, 9502 vB)
+[hub @ 241] contract 31: disproved by simple_pre_chk_61f66107 (35cb3ffe304c0b0f3701d4146f8b78e9af0eddc59d138eb360c8c5a9dbcfbc41)
+```
+</details>
+

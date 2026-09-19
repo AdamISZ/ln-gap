@@ -1,0 +1,13 @@
+[package]
+name = "lngap-chess"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Chess state machine for the fact-chain venue: the 40-byte position, named rule statements, square-centric attacks"
+
+[dependencies]
+bitcoin = { workspace = true }
+lngap-script32 = { path = "../../script32" }
+
+[dev-dependencies]
+lngap-btc = { path = "../../btc" }

@@ -402,6 +402,73 @@ at the flat leaf (`flat_<hash>`), and the party recognises `flat_`,
 way: the party spent the first `flat_` leaf in the tree rather than the
 isolated step's (one leaf per distinct round counter).
 
+## D30. Chess on the stall graph: the position lives in the claim's registers
+
+Date: 2026-09-17. Context: D28, CHESS_ON_FACTCHAIN.md §3-§5.
+
+Chess (`crates/apps/chess`, `crates/apps/chess-fc`) plays on the fact
+chain under the stall graph with no chess-specific claim machinery. What
+changed to make it fit:
+
+- The header's head is 48 bytes (D28 as revised): the 8-byte content word
+  and the whole 40-byte state after the move (36 bytes of position, then
+  from, to, promotion, depth). A chess venue entry is 6,768 bytes: the
+  head, then one 20-byte preimage per signed bit (320 state bits and 16
+  move bits, the move signed as well as the board).
+- The stall claim's layout is the game's (`stall::Layout`): chess has
+  `D P E E2`, 30 words, `E` and `E2` the 40-byte states of slots `d` and
+  `d - 1`, the depth read from `E`'s last byte (`k = 2`; 30 words is the
+  most two WOTS state commitments fit under the 1000-item stack limit).
+  At `W_max = 20`: 291 steps, 9 rounds; at 200: 2,811 steps, 12 rounds.
+- The Move leaf reveals only the outcome code and the claim's WOTS end
+  state (`MoveExtras::wots_only`); the prior, the move and the state are
+  read from the end state's registers, on Bitcoin by the disprove leaves
+  (`lngap_chess::leaf::leaf_over_registers`, `Field::End`, `Field::Exhibit`)
+  and natively by `Program::state_from_end`. No Lamport reveal of a
+  320-bit board.
+- The thirteen chess leaves of CHESS_ON_FACTCHAIN.md §3 become twelve
+  disprove leaves (the move-number check has nothing to check: the depth
+  is bound by the claim), each a WOTS verification of the end state plus
+  the leaf body over the registers, spendable by the counterparty off a
+  stall output at once and by the victim off an exhibit after `delta`,
+  with the exhibit values (a square, an attacker, a ray square) in the
+  witness.
+
+Measured (scenarios C1-C9, `crates/harness/src/scenarios/fc_chess.rs`,
+regtest, debug build): a cooperative game costs nothing on Bitcoin (C1);
+a stall proof or lie exhibit is one 6.1 kvB transaction and a stall is
+settled in three at any depth (C2, C3); an illegal move claimed as a
+stall proof is disproved by `disprove_chess_ray` at 6.1 kvB off the stall
+output (C4), or off the victim's exhibit after the window (C5); a baseless
+exhibit pays the framed party after `delta + delta'` (C6); a fabricated
+stall proof is disputed through nine rounds (about 6 kvB per prover
+round, 0.2 kvB per challenger pick) and disproved at the head check leaf
+`cpred_h2_b5` at 6.7 kvB, about 75 kvB in all (C7): the winner takes the
+pot net of roughly 25k sat of fees. 354 pre-signed transactions per game
+(six claim sets, D31 included).
+
+Where opening a game spends its time (release build, one core, measured
+2026-09-17 after D31): generating a party's keys 37 ms; signing its 354
+transactions 8 ms and verifying the counterparty's 9 ms; building the
+graph 6.1 s, all of it the dispute chains' terminal trees (about 1.05 s
+per signature-exhibit chain of 2,048 steps, 0.26 s per stall or lie chain
+of 512, the inner chain's flat leaves dominating), built twice because
+the channel record holds both commitment versions. Those trees depend on
+the keys and the spec only, so the instance now builds them once per
+claim set and shares them (`ContractInstance::terminal_stages`): 3.2 s
+per party, and scenario C2 runs in 5.4 s end to end against 14 s
+before and 29 s in a debug build. The Schnorr work is not the cost of
+pre-signing; script generation is. The workspace's dev profile now
+optimises dependencies (`[profile.dev.package."*"] opt-level = 2`), and
+the harness suites are run with `--test-threads=2`: nine chess games
+opening in parallel is nine cores.
+
+Lesson recorded from C3: a stall proof is correct whenever the OTHER side
+is to move and silent. "The loser refuses the fold" only produces a stall
+by the refuser when the refuser is the side to move, so the scenario
+resigns after an odd move. A winner who stops playing because it expects
+a fold is the one who stalls.
+
 ## D31. The signature exhibit: a garbage-signed entry is a claim, not an absence
 
 Date: 2026-09-17. Context: D28 (the stall claim checks no signature),
