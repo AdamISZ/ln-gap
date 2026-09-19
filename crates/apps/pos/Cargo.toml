@@ -8,4 +8,10 @@ license.workspace = true
 lngap-factchain = { path = "../factchain" }
 lngap-ec-wots = { path = "../../ec-wots" }
 lngap-n4bit = { path = "../../n4bit" }
+lngap-lamport = { path = "../../lamport" }
+bitcoin.workspace = true
 hex.workspace = true
+
+[dev-dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-script32 = { path = "../../script32" }

@@ -576,6 +576,52 @@ and the fixed-R burn path are the plan's step 5). This PoC demonstrates
 the mechanism, not the security: quorum formation under partial
 participation stays unexercised until the FROST iteration.
 
+## D33. The refutation leaf: the EC-OTS readout tied to a WOTS re-commitment (the park)
+
+Date: 2026-09-19. Context: pos-factchain plan step 3; D28/D31 (the stall
+graph's exhibit shapes), D32 (the seal).
+
+The refutation of "you did not publish a valid move in the window" is
+one leaf doing two things: the EC-OTS readout of the slot's head chunks
+(the venue attestation delivering the 48-byte head as 96 verified
+nibbles — `lngap_ec_wots::readout_value_fragment`, the stack-preserving
+variant: no claimed value, the values ARE the data) and the mover's
+Winternitz re-commitment of the same 48 bytes, tied nibble-equal (per
+chunk: the readout fragment, then FROMALTSTACK + EQUALVERIFY against
+the re-committed digits, which `wots_verify` left on the stack and a
+96x TOALTSTACK parked in pairing order). The re-commitment is the park:
+the refutation output's follow-on leaves trust a tuple carried by the
+refute key's reveal, and the refutation leaf is the only place that key
+is tied to the venue attestation — pre-signed graphs have no covenants,
+so run-time data crosses outputs only as pinned-key signatures (the
+contract's existing re-commitment discipline, reused unchanged). The
+choreography is sim-tested in script32 before regtest, per D29's
+discipline (`lngap-pos` tests/sim_refute.rs, five tests).
+
+Considered and not taken (revisit at contract integration): the
+self-contained disprove leaf — re-running the readout inside each
+disprove leaf instead of parking (the attestation scalars are public,
+so anyone can produce the chunk signatures). That drops the refute key
+set and the tie, at ~15 kvB per disprove spend against ~2.5 kvB parked;
+it also changes the graph's shape (the disprove no longer needs the
+refutation's output). The parked form matches D28's exhibit discipline
+and keeps disproves cheap.
+
+Measured on regtest (tests/refute.rs, the 96 head chunks of a slot-1
+block): the refutation leaf 60,045 B of script, 8,303 B of witness
+args, the spend 17,289 vB; sigops budget 68,828 vs 4,800 spent (14x
+headroom). The disprove leaf (a toy out-of-range-move predicate over
+the parked tuple) 7,306 B, its spend 2,498 vB. Negatives rejected on
+chain: a re-commitment to a different tuple fails the tie; a legal
+move's tuple cannot fire the disprove predicate. The +2.3 kvB of the
+refutation over the bare 96-chunk readout (~15 kvB) is the WOTS tie.
+
+Open for step 4: refute keys are per role per slot, pinned at open (the
+graph's key sets grow by one); the disprove leaf's delta timelock and
+party gating come with the graph integration; the two-head form of
+(state, move, state') (the plan's 5.1) is resolved when the real
+predicates are wired.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

@@ -16,7 +16,8 @@ mod leaf;
 mod table;
 
 pub use leaf::{
-    readout_leaf, readout_witness_args, slash_leaf, slash_witness_args, CHUNK_SCRIPT_BYTES,
+    readout_leaf, readout_value_fragment, readout_values_leaf, readout_values_witness,
+    readout_witness_args, slash_leaf, slash_witness_args, CHUNK_SCRIPT_BYTES,
 };
 pub use table::{Attestation, Attester, EpochTable};
 

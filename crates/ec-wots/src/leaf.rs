@@ -26,11 +26,71 @@
 //! signature fails at the VERIFY. After all chunks the stack is empty and the
 //! leaf pushes OP_1.
 
+use bitcoin::key::XOnlyPublicKey;
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
 use bitcoin::ScriptBuf;
 
 use crate::EpochTable;
+
+/// The readout fragment for one chunk position, leaving the attested value
+/// on the stack: witness enters as `[.. sig_j, v_j]` (v_j on top), and after
+/// the fragment the stack holds `[.., v_j]`. Unlike [`readout_leaf`] there is
+/// no claimed value to equal — the values ARE the data (this is the form a
+/// refutation composes: the venue-attested message accumulates on the stack).
+pub fn readout_value_fragment(mut b: Builder, points: &[XOnlyPublicKey; 16]) -> Builder {
+    for pt in points {
+        b = b.push_slice(pt.serialize());
+    }
+    b = b
+        .push_int(16)
+        .push_opcode(OP_PICK) // copy v_j
+        .push_int(15)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_SUB) // 15 - v_j
+        .push_opcode(OP_PICK) // select S_{v_j}
+        .push_int(18)
+        .push_opcode(OP_ROLL) // bring sig_j to the top (region: v, 16 points, S_v above it)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_CHECKSIGVERIFY); // abort unless sig_j verifies under S_{v_j}
+    for _ in 0..8 {
+        b = b.push_opcode(OP_2DROP); // drop the sixteen points, keep v_j
+    }
+    b
+}
+
+/// A leaf reading out the chunk positions `chunks` of `table`: the attested
+/// values land on the stack in range order, the last chunk's value on top.
+/// Does NOT end with OP_1 — compose with whatever consumes the values.
+pub fn readout_values_leaf(
+    table: &EpochTable,
+    chunks: std::ops::Range<usize>,
+) -> ScriptBuf {
+    let mut b = Builder::new();
+    for j in chunks {
+        b = readout_value_fragment(b, &table.points[j]);
+    }
+    b.into_script()
+}
+
+/// Witness args (wire order, bottom first) for [`readout_values_leaf`] over
+/// `chunks`: per chunk in DESCENDING chunk order, `sig_j` then `v_j` (so the
+/// lowest chunk's pair ends up on top and is consumed first). `sigs[k]` must
+/// sign the spend's sighash under the point for the attested value of chunk
+/// `chunks.start + k`.
+pub fn readout_values_witness(
+    msg: &[u8],
+    chunks: std::ops::Range<usize>,
+    sigs: &[Vec<u8>],
+) -> Vec<Vec<u8>> {
+    assert_eq!(sigs.len(), chunks.end - chunks.start);
+    let mut out = Vec::with_capacity(2 * sigs.len());
+    for k in (0..sigs.len()).rev() {
+        out.push(sigs[k].clone());
+        out.push(crate::snum(crate::chunk_value(msg, chunks.start + k)));
+    }
+    out
+}
 
 /// Script bytes per chunk of the readout leaf (16 point pushes + 20 opcodes).
 pub const CHUNK_SCRIPT_BYTES: usize = 16 * 33 + 20;
