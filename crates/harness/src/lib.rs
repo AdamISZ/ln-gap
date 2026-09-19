@@ -21,6 +21,7 @@ pub mod names_world;
 pub mod factchain_world;
 pub mod game_world;
 pub mod chess_world;
+pub mod pos_world;
 pub mod scenarios;
 
 pub const HALF: Amount = Amount::from_sat(100_000);
