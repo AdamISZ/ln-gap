@@ -530,18 +530,25 @@ Date: 2026-09-19. Context: pos-factchain branch (POS_FACTCHAIN_PLAN.md);
 the chain/statement/cadence pins the plan's step 1 before code.
 
 The header is byte-identical to the PoW chain's: `prev(20) root(20)
-head(48) height(4) pad(4)`, 96 bytes, 192 chunks; `height` IS the slot
-(one block per slot, the harness cadence already), the old nonce field
-pads to zero. The seal changes, not the shape: instead of
-`n4bit(header) <= target`, the venue's attester reveals one EC-OTS
-scalar per chunk of the header under that slot's epoch table (epoch =
-slot). A block is sealed iff the attestation verifies off-chain against
-the slot's table AND the old structural checks pass (`root =
-entry_root`, `head = entry_head`, prev link, height = parent + 1). Why
-the header survives intact: all entry/root/head machinery (and the
-48-byte head discipline of D28) carries over unchanged, comparison runs
-against the PoW sealer stay meaningful, and the claim-side absorb
-machinery remains available to a hybrid.
+head(48) height(4) pad(4)`, 96 bytes, 192 chunks; `height` carries the
+slot and the old nonce field pads to zero. The chain is SPARSE: a block
+exists only for a slot that carries an entry, slots strictly increase,
+and `prev` links the previous published block. (Amended in place later
+the same day after the user's challenge: no empty cadence blocks.
+Absence needs no chain representation — the "not published in the
+window" claim is enforced by the challenge window itself, since a
+refutation that does not exist cannot be exhibited. Density was a
+requirement of the D28 PoW stall claim's fixed-position header scan,
+which the thin PoS claim drops.) The seal changes, not the shape:
+instead of `n4bit(header) <= target`, the venue's attester reveals one
+EC-OTS scalar per chunk of the header under that slot's epoch table
+(epoch = slot). A block is sealed iff the attestation verifies
+off-chain against the slot's table AND the old structural checks pass
+(`root = entry_root`, `head = entry_head`, prev link, slot follows the
+parent's). Why the header survives intact: all entry/root/head
+machinery (and the 48-byte head discipline of D28) carries over
+unchanged, comparison runs against the PoW sealer stay meaningful, and
+the claim-side absorb machinery remains available to a hybrid.
 
 Statement granularity: the per-chunk statements (`epoch, chunk, value`)
 are as built in `lngap-ec-wots`, so one attestation over the header

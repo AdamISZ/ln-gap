@@ -4,16 +4,20 @@
 //! Design: docs/DECISIONS.md D32 and
 //! docs/planning/hermes-research/POS_FACTCHAIN_PLAN.md. The header is
 //! byte-identical to the PoW chain's (`prev(20) root(20) head(48) height(4)
-//! pad(4)`); `height` is the slot. The seal is an attestation over all
-//! [`HEADER_CHUNKS`] chunks of the header under the slot's epoch table
-//! (epoch = slot), produced by a single attester key standing in for the
+//! pad(4)`); the `height` field carries the SLOT (epoch = slot). The seal is
+//! an attestation over all [`HEADER_CHUNKS`] chunks of the header under the
+//! slot's epoch table, produced by a single attester key standing in for the
 //! FROST group key. The per-chunk statements let a later dispute read out any
 //! subset of the header (the head for a stall refutation, the root for an
 //! entry exhibit) without a separate attestation form.
 //!
-//! Unlike the PoW miner, the sealer produces a block EVERY slot, empty if no
-//! entry is pending: the venue is a proof-of-publication ledger, so "slot d
-//! held nothing of yours" must be a chain fact, not missing data.
+//! The chain is SPARSE: the sealer produces a block only for a slot that
+//! carries an entry; slots strictly increase and `prev` links the previous
+//! published block. Absence is not a chain fact and needs none — a "Bob did
+//! not publish in the window" claim is enforced by the challenge window
+//! itself: a refutation that does not exist cannot be exhibited. (Density
+//! was a requirement of the D28 PoW stall claim's fixed-position header
+//! scan, which the thin PoS claim drops.)
 
 use lngap_ec_wots::{Attestation, Attester, EpochTable};
 use lngap_factchain::{entry_head, entry_root, Header, HEADER_BYTES, HEAD_BYTES};
@@ -25,17 +29,30 @@ pub const HEADER_CHUNKS: usize = HEADER_BYTES * 2;
 /// A block sealed by the venue's attestation over the header bytes.
 pub struct SealedBlock {
     pub header: Header,
-    /// The single entry this block carries (stage 1; empty for an empty
-    /// block — the head is then all zeros).
+    /// The single entry this block carries (stage 1).
     pub entry: Vec<u8>,
     /// One revealed scalar per header chunk, under the slot's epoch table.
     pub attestation: Attestation,
 }
 
 impl SealedBlock {
-    /// The structural checks, shared with the PoW chain minus the target:
-    /// head = entry's head, root = entry's root, prev link.
+    /// The positional checks: head = entry's head, root = entry's root,
+    /// prev link. Shared with the PoW chain minus the target.
     pub fn verify_structure(&self, expected_prev: &Digest) -> Result<(), String> {
+        self.verify_content()?;
+        if self.header.prev() != *expected_prev {
+            return Err(format!(
+                "prev mismatch at slot {}: expected {} but got {}",
+                self.header.height(),
+                hex::encode(expected_prev),
+                hex::encode(self.header.prev())
+            ));
+        }
+        Ok(())
+    }
+
+    /// The position-free checks: head = entry's head, root = entry's root.
+    pub fn verify_content(&self) -> Result<(), String> {
         if self.header.head() != entry_head(&self.entry) {
             return Err(format!("head mismatch at slot {}", self.header.height()));
         }
@@ -46,14 +63,6 @@ impl SealedBlock {
                 self.header.height(),
                 hex::encode(self.header.root()),
                 hex::encode(computed_root)
-            ));
-        }
-        if self.header.prev() != *expected_prev {
-            return Err(format!(
-                "prev mismatch at slot {}: expected {} but got {}",
-                self.header.height(),
-                hex::encode(expected_prev),
-                hex::encode(self.header.prev())
             ));
         }
         Ok(())
@@ -107,10 +116,12 @@ pub fn genesis(attester: &Attester) -> (SealedBlock, EpochTable) {
     )
 }
 
-/// The sealer: accepts pending entries, builds blocks, attests them. One
-/// block per slot, empty or not (see the crate docs).
+/// The sealer: accepts pending entries, builds blocks, attests them.
+/// SPARSE: `seal_next` produces nothing for a slot with no pending entry
+/// (see the crate docs).
 pub struct PosMiner {
     attester: Attester,
+    /// The slot of the last sealed block.
     pub height: u32,
     pub tip: Digest,
     pending: Vec<Vec<u8>>,
@@ -130,7 +141,7 @@ impl PosMiner {
         &self.attester
     }
 
-    /// Submit an entry to be included in the next block.
+    /// Submit an entry to be included in the next sealed block.
     pub fn submit(&mut self, entry: Vec<u8>) {
         self.pending.push(entry);
     }
@@ -140,29 +151,33 @@ impl PosMiner {
         self.pending.len()
     }
 
-    /// Seal the next slot's block: the first pending entry, or an empty
-    /// block. Returns the block and its epoch table (registry data the
-    /// venue publishes alongside).
-    pub fn seal_next(&mut self) -> (SealedBlock, EpochTable) {
-        let entry = if self.pending.is_empty() {
-            Vec::new()
-        } else {
-            self.pending.remove(0)
-        };
-        let height = self.height + 1;
-        let header = Header::new(&self.tip, &entry_root(&entry), &entry_head(&entry), height);
-        let table = self.attester.epoch_table(height as u64, HEADER_CHUNKS);
+    /// Seal the first pending entry at `slot`. Returns Ok(None) when nothing
+    /// is pending — no block exists for a slot with no entry. `slot` must
+    /// follow the last sealed slot.
+    pub fn seal_next(&mut self, slot: u32) -> Result<Option<(SealedBlock, EpochTable)>, String> {
+        if self.pending.is_empty() {
+            return Ok(None);
+        }
+        if slot <= self.height {
+            return Err(format!(
+                "slot {slot} does not follow the tip slot {}",
+                self.height
+            ));
+        }
+        let entry = self.pending.remove(0);
+        let header = Header::new(&self.tip, &entry_root(&entry), &entry_head(&entry), slot);
+        let table = self.attester.epoch_table(slot as u64, HEADER_CHUNKS);
         let attestation = self.attester.attest(&table, header.as_bytes());
         self.tip = header.digest();
-        self.height = height;
-        (
+        self.height = slot;
+        Ok(Some((
             SealedBlock {
                 header,
                 entry,
                 attestation,
             },
             table,
-        )
+        )))
     }
 }
 
@@ -175,17 +190,32 @@ pub enum Observation {
     Known,
     /// A second, DIFFERENT attested header at a slot we already hold: the
     /// attester equivocated. Both headers open under the same epoch table,
-    /// which is the on-chain slash case (`lngap_ec_wots::slash_leaf`).
+    /// which is the clean on-chain slash case (`lngap_ec_wots::slash_leaf`).
     Equivocation(Equivocation),
+    /// The block continues a held non-tip header while we hold a different
+    /// continuation: a chain-level fork. Distinct from same-slot
+    /// equivocation (the two successors have different slots); slash-relevant
+    /// through the venue's fork-choice rule rather than the per-epoch leaf.
+    Fork(Fork),
 }
 
 /// Two conflicting attested headers at one slot.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Equivocation {
-    pub height: u32,
+    pub slot: u32,
     /// The header the client already held.
     pub first: Header,
     /// The newly observed conflicting header.
+    pub second: Header,
+}
+
+/// Two attested continuations of one parent: the held one and the new one.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Fork {
+    pub parent_slot: u32,
+    /// The continuation the client already holds.
+    pub first: Header,
+    /// The newly observed conflicting continuation.
     pub second: Header,
 }
 
@@ -224,8 +254,8 @@ impl PosClient {
     }
 
     /// Find the header at a given slot, if verified.
-    pub fn header_at(&self, height: u32) -> Option<&Header> {
-        self.headers.iter().find(|h| h.height() == height)
+    pub fn header_at(&self, slot: u32) -> Option<&Header> {
+        self.headers.iter().find(|h| h.height() == slot)
     }
 
     /// Number of headers since the checkpoint.
@@ -238,8 +268,8 @@ impl PosClient {
         &self.headers
     }
 
-    /// Verify and append a block extending the tip: structure, seal, and
-    /// slot continuity.
+    /// Verify and append a block extending the tip: structure, seal, and a
+    /// strictly increasing slot.
     pub fn verify_and_append(
         &mut self,
         block: &SealedBlock,
@@ -248,11 +278,11 @@ impl PosClient {
         let expected_prev = self.tip();
         block.verify_structure(&expected_prev)?;
         block.verify_seal(table)?;
-        let expected = self.tip_height() + 1;
-        if block.header.height() != expected {
+        if block.header.height() <= self.tip_height() {
             return Err(format!(
-                "slot gap: expected {expected}, got {}",
-                block.header.height()
+                "slot {} does not follow the tip slot {}",
+                block.header.height(),
+                self.tip_height()
             ));
         }
         self.headers.push(block.header.clone());
@@ -260,32 +290,53 @@ impl PosClient {
     }
 
     /// Observe a sealed block that names its own parent — possibly a fork.
-    /// The block must verify against the parent we hold for the previous
-    /// slot (or the checkpoint); the result says whether it extends the tip,
-    /// is already known, or equivocates.
+    /// The parent is found BY the prev link: a held header, or the
+    /// checkpoint. The result says whether the block extends the tip, is
+    /// already known, equivocates at a held slot, or forks a held parent.
     pub fn observe(&self, block: &SealedBlock, table: &EpochTable) -> Result<Observation, String> {
-        let height = block.header.height();
-        let expected_prev = match self.header_at(height - 1) {
-            Some(parent) => parent.digest(),
-            None if height - 1 == self.checkpoint.0 => self.checkpoint.1,
-            None => return Err(format!("unknown parent slot {}", height - 1)),
+        let slot = block.header.height();
+        let parent_slot = if block.header.prev() == self.checkpoint.1 {
+            self.checkpoint.0
+        } else {
+            match self.headers.iter().find(|h| h.digest() == block.header.prev()) {
+                Some(p) => p.height(),
+                None => return Err(format!("unknown parent for slot {slot}")),
+            }
         };
-        block.verify_structure(&expected_prev)?;
+        if slot <= parent_slot {
+            return Err(format!(
+                "slot {slot} does not follow its parent slot {parent_slot}"
+            ));
+        }
+        block.verify_content()?;
         block.verify_seal(table)?;
-        match self.header_at(height) {
-            Some(held) if held.digest() != block.header.digest() => {
+        if let Some(held) = self.header_at(slot) {
+            return if held.digest() == block.header.digest() {
+                Ok(Observation::Known)
+            } else {
                 Ok(Observation::Equivocation(Equivocation {
-                    height,
+                    slot,
                     first: held.clone(),
                     second: block.header.clone(),
                 }))
-            }
-            Some(_) => Ok(Observation::Known),
-            None if height == self.tip_height() + 1 => Ok(Observation::ExtendsTip),
-            None => Err(format!(
-                "slot {height} does not extend the tip and is not held"
-            )),
+            };
         }
+        if block.header.prev() == self.tip() {
+            return Ok(Observation::ExtendsTip);
+        }
+        // The parent is held but the block enters history behind the tip:
+        // the held chain continues the parent with a different block.
+        let held_successor = self
+            .headers
+            .iter()
+            .find(|h| h.prev() == block.header.prev())
+            .expect("the held parent has a held successor")
+            .clone();
+        Ok(Observation::Fork(Fork {
+            parent_slot,
+            first: held_successor,
+            second: block.header.clone(),
+        }))
     }
 }
 
@@ -316,27 +367,49 @@ mod tests {
     }
 
     #[test]
-    fn sealed_chain_verifies() {
+    fn sparse_chain_verifies() {
         let (mut miner, mut client) = boot();
-        miner.submit(b"entry one: a tictactoe move".to_vec());
-        let mut sealed = Vec::new();
-        for _ in 0..4 {
-            sealed.push(miner.seal_next());
-        }
-        for (b, t) in &sealed {
-            client.verify_and_append(b, t).expect("block verifies");
-        }
-        assert_eq!(client.tip_height(), 4);
-        assert_eq!(client.chain_length(), 4);
-        // Slot 1 carried the entry; slots 2-4 were empty cadence blocks.
+        miner.submit(b"move at slot 1".to_vec());
+        miner.submit(b"move at slot 3".to_vec());
+        miner.submit(b"move at slot 7".to_vec());
+        let (b1, t1) = miner.seal_next(1).unwrap().unwrap();
+        let (b3, t3) = miner.seal_next(3).unwrap().unwrap();
+        let (b7, t7) = miner.seal_next(7).unwrap().unwrap();
+        // Gaps are legal: slots 2, 4, 5, 6 have no blocks.
+        client.verify_and_append(&b1, &t1).unwrap();
+        client.verify_and_append(&b3, &t3).unwrap();
+        client.verify_and_append(&b7, &t7).unwrap();
+        assert_eq!(client.tip_height(), 7);
+        assert_eq!(client.chain_length(), 3);
         assert_ne!(client.header_at(1).unwrap().head(), [0u8; HEAD_BYTES]);
-        assert_eq!(client.header_at(2).unwrap().head(), [0u8; HEAD_BYTES]);
+        assert!(client.header_at(2).is_none());
+    }
+
+    #[test]
+    fn no_entry_no_block() {
+        let (mut miner, _client) = boot();
+        assert!(miner.seal_next(1).unwrap().is_none());
+    }
+
+    #[test]
+    fn non_increasing_slot_rejected() {
+        let (mut miner, mut client) = boot();
+        miner.submit(b"a".to_vec());
+        miner.submit(b"b".to_vec());
+        let (b3, t3) = miner.seal_next(3).unwrap().unwrap();
+        // Miner-side: the next seal must follow slot 3.
+        assert!(miner.seal_next(3).is_err());
+        assert!(miner.seal_next(2).is_err());
+        // Client-side: a block at a held-or-earlier slot does not append.
+        client.verify_and_append(&b3, &t3).unwrap();
+        assert!(client.verify_and_append(&b3, &t3).is_err());
     }
 
     #[test]
     fn seal_rejects_tampered_header() {
         let (mut miner, client) = boot();
-        let (mut block, table) = miner.seal_next();
+        miner.submit(b"x".to_vec());
+        let (mut block, table) = miner.seal_next(1).unwrap().unwrap();
         // Flip a byte in the pad field (the old nonce): the structural
         // checks do not read it, so only the seal can catch this.
         block.header.0[95] ^= 1;
@@ -349,7 +422,8 @@ mod tests {
     #[test]
     fn seal_rejects_wrong_epoch_table() {
         let (mut miner, _client) = boot();
-        let (block, _table) = miner.seal_next();
+        miner.submit(b"x".to_vec());
+        let (block, _table) = miner.seal_next(1).unwrap().unwrap();
         let wrong = miner.attester().epoch_table(99, HEADER_CHUNKS);
         assert!(block.verify_seal(&wrong).is_err());
     }
@@ -358,7 +432,7 @@ mod tests {
     fn structure_rejects_tampered_entry() {
         let (mut miner, client) = boot();
         miner.submit(b"some move".to_vec());
-        let (mut block, _table) = miner.seal_next();
+        let (mut block, _table) = miner.seal_next(1).unwrap().unwrap();
         block.entry[0] ^= 1;
         assert!(block.verify_structure(&client.tip()).is_err());
     }
@@ -367,12 +441,12 @@ mod tests {
     fn equivocation_is_detected() {
         let (mut miner, mut client) = boot();
         miner.submit(b"move A".to_vec());
-        let (block_a, table) = miner.seal_next();
+        let (block_a, table) = miner.seal_next(1).unwrap().unwrap();
         client.verify_and_append(&block_a, &table).unwrap();
 
         // The attester equivocates: a second, different block at slot 1,
         // attested under the SAME epoch table.
-        let prev = client.header_at(1).unwrap().prev();
+        let prev = client.checkpoint.1;
         let entry_b = b"move B".to_vec();
         let header_b = Header::new(&prev, &entry_root(&entry_b), &entry_head(&entry_b), 1);
         let attestation_b = miner.attester().attest(&table, header_b.as_bytes());
@@ -387,21 +461,53 @@ mod tests {
         // ...and the client names the equivocation.
         match client.observe(&block_b, &table) {
             Ok(Observation::Equivocation(e)) => {
-                assert_eq!(e.height, 1);
+                assert_eq!(e.slot, 1);
                 assert_eq!(e.first, block_a.header);
                 assert_eq!(e.second, block_b.header);
             }
             other => panic!("expected equivocation, got {other:?}"),
         }
         // Re-observing the held block is just Known.
-        assert_eq!(client.observe(&block_a, &table).unwrap(), Observation::Known);
+        assert_eq!(
+            client.observe(&block_a, &table).unwrap(),
+            Observation::Known
+        );
     }
 
     #[test]
-    fn rejects_slot_gap() {
+    fn fork_is_detected() {
         let (mut miner, mut client) = boot();
-        let _skipped = miner.seal_next(); // slot 1, never shown
-        let (block2, table2) = miner.seal_next();
-        assert!(client.verify_and_append(&block2, &table2).is_err());
+        miner.submit(b"move at 1".to_vec());
+        miner.submit(b"move at 7".to_vec());
+        let (b1, t1) = miner.seal_next(1).unwrap().unwrap();
+        let (b7, t7) = miner.seal_next(7).unwrap().unwrap();
+        client.verify_and_append(&b1, &t1).unwrap();
+        client.verify_and_append(&b7, &t7).unwrap();
+
+        // A block appears continuing slot 1 while we hold the slot-7
+        // continuation: a fork, with no same-slot clash.
+        let entry_c = b"fork move at 4".to_vec();
+        let header_c = Header::new(
+            &b1.header.digest(),
+            &entry_root(&entry_c),
+            &entry_head(&entry_c),
+            4,
+        );
+        let table_c = miner.attester().epoch_table(4, HEADER_CHUNKS);
+        let attestation_c = miner.attester().attest(&table_c, header_c.as_bytes());
+        let block_c = SealedBlock {
+            header: header_c,
+            entry: entry_c,
+            attestation: attestation_c,
+        };
+        block_c.verify_seal(&table_c).unwrap();
+        match client.observe(&block_c, &table_c) {
+            Ok(Observation::Fork(f)) => {
+                assert_eq!(f.parent_slot, 1);
+                assert_eq!(f.first, b7.header);
+                assert_eq!(f.second, block_c.header);
+            }
+            other => panic!("expected fork, got {other:?}"),
+        }
     }
 }
