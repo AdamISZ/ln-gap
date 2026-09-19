@@ -525,6 +525,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-pos"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "lngap-ec-wots",
+ "lngap-factchain",
+ "lngap-n4bit",
+]
+
+[[package]]
 name = "lngap-script32"
 version = "0.1.0"
 dependencies = [

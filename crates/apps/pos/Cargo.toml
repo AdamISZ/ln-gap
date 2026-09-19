@@ -1,0 +1,11 @@
+[package]
+name = "lngap-pos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-factchain = { path = "../factchain" }
+lngap-ec-wots = { path = "../../ec-wots" }
+lngap-n4bit = { path = "../../n4bit" }
+hex.workspace = true
