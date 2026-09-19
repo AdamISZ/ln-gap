@@ -524,6 +524,48 @@ exhibit's data (stream, siblings) is 8 KB per step of prover data on the
 dispute path, the price of absorbing the whole entry rather than a
 Merkle path over it.
 
+## D32. The PoS venue seal: an EC-OTS attestation over the unchanged 96-byte header
+
+Date: 2026-09-19. Context: pos-factchain branch (POS_FACTCHAIN_PLAN.md);
+the chain/statement/cadence pins the plan's step 1 before code.
+
+The header is byte-identical to the PoW chain's: `prev(20) root(20)
+head(48) height(4) pad(4)`, 96 bytes, 192 chunks; `height` IS the slot
+(one block per slot, the harness cadence already), the old nonce field
+pads to zero. The seal changes, not the shape: instead of
+`n4bit(header) <= target`, the venue's attester reveals one EC-OTS
+scalar per chunk of the header under that slot's epoch table (epoch =
+slot). A block is sealed iff the attestation verifies off-chain against
+the slot's table AND the old structural checks pass (`root =
+entry_root`, `head = entry_head`, prev link, height = parent + 1). Why
+the header survives intact: all entry/root/head machinery (and the
+48-byte head discipline of D28) carries over unchanged, comparison runs
+against the PoW sealer stay meaningful, and the claim-side absorb
+machinery remains available to a hybrid.
+
+Statement granularity: the per-chunk statements (`epoch, chunk, value`)
+are as built in `lngap-ec-wots`, so one attestation over the header
+lets a dispute read out ANY subset of chunk positions — the head for a
+stall refutation, the root for an entry exhibit, the prev for linkage —
+with no separate attestation forms. Grafting after a real equivocation
+(chunk-mixing two attestations) is the known contained case: the venue
+bond exceeds the damage, and one attestation per slot is honest
+operation by definition (EC_WOTS.md section 6).
+
+Registry: one epoch table per slot (192 x 16 points, 96 KB of off-chain
+data per slot), published by the attester, committed by root at
+contract open; disputes bind tables as per-epoch leaf constants
+(EC_WOTS.md section 5 option (i)). Amortization (checkpoint epochs) is
+deliberately deferred (the plan's 5.3).
+
+Consensus for the PoC: a single attester key standing in for the FROST
+group key (indistinguishable on-chain, per the ec-wots crate's design).
+Equivocation = two attested headers at one slot; detected natively by
+the client, slashed on-chain by the built `slash_leaf` (the bond UTXO
+and the fixed-R burn path are the plan's step 5). This PoC demonstrates
+the mechanism, not the security: quorum formation under partial
+participation stays unexercised until the FROST iteration.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
