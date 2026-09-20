@@ -57,11 +57,17 @@ pub fn absent_leaf(ctx: &CommitCtx, name: &str, claimant: Role, claim_from: u32)
 
 /// The mover's refutation leaf on the claim output: the mover's payment
 /// signature first (the pre-signed skeleton pins the output to the refuted
-/// tree), then the readout-and-park.
-pub fn refute_leaf(ctx: &CommitCtx, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, key: &WotsPublic) -> Leaf {
+/// tree), then the readout-and-park. The D41 authorship fragment rides the
+/// gate slot: per parked head, the witness's 21 preimages of THAT head's
+/// mover's state key must open the head's claimed state bit by bit — a
+/// garbage-signed attested entry admits no refutation.
+pub fn refute_leaf(ctx: &CommitCtx, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Leaf {
     let body = match table_prev {
-        Some(tp) => refute::refute_leaf_pair(tp, table, key),
-        None => refute::refute_leaf(table, key),
+        Some(tp) => refute::refute_leaf_pair_gated(tp, table, &keys.refute, |b| {
+            let b = ttt::authorship_fragment(b, l.file, l.new, &keys.state);
+            ttt::authorship_fragment(b, l.file, 0, &keys_prev.expect("a pair has a prior").state)
+        }),
+        None => refute::refute_leaf(table, &keys.refute, |b| ttt::authorship_fragment(b, l.file, 0, &keys.state)),
     };
     let mut b = Builder::new().checksigverify(&ctx.key(l.mover).payment);
     for ins in body.instructions() {
@@ -92,7 +98,16 @@ pub fn refute_leaf(ctx: &CommitCtx, l: &Layout, table_prev: Option<&EpochTable>,
 /// one-time-ness is preserved by construction. The exhibit exists from
 /// depth 5 (tic-tac-toe cannot be terminal before move 5 — the
 /// never-fire-trim discipline).
-pub fn exhibit_leaf(ctx: &CommitCtx, name: &str, l: &Layout, table_prev: &EpochTable, table: &EpochTable, key: &WotsPublic, claim_from: u32) -> Leaf {
+pub fn exhibit_leaf(
+    ctx: &CommitCtx,
+    name: &str,
+    l: &Layout,
+    table_prev: &EpochTable,
+    table: &EpochTable,
+    keys: &PosDepthKeys,
+    keys_prev: &PosDepthKeys,
+    claim_from: u32,
+) -> Leaf {
     let mut b = Builder::new().cltv(claim_from);
     let mut tl = Timelock::cltv(claim_from);
     if l.mover == ctx.broadcaster && ctx.params.to_self_delay > 0 {
@@ -100,7 +115,11 @@ pub fn exhibit_leaf(ctx: &CommitCtx, name: &str, l: &Layout, table_prev: &EpochT
         tl.csv = Some(ctx.params.to_self_delay);
     }
     b = ctx.two_of_two_verify(b);
-    let body = refute::refute_leaf_pair_gated(table_prev, table, key, |b| ttt::terminal_gate_fragment(b, l.file, l.new));
+    let body = refute::refute_leaf_pair_gated(table_prev, table, &keys.refute, |b| {
+        let b = ttt::authorship_fragment(b, l.file, l.new, &keys.state);
+        let b = ttt::authorship_fragment(b, l.file, 0, &keys_prev.state);
+        ttt::terminal_gate_fragment(b, l.file, l.new)
+    });
     for ins in body.instructions() {
         b = match ins.expect("valid script") {
             bitcoin::script::Instruction::Op(op) => b.push_opcode(op),
@@ -144,9 +163,10 @@ pub fn claim_tree(
     table_prev: Option<&EpochTable>,
     table: &EpochTable,
     keys: &PosDepthKeys,
+    keys_prev: Option<&PosDepthKeys>,
     outcomes: &[Outcome],
 ) -> Result<TapTree> {
-    let mut leaves = vec![refute_leaf(ctx, l, table_prev, table, &keys.refute)];
+    let mut leaves = vec![refute_leaf(ctx, l, table_prev, table, keys, keys_prev)];
     for o in outcomes {
         leaves.push(split_leaf(ctx, o, ctx.params.delta, &keys.claimant_code));
     }

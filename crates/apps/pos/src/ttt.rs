@@ -47,8 +47,10 @@ use bitcoin::script::Builder;
 use bitcoin::ScriptBuf;
 use lngap_btc::script::BuilderExt;
 use lngap_channel::Role;
+use lngap_factchain::slot::STATE_BITS;
 use lngap_factchain::HEAD_BYTES;
 use lngap_lamport::winternitz::{WotsExt, WotsPublic};
+use lngap_lamport::PublicKey;
 use lngap_tictactoe::LINES;
 
 /// Head chunk digits per head in the file.
@@ -578,6 +580,50 @@ fn status_mismatch(l: &Layout, key: &WotsPublic) -> PosLeaf {
             status(s) != expected
         }),
     }
+}
+
+// ----- the authorship fragment (D41) -----
+
+/// [nib] -> [bit `b` of the nibble] (b = 0 the low bit).
+fn nib_bit(b: Builder, bit: usize) -> Builder {
+    match bit {
+        0 => split2(split4(b).push_opcode(OP_NIP)).push_opcode(OP_NIP), // lo2, lo
+        1 => split2(split4(b).push_opcode(OP_NIP)).push_opcode(OP_DROP), // lo2, hi
+        2 => split2(split4(b).push_opcode(OP_DROP)).push_opcode(OP_NIP), // hi2, lo
+        _ => split2(split4(b).push_opcode(OP_DROP)).push_opcode(OP_DROP), // hi2, hi
+    }
+}
+
+/// The authorship fragment (D41): the refutation/exhibit must present, per
+/// parked head, the 21 preimages of THAT head's mover's state key, each
+/// opening the commitment of the bit value the head's claimed state has at
+/// that bit. "Standing behind a head" now requires the mover's key over
+/// the head's state — which is playing the move. A garbage-signed attested
+/// entry supports no refutation (its author alone holds the key, and the
+/// venue never had it), so the absence path proceeds; the witness's
+/// preimages ride in a block right below the register file and are ROLLed
+/// off one by one (constant depth `file`).
+///
+/// Witness order: the fragment consumes the block top-first; per head the
+/// preimages are checked bit-ascending, the NEW head's block first.
+///
+/// Runs on the file right after the re-commitment verify: the PICK copies
+/// leave the file intact for the readout (the conjunction is order-free).
+pub fn authorship_fragment(mut b: Builder, file: usize, head_off: usize, key: &PublicKey) -> Builder {
+    for i in 0..STATE_BITS {
+        let d = head_off + 15 - i / 4; // the file digit holding state bit i
+        b = b.push_int(file as i64).push_opcode(OP_ROLL).push_opcode(OP_HASH160); // [.. H(p_i)]
+        b = b.push_int((file - d) as i64).push_opcode(OP_PICK); // [.. H(p_i), digit] (shifted one deep by H)
+        b = nib_bit(b, i % 4); // [.. H(p_i), bit]
+        b = b
+            .push_opcode(OP_IF)
+            .push_bytes(&key.bits[i].h1)
+            .push_opcode(OP_ELSE)
+            .push_bytes(&key.bits[i].h0)
+            .push_opcode(OP_ENDIF) // [.. H(p_i), h_b]
+            .push_opcode(OP_EQUALVERIFY);
+    }
+    b
 }
 
 // ----- the terminal exhibit's status gate (D37) -----

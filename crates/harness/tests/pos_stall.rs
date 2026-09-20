@@ -20,3 +20,4 @@ scenario_test!(ps6a_illegal_move_disproved_off_the_refutation, PS6A);
 scenario_test!(ps6b_fabricated_terminal_state_disproved_off_the_exhibit, PS6B);
 scenario_test!(ps7_double_played_slot_pays_the_victim, PS7);
 scenario_test!(ps8_baseless_terminal_exhibit_rejected_by_the_gate, PS8);
+scenario_test!(ps9_garbage_signed_attested_entry_is_not_a_move, PS9);

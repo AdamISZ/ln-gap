@@ -24,9 +24,11 @@
 //! - F: the gate rejects an OPEN state (no mid-game self-claim), and a
 //!   drawn game at depth 9 — unresolvable in 4b's graph — pays Draw.
 //!
-//! The venue entries' state signatures are dummies here — a garbage-signed
-//! attested entry is the PoS sig exhibit's case (deferred, D36); the leaves
-//! under test judge the head's content fields.
+//! Venue entries are signed for real (the mover's per-depth state key): the
+//! D41 authorship fragment on every refute/exhibit leaf checks the
+//! presented preimages against the parked head's claimed state, so the
+//! witness carries them — and path G shows a garbage-signed attested entry
+//! admits no refutation (the D40/PS9 hole, closed).
 
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1::{SecretKey, SECP256K1};
@@ -82,8 +84,10 @@ impl Venue {
     }
     /// Seal `slot` carrying `mv` played from `board` by its mover (the
     /// venue is a dumb sequencer: an illegal move seals just the same; the
-    /// entry claims the naive overwrite). Returns the claimed new board.
-    fn seal_move(&mut self, slot: u32, board: &Board, mv: u8) -> Board {
+    /// entry claims the naive overwrite), SIGNED with the mover's state key
+    /// over the claimed state (D41: the refute/exhibit leaves check it).
+    /// Returns the claimed new board.
+    fn seal_move(&mut self, slot: u32, board: &Board, mv: u8, ks: &mut KeyStore) -> Board {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap_or_else(|_| {
             let mut n = board.clone();
@@ -91,6 +95,27 @@ impl Venue {
             n.turn = mover.other();
             n
         });
+        let reveal = ks.reveal_bits(&instance::state_label(CONTRACT_ID, 1, slot), &lngap_lamport::uint_to_bits(state_u32(&new), 21)).unwrap();
+        let entry = SlotEntry {
+            game_id: GAME_ID,
+            depth: slot as u8,
+            mover: mover.idx() as u8,
+            mv,
+            state: state_u32(&new),
+            sigs: reveal.preimages.clone(),
+        };
+        self.miner.submit(entry.encode());
+        let (block, table) = self.miner.seal_next(slot).unwrap();
+        assert!(block.verify_seal(&table).is_ok());
+        self.sealed.insert(slot, block);
+        new
+    }
+    /// Seal `slot` with a legal-looking but GARBAGE-SIGNED entry (the
+    /// D41/PS9 case): the sigs region is junk. The venue attests existence,
+    /// never validity — it seals anyway.
+    fn seal_move_junk(&mut self, slot: u32, board: &Board, mv: u8) {
+        let mover = instance::mover_at(slot);
+        let new = TicTacToe.transition(board, &mv, mover).unwrap();
         let entry = SlotEntry {
             game_id: GAME_ID,
             depth: slot as u8,
@@ -103,7 +128,6 @@ impl Venue {
         let (block, table) = self.miner.seal_next(slot).unwrap();
         assert!(block.verify_seal(&table).is_ok());
         self.sealed.insert(slot, block);
-        new
     }
     /// Seal `slot` empty (the mover stalls).
     fn seal_empty(&mut self, slot: u32) {
@@ -195,6 +219,25 @@ fn skel<'a>(graph: &'a [PresignedTx], label: &str) -> &'a PresignedTx {
     graph.iter().find(|p| p.label == label).unwrap_or_else(|| panic!("no skeleton {label}"))
 }
 
+/// Seal `slot` with `mv` played by its mover, signed with the mover's
+/// state key from that side's keystore (D41: the venue entries are really
+/// signed).
+fn seal_move(path: &mut Path, g: &mut Game, slot: u32, mv: u8) {
+    let mover = instance::mover_at(slot);
+    path.board = path.venue.seal_move(slot, &path.board, mv, g.keys_of(mover).0);
+}
+
+/// The state-key reveal over a sealed head's CLAIMED state (the D41
+/// authorship block), from that depth's mover's keystore — the same bits
+/// as the published entry's, so the same preimages (idempotent re-reveal).
+fn auth_reveal(g: &mut Game, d: u32, head: &[u8; 48]) -> lngap_lamport::Reveal {
+    let state = u32::from_be_bytes(head[4..8].try_into().unwrap()) & 0x00ff_ffff;
+    g.keys_of(instance::mover_at(d))
+        .0
+        .reveal_bits(&instance::state_label(CONTRACT_ID, 1, d), &lngap_lamport::uint_to_bits(state, 21))
+        .unwrap()
+}
+
 /// One playing of the dance from a funded contract output.
 struct Path {
     venue: Venue,
@@ -233,14 +276,15 @@ impl Path {
         let p = skel(&self.graph, &format!("absent_{d}/refute"));
         let mut tx = p.tx.clone();
         let a_prev = p.prevouts[0].clone();
-        let (mover_ks, mover_payment) = g.keys_of(instance::mover_at(d));
         let new_head = self.venue.head(d);
         let w = if d >= 2 {
             let prev_head = self.venue.head(d - 1);
             let mut msg = prev_head.to_vec();
             msg.extend_from_slice(&new_head);
-            let pair_sig = mover_ks.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap();
+            let pair_sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap();
             self.pair_sig = Some(pair_sig.clone());
+            let prev_reveal = auth_reveal(g, d - 1, &prev_head);
+            let new_reveal = auth_reveal(g, d, &new_head);
             let new_block = &self.venue.sealed[&d];
             let prev_block = &self.venue.sealed[&(d - 1)];
             let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
@@ -249,23 +293,59 @@ impl Path {
             let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig)
+            refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &prev_reveal, &new_reveal)
         } else {
-            let sig = mover_ks.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
+            let sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());
+            let new_reveal = auth_reveal(g, d, &new_head);
             let new_block = &self.venue.sealed[&d];
             let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness(&new_head, &sigs, &sig)
+            refute::refute_witness(&new_head, &sigs, &sig, &new_reveal)
         };
-        let mover_sig = sign_tx(mover_payment, &tx, &a_prev, &p.leaf.script);
+        let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), &tx, &a_prev, &p.leaf.script);
         let mut w = w;
         w.push(mover_sig);
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the refutation at depth {d} must mine: {e}"));
         println!("REGTEST 4b: refutation at depth {d}: {} vB", tx.vsize());
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
+    }
+
+    /// The depth-`d` refutation carrying the entry's OWN junk preimages
+    /// instead of the mover's reveal over the claimed state — the D41
+    /// negative, assembled but NOT broadcast (the caller test_accepts the
+    /// rejection).
+    fn refute_with_preimages(&mut self, rt: &Regtest, g: &mut Game, d: u32, junk: bool) -> Transaction {
+        assert!(junk, "the honest refutation is refute()");
+        let _ = rt;
+        let junk_r = lngap_lamport::Reveal { preimages: vec![[0x11; 20]; 21] };
+        let p = skel(&self.graph, &format!("absent_{d}/refute"));
+        let tx = &p.tx;
+        let a_prev = &p.prevouts[0];
+        let (prev_head, new_head) = (self.venue.head(d - 1), self.venue.head(d));
+        let mut msg = prev_head.to_vec();
+        msg.extend_from_slice(&new_head);
+        let pair_sig = g
+            .keys_of(instance::mover_at(d))
+            .0
+            .sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg)
+            .unwrap();
+        let new_block = &self.venue.sealed[&d];
+        let prev_block = &self.venue.sealed[&(d - 1)];
+        let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
+            .map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], tx, a_prev, &p.leaf.script))
+            .collect();
+        let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
+            .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, a_prev, &p.leaf.script))
+            .collect();
+        let mut w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &junk_r, &junk_r);
+        let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
+        w.push(mover_sig);
+        let mut tx = p.tx.clone();
+        tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
+        tx
     }
 
     /// The exhibit witness at depth `d` (the gated pair readout plus both
@@ -284,6 +364,8 @@ impl Path {
             mover_ks.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap()
         };
         self.pair_sig = Some(pair_sig.clone());
+        let prev_reveal = auth_reveal(g, d - 1, &prev_head);
+        let new_reveal = auth_reveal(g, d, &new_head);
         let new_block = &self.venue.sealed[&d];
         let prev_block = &self.venue.sealed[&(d - 1)];
         let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
@@ -292,7 +374,7 @@ impl Path {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, c_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig);
+        let mut w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &prev_reveal, &new_reveal);
         let sig_u = sign_tx(&g.user.payment, tx, c_prev, &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, tx, c_prev, &p.leaf.script);
         w.push(sig_h);
@@ -457,9 +539,9 @@ fn wired_pos_graph() {
         assert_eq!(path.graph.len(), 282, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 x 21 equivocation exhibits (D39)");
         // slot 1: user's legal X@4; slot 2: hub plays the OCCUPIED cell 4
         rt.mine(1).unwrap();
-        path.board = path.venue.seal_move(1, &path.board, 4);
+        seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
-        path.venue.seal_move(2, &path.board, 4);
+        seal_move(&mut path, &mut g, 2, 4);
         // past the claim window and the broadcaster's to_self_delay
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
         let (_a_op, _a_prev) = path.claim(&rt, &g, D);
@@ -484,9 +566,9 @@ fn wired_pos_graph() {
         let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut path = Path::open(&rt, &g, &tables);
         rt.mine(1).unwrap();
-        path.board = path.venue.seal_move(1, &path.board, 4);
+        seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
-        path.board = path.venue.seal_move(2, &path.board, 0); // legal: O@0
+        seal_move(&mut path, &mut g, 2, 0); // legal: O@0
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
         let (_a_op, _a_prev) = path.claim(&rt, &g, D);
         let (p_op, p_prev) = path.refute(&rt, &mut g, D);
@@ -511,7 +593,7 @@ fn wired_pos_graph() {
         let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut path = Path::open(&rt, &g, &tables);
         rt.mine(1).unwrap();
-        path.board = path.venue.seal_move(1, &path.board, 4);
+        seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
         path.venue.seal_empty(2); // hub stalls
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
@@ -528,7 +610,7 @@ fn wired_pos_graph() {
         let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut path = Path::open(&rt, &g, &tables);
         rt.mine(1).unwrap();
-        path.board = path.venue.seal_move(1, &path.board, 4); // legal opening
+        seal_move(&mut path, &mut g, 1, 4); // legal opening
         rt.mine(2).unwrap(); // past claim_from(1)
         let (_a_op, _a_prev) = path.claim(&rt, &g, 1); // hub claims absence
         let (p_op, p_prev) = path.refute(&rt, &mut g, 1);
@@ -553,7 +635,7 @@ fn wired_pos_graph() {
         // terminal at depth 5 with the user the last mover
         for (i, mv) in [0u8, 3, 1, 4, 2].into_iter().enumerate() {
             rt.mine(1).unwrap();
-            path.board = path.venue.seal_move(i as u32 + 1, &path.board, mv);
+            seal_move(&mut path, &mut g, i as u32 + 1, mv);
         }
         assert!(TicTacToe.turn(&path.board).is_none(), "the line must be terminal at depth 5");
         // the loser cannot exhibit: the depth-5 refute key is the user's,
@@ -590,7 +672,7 @@ fn wired_pos_graph() {
         // the drawn line XOX/XOO/OXX: 0,1,3,4,2 then 5,7,6,8
         for (i, mv) in [0u8, 1, 3, 4, 2].into_iter().enumerate() {
             rt.mine(1).unwrap();
-            path.board = path.venue.seal_move(i as u32 + 1, &path.board, mv);
+            seal_move(&mut path, &mut g, i as u32 + 1, mv);
         }
         assert!(TicTacToe.turn(&path.board).is_some(), "the board must still be OPEN at depth 5");
         // the gate: the exhibit leaf rejects an OPEN parked state even
@@ -605,7 +687,7 @@ fn wired_pos_graph() {
         // resolve at all
         for (i, mv) in [5u8, 7, 6, 8].into_iter().enumerate() {
             rt.mine(1).unwrap();
-            path.board = path.venue.seal_move(6 + i as u32, &path.board, mv);
+            seal_move(&mut path, &mut g, 6 + i as u32, mv);
         }
         assert!(TicTacToe.turn(&path.board).is_none(), "the line must be a draw at depth 9");
         let need = g.inst.claim_from(9).saturating_sub(rt.height().unwrap()) + 1;
@@ -620,5 +702,30 @@ fn wired_pos_graph() {
         let w = path.exhibit_checked_witness(&mut g, 9, 2);
         let tx = run(&rt, skel(&path.graph, "exhibit_9/split_Draw"), w);
         println!("REGTEST 4c: exhibit split (draw at 9): {} vB", tx.vsize());
+    }
+
+    // ============ path G: a garbage-signed attested entry is not a move ==
+    {
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut path = Path::open(&rt, &g, &tables);
+        rt.mine(1).unwrap();
+        seal_move(&mut path, &mut g, 1, 4); // X@4, really signed
+        rt.mine(1).unwrap();
+        // the hub's slot-2 entry claims a legal move (O@0) but its sigs
+        // region is junk (the PS9 hole, D40 — closed by D41)
+        path.venue.seal_move_junk(2, &path.board, 0);
+        rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        let (_a_op, _a_prev) = path.claim(&rt, &g, 2);
+        // the hub declines to adopt the junk (its key never signed that
+        // state): a refutation carrying the entry's own junk preimages
+        // fails the authorship fragment on-chain
+        let bad = path.refute_with_preimages(&rt, &mut g, 2, true);
+        assert!(rt.test_accept(&bad).is_err(), "junk preimages must fail the authorship fragment");
+        // (the hub COULD adopt the entry by signing its claimed state —
+        // that would be its move; it declines, so the absence resolves)
+        rt.mine(u64::from(g.params.delta) + 1).unwrap();
+        let w = path.timeout_witness(&mut g, 2, 0);
+        let tx = run(&rt, skel(&path.graph, "absent_2/split_UserWins"), w);
+        println!("REGTEST 6/PS9: garbage-signed entry held no refutation; timeout split: {} vB", tx.vsize());
     }
 }

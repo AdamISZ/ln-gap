@@ -4,10 +4,37 @@
 //! the source of truth for the crypto; this catches stack bugs.
 
 use lngap_ec_wots::Attester;
-use lngap_pos::refute::{pair_key, refute_key, refute_leaf, refute_leaf_pair, refute_witness, refute_witness_pair, HEAD_CHUNKS};
+use lngap_pos::refute::{pair_key, refute_key, refute_leaf, refute_leaf_pair_gated, refute_witness, refute_witness_pair, HEAD_CHUNKS};
 use lngap_pos::HEADER_CHUNKS;
 
 const DUMMY_SIG: [u8; 64] = [0x30; 64];
+
+/// The fixture heads carry state 0 (all bits false); the D41 authorship
+/// fragments check the presented preimages against these per-head state
+/// keys.
+fn state_key(seed: u8) -> lngap_lamport::SecretKey {
+    lngap_lamport::SecretKey::from_entropy(lngap_factchain::slot::STATE_BITS, [seed; 32])
+}
+
+fn zero_state_reveal(seed: u8) -> lngap_lamport::Reveal {
+    state_key(seed)
+        .reveal_bits(&[false; lngap_factchain::slot::STATE_BITS])
+        .unwrap()
+}
+
+/// The authorship gate for a depth-1 (single-head) leaf.
+fn auth1(seed: u8) -> impl FnOnce(bitcoin::script::Builder) -> bitcoin::script::Builder {
+    move |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key(seed).public())
+}
+
+/// The authorship gate for a pair leaf: the new head's fragment (offset 96)
+/// then the prior's (offset 0).
+fn auth2(seed_new: u8, seed_prev: u8) -> impl FnOnce(bitcoin::script::Builder) -> bitcoin::script::Builder {
+    move |b| {
+        let b = lngap_pos::ttt::authorship_fragment(b, 192, 96, &state_key(seed_new).public());
+        lngap_pos::ttt::authorship_fragment(b, 192, 0, &state_key(seed_prev).public())
+    }
+}
 
 /// A head whose move byte (byte 4) is `mv`; the rest zero.
 fn head_with(mv: u8) -> [u8; 48] {
@@ -42,8 +69,8 @@ fn refute_runs() {
     let key = refute_key([9u8; 32]);
     let sig = key.sign(&head).unwrap();
     assert_eq!(key.public().verify(&sig).unwrap(), head.to_vec());
-    let leaf = refute_leaf(&table, &key.public());
-    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness(&head, &sigs, &sig))
+    let leaf = refute_leaf(&table, &key.public(), auth1(1));
+    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness(&head, &sigs, &sig, &zero_state_reveal(1)))
         .expect("a correct refutation must run");
     assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1");
 }
@@ -55,11 +82,29 @@ fn refute_rejects_a_mismatched_recommitment() {
     // the re-commitment signs a DIFFERENT head than the one attested
     let other = head_with(6);
     let sig = key.sign(&other).unwrap();
-    let leaf = refute_leaf(&table, &key.public());
+    let leaf = refute_leaf(&table, &key.public(), auth1(1));
+    // the fragment reads the FILE's claimed state (the re-committed head's:
+    // zero); the tie then fails the readout
     assert!(
-        lngap_script32::sim::run(leaf.as_script(), refute_witness(&head, &sigs, &sig)).is_err(),
+        lngap_script32::sim::run(leaf.as_script(), refute_witness(&head, &sigs, &sig, &zero_state_reveal(1))).is_err(),
         "the re-committed tuple must equal the attested head, nibble by nibble"
     );
+}
+
+#[test]
+fn refute_rejects_junk_preimages() {
+    // D41: the authorship fragment — the presented preimages must open the
+    // mover's state key bit by bit against the claimed state
+    let (table, head, sigs) = setup(5);
+    let key = refute_key([9u8; 32]);
+    let sig = key.sign(&head).unwrap();
+    let leaf = refute_leaf(&table, &key.public(), auth1(1));
+    let junk = lngap_lamport::Reveal { preimages: vec![[0x11; 20]; 21] };
+    assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness(&head, &sigs, &sig, &junk)).is_err());
+    // and one wrong bit's preimage among twenty good ones
+    let mut r = zero_state_reveal(1);
+    r.preimages[7] = [0x12; 20];
+    assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness(&head, &sigs, &sig, &r)).is_err());
 }
 
 #[test]
@@ -67,13 +112,12 @@ fn refute_rejects_an_out_of_range_value() {
     let (table, head, sigs) = setup(5);
     let key = refute_key([9u8; 32]);
     let sig = key.sign(&head).unwrap();
-    let leaf = refute_leaf(&table, &key.public());
-    let mut w = refute_witness(&head, &sigs, &sig);
-    // corrupt the first-consumed value (the last chunk item in wire order
-    // before the wots items): 16 is out of range and must fail at OP_PICK
-    let n = w.len();
-    let wots_items = 2 * sig.params.total_digits() as usize;
-    let v_pos = n - wots_items - 1;
+    let leaf = refute_leaf(&table, &key.public(), auth1(1));
+    let mut w = refute_witness(&head, &sigs, &sig, &zero_state_reveal(1));
+    // corrupt chunk 0's value (the last of the 192 chunk items — the
+    // authorship block and the wots items follow): 16 is out of range and
+    // must fail at OP_PICK
+    let v_pos = 2 * HEAD_CHUNKS - 1;
     w[v_pos] = vec![16];
     assert!(lngap_script32::sim::run(leaf.as_script(), w).is_err());
 }
@@ -111,9 +155,12 @@ fn refute_pair_runs() {
     let (t1, t2, h1, h2) = pair_setup();
     let key = pair_key([9u8; 32]);
     let sig = key.sign(&pair_msg(&h1, &h2)).unwrap();
-    let leaf = refute_leaf_pair(&t1, &t2, &key.public());
+    let leaf = refute_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
-    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness_pair(&h1, &sigs, &h2, &sigs, &sig))
+    let end = lngap_script32::sim::run(
+        leaf.as_script(),
+        refute_witness_pair(&h1, &sigs, &h2, &sigs, &sig, &zero_state_reveal(1), &zero_state_reveal(2)),
+    )
         .expect("a correct two-head refutation must run");
     assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1");
 }
@@ -124,7 +171,15 @@ fn refute_pair_rejects_a_mismatched_recommitment() {
     let (t1, t2, h1, h2) = pair_setup();
     let key = pair_key([9u8; 32]);
     let sig = key.sign(&pair_msg(&head_with(5), &h2)).unwrap();
-    let leaf = refute_leaf_pair(&t1, &t2, &key.public());
+    let leaf = refute_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
-    assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness_pair(&h1, &sigs, &h2, &sigs, &sig)).is_err());
+    // the FILE's prior head claims state 0 (the mismatched re-commitment);
+    // the prior fragment's preimages match it, then the tie fails
+    assert!(
+        lngap_script32::sim::run(
+            leaf.as_script(),
+            refute_witness_pair(&h1, &sigs, &h2, &sigs, &sig, &zero_state_reveal(1), &zero_state_reveal(2)),
+        )
+        .is_err()
+    );
 }

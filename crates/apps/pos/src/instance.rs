@@ -30,15 +30,18 @@
 //! pre-signed skeleton here — including the refutation, whose pinned output
 //! is the whole point (see graph.rs's module docs).
 //!
-//! Deferred from this wiring (the D34/D36 lists): the PoS signature exhibit
-//! (a garbage-signed attested entry is a claim, D31's analogue), the party
-//! policies (including actually signing venue entries with the state key)
-//! and the S1-S9 scenario port. The terminal-claim hole (D36) is CLOSED
-//! here: the `exhibit_d` leaves (D37) let the mover of the last move park
-//! the attested terminal pair under a `status != OPEN` gate and split to
+//! Deferred from this wiring (the D34/D36 lists): the party policies
+//! (including actually signing venue entries with the state key) and the
+//! S1-S9 scenario port. The terminal-claim hole (D36) is CLOSED here: the
+//! `exhibit_d` leaves (D37) let the mover of the last move park the
+//! attested terminal pair under a `status != OPEN` gate and split to
 //! R(parked terminal), the checked resolution the thin claim dropped. The
 //! player-equivocation gap (GAME_PROTOCOL.md section 5 item 4) is CLOSED by
-//! the `equiv_{d}_{i}` leaves (D39).
+//! the `equiv_{d}_{i}` leaves (D39). The garbage-signed-entry hole (D40's
+//! PS9, the deferred "PoS sig exhibit") is CLOSED by the D41 authorship
+//! fragment riding the refute/exhibit gate slot (no sig exhibit, no
+//! entry-tail binding): every parked head carries the in-script proof that
+//! its mover's state key opens the head's claimed state.
 
 use anyhow::{bail, ensure, Result};
 use bitcoin::{Amount, OutPoint, TxOut};
@@ -219,7 +222,8 @@ impl PosInstance {
                 &l,
                 &tables[(d - 1) as usize],
                 &tables[d as usize],
-                &self.depth_keys(d).refute,
+                self.depth_keys(d),
+                self.depth_keys(d - 1),
                 self.claim_from(d),
             ));
         }
@@ -238,7 +242,7 @@ impl PosInstance {
     pub fn claim_tree(&self, ctx: &CommitCtx, d: u32, tables: &[EpochTable]) -> Result<TapTree> {
         let l = self.layout(d);
         let (prev, table) = if d >= 2 { (Some(&tables[(d - 1) as usize]), &tables[d as usize]) } else { (None, &tables[1]) };
-        graph::claim_tree(ctx, &l, prev, table, self.depth_keys(d), &self.outcomes)
+        graph::claim_tree(ctx, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes)
     }
 
     /// The refutation output's tree at depth `d`.

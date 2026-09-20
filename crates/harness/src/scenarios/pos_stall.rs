@@ -292,6 +292,42 @@ impl PosGame {
         Ok(())
     }
 
+    /// The mover at the coming slot claims `mv` with a GARBAGE sigs region
+    /// (D41's PS9): the venue attests existence, never validity — the chain
+    /// accepts the block (the attestation is honest) while the entry opens
+    /// no key. The board does NOT advance (no signed move exists).
+    fn play_garbage_signed(&mut self, mv: u8) -> Result<()> {
+        self.rt.mine(1)?;
+        let slot = self.next_slot;
+        let mover = instance::mover_at(slot);
+        let new = TicTacToe.transition(&self.board, &mv, mover).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let entry = SlotEntry {
+            game_id: GAME_ID,
+            depth: slot as u8,
+            mover: mover.idx() as u8,
+            mv,
+            state: lngap_lamport::bits_to_uint(&state_bits(&new)),
+            sigs: vec![[0x11; 20]; STATE_BITS],
+        };
+        self.miner.submit(entry.encode());
+        let (block, table) = self.miner.seal_next(slot).map_err(|e| anyhow::anyhow!(e))?;
+        self.client.verify_and_append(&block, &table).map_err(|e| anyhow::anyhow!(e))?;
+        self.next_slot += 1;
+        self.say(format!("slot {slot} holds {mover}'s claimed move {mv} with a GARBAGE signature — attested (existence, not validity); anyone sees it opens no key"));
+        self.sealed.insert(slot, block);
+        Ok(())
+    }
+
+    /// The state-key reveal over a sealed head's CLAIMED state (the D41
+    /// authorship block), from that depth's mover's keystore — the same
+    /// bits as the published entry's, so the same preimages (idempotent).
+    fn auth_reveal(&mut self, d: u32, head: &[u8; 48]) -> Reveal {
+        let state = u32::from_be_bytes(head[4..8].try_into().unwrap()) & 0x00ff_ffff;
+        self.ks(instance::mover_at(d))
+            .reveal_bits(&instance::state_label(CONTRACT_ID, 1, d), &lngap_lamport::uint_to_bits(state, STATE_BITS))
+            .unwrap()
+    }
+
     /// The mover at depth `d` plays a SECOND, conflicting move in a fork
     /// block at the same slot (the venue equivocates). The client names the
     /// event; the conflicting state reveal is hand-reproduced.
@@ -366,8 +402,10 @@ impl PosGame {
     }
 
     /// The pair-readout witness of a refute/exhibit at depth `d`, with the
-    /// pair reveal (needed again by the disprove/split witnesses).
-    fn readout_witness(&mut self, label: &str, d: u32) -> Result<(Vec<Vec<u8>>, WotsSig)> {
+    /// pair reveal (needed again by the disprove/split witnesses). With
+    /// `junk` set, the authorship blocks carry the entry's own garbage
+    /// preimages instead of the movers' reveals (the PS9 negative).
+    fn readout_witness(&mut self, label: &str, d: u32, junk: bool) -> Result<(Vec<Vec<u8>>, WotsSig)> {
         let (tx, prev, leaf) = {
             let p = self.skel(label);
             (p.tx.clone(), p.prevouts[0].clone(), p.leaf.script.clone())
@@ -377,13 +415,28 @@ impl PosGame {
         msg.extend_from_slice(&new_head);
         let mover = instance::mover_at(d);
         let pair_sig = self.ks(mover).sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let junk_r = Reveal { preimages: vec![[0x11; 20]; STATE_BITS] };
+        let (prev_r, new_r) = if junk { (junk_r.clone(), junk_r) } else { (self.auth_reveal(d - 1, &prev_head), self.auth_reveal(d, &new_head)) };
         let sign_at = |block: &SealedBlock| -> Vec<Vec<u8>> {
             (0..HEAD_CHUNKS).map(|j| sign_tx(&Keypair::from_secret_key(SECP256K1, &block.attestation.secrets[HEAD_CHUNK_START + j]), &tx, &prev, &leaf)).collect()
         };
         let sigs_new = sign_at(&self.sealed[&d]);
         let sigs_prev = sign_at(&self.sealed[&(d - 1)]);
-        let w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig);
+        let w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &prev_r, &new_r);
         Ok((w, pair_sig))
+    }
+
+    /// The depth-`d` refutation carrying the entry's own junk preimages —
+    /// the PS9 negative, assembled but never broadcast.
+    fn refute_junk(&mut self, d: u32) -> Result<Transaction> {
+        let label = format!("absent_{d}/refute");
+        let (mut w, _psig) = self.readout_witness(&label, d, true)?;
+        let msig = {
+            let p = self.skel(&label);
+            sign_tx(self.payment(instance::mover_at(d)), &p.tx, &p.prevouts[0], &p.leaf.script)
+        };
+        w.push(msig);
+        Ok(self.dry(&label, w))
     }
 
     /// The mover's refutation at depth `d`: the readout parks the attested
@@ -391,7 +444,7 @@ impl PosGame {
     fn refute(&mut self, d: u32) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
         let mover = instance::mover_at(d);
         let label = format!("absent_{d}/refute");
-        let (mut w, pair_sig) = self.readout_witness(&label, d)?;
+        let (mut w, pair_sig) = self.readout_witness(&label, d, false)?;
         let msig = {
             let p = self.skel(&label);
             sign_tx(self.payment(mover), &p.tx, &p.prevouts[0], &p.leaf.script)
@@ -407,7 +460,7 @@ impl PosGame {
     fn exhibit(&mut self, d: u32) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
         let mover = instance::mover_at(d);
         let label = format!("exhibit_{d}");
-        let (mut w, pair_sig) = self.readout_witness(&label, d)?;
+        let (mut w, pair_sig) = self.readout_witness(&label, d, false)?;
         let [sig_h, sig_u] = self.sigs22(&label);
         w.push(sig_h);
         w.push(sig_u);
@@ -694,7 +747,7 @@ pub const PS8: Scenario = Scenario {
         g.wait_to(g.mature_at(5))?;
         // the baseless exhibit, assembled honestly otherwise: sigs, readout,
         // pair reveal all valid — the open state is what fails
-        let (w, _psig) = g.readout_witness("exhibit_5", 5)?;
+        let (w, _psig) = g.readout_witness("exhibit_5", 5, false)?;
         let [sig_h, sig_u] = g.sigs22("exhibit_5");
         let mut w = w;
         w.push(sig_h);
@@ -713,6 +766,27 @@ pub const PS8: Scenario = Scenario {
     },
 };
 
+pub const PS9: Scenario = Scenario {
+    id: "PS9",
+    title: "PoS graph: a garbage-signed attested entry is not a move (D41)",
+    expected: "the venue seals slot 2 with a legal-looking entry whose preimages open no key; the hub declines to adopt it (its state key never signed that state); a refutation carrying the entry's own junk preimages fails the authorship fragment; the absence claim and the timeout split pay the user",
+    run: || {
+        let mut g = PosGame::open(sat(POT))?;
+        g.play(4)?; // X@4, really signed
+        g.play_garbage_signed(0)?; // slot 2: O@0 claimed, junk signature
+        g.wait_to(g.mature_at(2))?;
+        let (h, _, _) = g.claim_absent(2)?;
+        let bad = g.refute_junk(2)?;
+        ensure!(g.rt.test_accept(&bad).is_err(), "junk preimages must fail the authorship fragment");
+        g.say("the hub declines to adopt the junk entry (adopting would be its move); no refutation exists — the absence claim resolves".to_string());
+        g.wait_to(h + u32::from(g.params.delta) + 1)?;
+        g.split(2, "absent_2", 0, None)?;
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/split_UserWins".to_string()], "{:?}", roles(&g));
+        ensure!(g.balances() == [sat(POT - 2_000), sat(0)], "{:?}", g.balances());
+        Ok(report(&g, &PS9))
+    },
+};
+
 pub fn scenarios() -> Vec<Scenario> {
-    vec![PS1, PS2, PS3, PS4, PS5, PS6A, PS6B, PS7, PS8]
+    vec![PS1, PS2, PS3, PS4, PS5, PS6A, PS6B, PS7, PS8, PS9]
 }

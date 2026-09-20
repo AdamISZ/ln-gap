@@ -61,9 +61,12 @@ pub fn wots_wire(sig: &WotsSig) -> Vec<Vec<u8>> {
 
 /// The refutation leaf for one slot: `table` is the slot's epoch table (only
 /// the head chunks' points are embedded in the script) and `key` the mover's
-/// refute key for the slot.
-pub fn refute_leaf(table: &EpochTable, key: &WotsPublic) -> ScriptBuf {
-    let mut b = Builder::new().wots_verify(key);
+/// refute key for the slot. `gate` runs on the register file right after the
+/// re-commitment verify — the graph always passes the D41 authorship
+/// fragment (the mover's state-key preimages checked against the parked
+/// head's claimed state).
+pub fn refute_leaf(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Builder) -> Builder) -> ScriptBuf {
+    let mut b = gate(Builder::new().wots_verify(key));
     // the re-committed digits to the altstack (d_0 comes out first)
     for _ in 0..HEAD_CHUNKS {
         b = b.push_opcode(OP_TOALTSTACK);
@@ -79,17 +82,27 @@ pub fn refute_leaf(table: &EpochTable, key: &WotsPublic) -> ScriptBuf {
 /// The refutation witness, wire order. `head_sigs[j]` must sign the spend's
 /// sighash under the point for the attested value of head chunk `j`
 /// (= header chunk `HEAD_CHUNK_START + j`); `sig` re-commits the head.
+/// `preimages` is the mover's state-key reveal over the head's claimed
+/// state (the D41 authorship block, consumed bit-ascending off the block
+/// top: `preimages[0]` LAST in wire order).
 pub fn refute_witness(
     head: &[u8; HEAD_BYTES],
     head_sigs: &[Vec<u8>],
     sig: &WotsSig,
+    preimages: &lngap_lamport::Reveal,
 ) -> Vec<Vec<u8>> {
     assert_eq!(head_sigs.len(), HEAD_CHUNKS);
+    assert_eq!(preimages.preimages.len(), lngap_factchain::slot::STATE_BITS);
     let mut w = Vec::with_capacity(2 * HEAD_CHUNKS + 2 * sig.params.total_digits() as usize);
     // chunk items, descending: head chunk 0's pair ends up consumed first
     for j in (0..HEAD_CHUNKS).rev() {
         w.push(head_sigs[j].clone());
         w.push(snum(chunk_value(head, j)));
+    }
+    // the authorship block: bit-20's preimage first, bit-0's last (the
+    // fragment consumes bit 0 off the block top)
+    for i in (0..lngap_factchain::slot::STATE_BITS).rev() {
+        w.push(preimages.preimages[i].to_vec());
     }
     w.extend(wots_wire(sig));
     w
@@ -116,19 +129,8 @@ pub fn pair_key(entropy: [u8; 32]) -> WotsSecret {
     WotsSecret::from_entropy(pair_params(), entropy)
 }
 
-/// The two-head refutation leaf: the pair key's re-commitment of
-/// `head(d-1) || head(d)`, each of the 192 re-committed digits tied
-/// nibble-equal to the readout of that head's chunks — the prior head's
-/// under slot `d-1`'s table, the new head's under slot `d`'s. The heads'
-/// slots are bound by the epoch tables (epoch = slot); no covenant needed.
-/// Witness (consumption order): the pair reveal, then the prior head's
-/// chunk items ascending, then the new head's.
-pub fn refute_leaf_pair(table_prev: &EpochTable, table: &EpochTable, key: &WotsPublic) -> ScriptBuf {
-    refute_leaf_pair_gated(table_prev, table, key, |b| b)
-}
-
-/// [`refute_leaf_pair`] with a GATE over the re-committed digits: `gate`
-/// runs on the register file (the 192 message digits, digit `j` at stack
+/// The two-head refutation leaf, with a GATE over the re-committed digits:
+/// `gate` runs on the register file (the 192 message digits, digit `j` at stack
 /// depth `191 - j`) right after the re-commitment verify, before the
 /// readout ties the digits to the attestation. The conjunction is
 /// order-free — a digit that fails the readout was never the attested
@@ -164,12 +166,17 @@ pub fn refute_leaf_pair_gated(
 /// (descending), then the PRIOR head's (descending — its chunk 0 is consumed
 /// first after the reveal), then the pair reveal. `sigs_prev`/`sigs` must
 /// sign the spend's sighash under the two slots' tables' head-chunk points.
+/// Between the chunk items and the reveal: the authorship blocks (D41) —
+/// the PRIOR head's preimages block first, then the NEW head's (each
+/// bit-20 first, bit-0 last), so the fragment checks the NEW head first.
 pub fn refute_witness_pair(
     head_prev: &[u8; HEAD_BYTES],
     sigs_prev: &[Vec<u8>],
     head: &[u8; HEAD_BYTES],
     sigs: &[Vec<u8>],
     sig: &WotsSig,
+    preimages_prev: &lngap_lamport::Reveal,
+    preimages: &lngap_lamport::Reveal,
 ) -> Vec<Vec<u8>> {
     assert_eq!(sigs_prev.len(), HEAD_CHUNKS);
     assert_eq!(sigs.len(), HEAD_CHUNKS);
@@ -181,6 +188,12 @@ pub fn refute_witness_pair(
     for j in (0..HEAD_CHUNKS).rev() {
         w.push(sigs_prev[j].clone());
         w.push(snum(chunk_value(head_prev, j)));
+    }
+    for i in (0..lngap_factchain::slot::STATE_BITS).rev() {
+        w.push(preimages_prev.preimages[i].to_vec());
+    }
+    for i in (0..lngap_factchain::slot::STATE_BITS).rev() {
+        w.push(preimages.preimages[i].to_vec());
     }
     w.extend(wots_wire(sig));
     w

@@ -336,9 +336,11 @@ fn terminal_gate_admits_only_terminal_states() {
 
 #[test]
 fn exhibit_leaf_runs_only_when_terminal() {
-    // the FULL exhibit leaf: the gated two-head readout over the two slots'
-    // epoch tables (the tables' points are embedded; the possession sigs
-    // are dummies under the sim's CHECKSIG stub)
+    // the FULL exhibit leaf: the D41 authorship fragments (per parked head,
+    // the mover's state-key preimages checked against the claimed state)
+    // plus the gated two-head readout over the two slots' epoch tables (the
+    // tables' points are embedded; the possession sigs are dummies under
+    // the sim's CHECKSIG stub)
     let att = lngap_ec_wots::Attester::new([7u8; 32]);
     let t4 = att.epoch_table(4, lngap_pos::HEADER_CHUNKS);
     let t5 = att.epoch_table(5, lngap_pos::HEADER_CHUNKS);
@@ -346,14 +348,24 @@ fn exhibit_leaf_runs_only_when_terminal() {
     let l = Layout::at(5, 1, Role::User);
     let prior = after(&[0, 3, 1, 4]);
     let p_head = head(1, 4, 1, 4, state_u32(&prior));
+    // the per-head state keys (fixture): the prior head is the hub's move
+    // at depth 4, the new the user's at depth 5
+    let sk_prev = lngap_lamport::SecretKey::from_entropy(lngap_factchain::slot::STATE_BITS, [0x52; 32]);
+    let sk_new = lngap_lamport::SecretKey::from_entropy(lngap_factchain::slot::STATE_BITS, [0x51; 32]);
+    let reveal_prev = sk_prev.reveal_bits(&lngap_lamport::uint_to_bits(state_u32(&prior), lngap_factchain::slot::STATE_BITS)).unwrap();
     let sigs: Vec<Vec<u8>> = (0..refute::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     for (b, terminal) in [(play(&prior, 2).unwrap(), true), (play(&prior, 8).unwrap(), false)] {
         let n_head = head(1, 5, 0, 2, state_u32(&b));
         let mut msg = p_head.to_vec();
         msg.extend_from_slice(&n_head);
         let sig = key.sign(&msg).unwrap();
-        let leaf = refute::refute_leaf_pair_gated(&t4, &t5, &key.public(), |bd| ttt::terminal_gate_fragment(bd, l.file, l.new));
-        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&p_head, &sigs, &n_head, &sigs, &sig));
+        let reveal_new = sk_new.reveal_bits(&lngap_lamport::uint_to_bits(state_u32(&b), lngap_factchain::slot::STATE_BITS)).unwrap();
+        let leaf = refute::refute_leaf_pair_gated(&t4, &t5, &key.public(), |bd| {
+            let bd = ttt::authorship_fragment(bd, l.file, l.new, &sk_new.public());
+            let bd = ttt::authorship_fragment(bd, l.file, 0, &sk_prev.public());
+            ttt::terminal_gate_fragment(bd, l.file, l.new)
+        });
+        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&p_head, &sigs, &n_head, &sigs, &sig, &reveal_prev, &reveal_new));
         assert_eq!(res.is_ok(), terminal, "the exhibit leaf must admit exactly the terminal state");
     }
 }

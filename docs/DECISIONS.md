@@ -930,7 +930,8 @@ exhibit is a terminal resolution — equivocation is a forfeit.
   entry is a claim, D31's analogue — the equiv leaf does NOT cover it:
   garbage sigs open no key, so no equivocation), party policies (actually
   signing venue entries with the state key is policy, not graph), the
-  S-port.
+  S-port. [Superseded 2026-09-20: D41 closes the sig hole by authorship
+  at refute time; no sig exhibit is needed.]
 
 ## D40. The PS scenario suite: the PoS graph measured against the PoW baselines
 
@@ -954,22 +955,23 @@ Measured (pot 200k sat, 1k sat pre-signed fee per tx):
 |---|---|---|
 | PS1 cooperative | 0, 0 | S1: 0 |
 | PS2/PS3 stall at 2 / mid-game | 2, **414** | S2A/S2B: 3, ~4.5-5.0k (incl. commitment) |
-| PS4 loser refuses fold | 2, **39,488** (exhibit 34.4k + split 5.0k) | S3: 3, ~5.0k |
-| PS5 spurious absence claim | 3, **39,598** (claim 214 + refute 34.4k + checked split) | S4/S6: bisection, 44.2k in 20 txs (S6), ~75k worst |
-| PS6A illegal move off the refutation | 3, **39,528** (disprove 4.9k) | S5A: 3, ~6.6k |
-| PS6B fabricated terminal off the exhibit | 2, **39,539** (disprove status_mismatch) | no PoW analogue |
-| PS7 double-played slot (venue reorg + mover double-sign) | 1, **233** | NONE (the GAME_PROTOCOL 5.4 gap; closed by D39) |
+| PS4 loser refuses fold | 2, **40,680** (exhibit 35.7k + split 5.0k) | S3: 3, ~5.0k |
+| PS5 spurious absence claim | 3, **40,789** (claim 214 + refute 35.6k + checked split) | S4/S6: bisection, 44.2k in 20 txs (S6), ~75k worst |
+| PS6A illegal move off the refutation | 3, **40,720** (disprove 4.9k) | S5A: 3, ~6.6k |
+| PS6B fabricated terminal off the exhibit | 2, **40,739** (disprove status_mismatch) | no PoW analogue |
+| PS7 double-played slot (venue reorg + mover double-sign) | 1, **241** (the csv branch) | NONE (the GAME_PROTOCOL 5.4 gap; closed by D39) |
 | PS8 baseless terminal exhibit | gate rejects, never confirms; then 2, 414 | S7: pays the framed party |
-| PS9 garbage-signed attested entry | DEFERRED (the PoS sig exhibit, D39's list) | S8/S9 |
+| PS9 garbage-signed attested entry | 2, **414** (no refutation exists; D41) | S8/S9 |
 
 The honest summary of the trade: the PoS graph moves cost from the
 VALIDITY leg to the PUBLICATION leg. The common failure (a bare stall) is
 ~10x cheaper than the PoW stall graph (414 vB vs ~4.5 kvB — the thin
 claim carries no venue proof). Anything that runs the EC-OTS readout
-(the refutation or the terminal exhibit) pays a fixed ~34.4 kvB — heavier
+(the refutation or the terminal exhibit) pays a fixed ~35.6 kvB with the
+D41 authorship fragment — heavier
 than the PoW stall proof's ~6.1 kvB — but the bisection is gone entirely:
 the spurious/fabricated-claim classes that cost 44-75 kvB and ~20
-transactions in the PoW graph now cost 39.6 kvB in 3 transactions, and
+transactions in the PoW graph now cost ~40.7 kvB in 3 transactions, and
 the exhibitor of a false claim is never waiting out nine rounds. PS8's
 asymmetry with S7 is real and acceptable: the PoS exhibit is not a claim
 (it parks attested data or aborts), so a baseless one has no on-chain
@@ -979,13 +981,90 @@ The pre-signed graph is 282 skeletons per game (73 PoW stall ttt / 129
 with D31 / 354 chess). PS9's deferral is the last open resolution gap:
 a garbage-signed attested entry counts as held and resolves as if valid
 unless its claimed transition trips a disprove — the sig exhibit (D31's
-PoS analogue) remains to build.
+PoS analogue) remains to build. [Superseded 2026-09-20: D41 — authorship
+at refute time closes the hole; PS9 runs.]
 
-Deferred, unchanged: the PoS sig exhibit, the party policies (this
-suite's choreography is the specification they implement), the chess PoS
-port (PC1-PC9 need the chess disprove family over the parked pair — the
-12-predicate set was never ported; that is the next increment, not a
-scenario-suite item), the S-port.
+Deferred, unchanged: the PoS sig exhibit [superseded by D41], the party
+policies (this suite's choreography is the specification they implement),
+the chess PoS port (PC1-PC9 need the chess disprove family over the
+parked pair — the 12-predicate set was never ported; that is the next
+increment, not a scenario-suite item), the S-port.
+
+## D41. Authorship at refute time: the garbage-signature hole closed without a sig exhibit
+
+Date: 2026-09-20. Context: D40's PS9 gap (a garbage-signed attested entry
+counts as a held slot); D31 (the PoW sig exhibit); the D34/D36/D39/D40
+deferral ("the PoS sig exhibit needs the entry-tail binding"). Design
+conversation with the user, same day.
+
+The deferred plan was a PoS port of D31: a claim exhibiting that an
+attested entry's preimages don't open the mover's key. Two design
+failures surfaced in discussion. (1) Pot-flip-on-garbage is unsound: a
+junk entry's author is UNATTRIBUTABLE on-chain (the head fields are bare
+bytes — the venue, the mover, or anyone can have written them), so
+punishing the refuter over junk can be manufactured against an innocent
+Bob (junk fills his slot; he refutes and is "wrong", or stays silent and
+forfeits by absence — robbed either way). (2) The user's reframe: the
+refutation is an EXISTENCE claim — Bob chooses which attested entry to
+stand behind — so over a publication WINDOW junk is routed around (play
+a later slot) and the only punishable case is a refutation over junk Bob
+chose to exhibit.
+
+The resolution that ships: authorship at refute time, no window needed.
+The refutation and the terminal exhibit carry, per parked head, an
+AUTHORSHIP FRAGMENT: the witness presents the 21 preimages of that head's
+mover's depth-`d` state key, and the script checks each opens its bit of
+the head's claimed state (per-bit `hash160` against the key's BitCommit
+constants, the bit values read off the parked register file). The check
+binds the mover to the ATTESTED state (the parked head's state bits), not
+to the originally published preimages — and that is what makes it
+complete: "standing behind a head" now requires the mover's key over the
+head's state, which IS playing the move. Consequences:
+
+- The adoption channel collapses into play: the venue can no longer hand
+  Bob a head he costlessly adopts; adopting requires his signature over
+  its state, i.e. he authored the move. The transition's legality is the
+  disprove family's, as before.
+- The junk-block dies: a garbage-signed entry holding Bob's slot supports
+  no refutation (nobody can present the authorship of its state except
+  its author; Bob won't), so the absence claim proceeds — without any
+  pot-flip judgment on unattributable junk. The judgment stays "the slot
+  is empty", the resolution is the absence path's.
+- The D39 interlock: if Bob DID sign a different depth-`d` state (his
+  real move, dropped by a substituting venue), adopting the attested
+  head's state is a second signature under the state key — equivocation
+  evidence, `equiv_{d}_{i}` pays the victim. So honest Bob never adopts
+  a substitute; collusion needs Bob-never-played, where adoption is play.
+- No baseless variant exists: the evidence is the attested head's own
+  claimed state bits; a well-signed entry's refutation always passes
+  (idempotent re-reveal of the same bits). S7/S9's framed-party class
+  does not arise — there is no claim to be baseless about.
+
+The residual, explicitly accepted as an economic argument and NOT fixed
+here: venue substitution/omission against an honest Bob who DID play —
+the venue drops his real entry and seals junk; Bob can't refute the
+junk's state without equivocating, so the absence path resolves against
+him although he moved. Nothing attested exists to exhibit, so no leaf can
+help; the venue's bond must price it (the priced-censorship line of
+GAME_PROTOCOL.md section 5 item 2).
+
+The window direction (existence-over-a-publication-window per move) is
+recorded, not built: it additionally makes junk routable-around and
+stiffens substitution resistance, at the cost of a variable-position
+pair readout (per-window-slot leaf families or witness-selected slots)
+and window-length finality delay per move. The sig hole did not need it.
+
+Supersedes the "PoS sig exhibit" deferral (D34/D36/D39/D40's lists): the
+entry-tail binding is unnecessary — no format change, no head-layout
+change, no digest, no n4bit recomputation, no bisection. Measured on
+regtest: the pair refutation is 35,623 vB (from 34,436), the terminal
+exhibit 35,719/35,722 (from 34,503/34,505), the depth-1 refutation 17,914
+(from 17,329) — the fragment is ~1.2 kvB per readout path. PS9 runs in
+the suite: a garbage-signed attested entry admits no refutation (the
+junk-preimage witness is rejected on-chain) and the absence claim
+resolves (414 vB). Chess note for the port: the same fragment over
+SIGNED_BITS = 336 covers move||state (chess's move is signed); ~6.7 KB
+of witness per head — heavier, fine.
 
 ## TODO
 
