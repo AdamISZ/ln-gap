@@ -653,6 +653,31 @@ only move-in-isolation checks like out-of-range — the graph is not yet
 safe against occupied-cell claims); the PoS sig exhibit (D31's analogue
 needs the entry-tail binding); the party policies and the S1-S9 port.
 
+## D35. The two-head resolution: two readouts for the PoC; digest re-derivation the plan-only long-term form
+
+Date: 2026-09-19. Context: D34's deferral; resolves the pos-factchain
+plan's open question 5.1. Locked by the user the same day.
+
+Move legality is a predicate on (state, move, state'); slot d's
+attested head carries only (move, state') — the prior state is slot
+d-1's head — so the refutation stage must present BOTH heads before
+the prior-state predicates (cell_occupied_i, not_on_turn, the
+board-mismatch leaves) can exist on the PoS graph. Resolution: option
+(a) for the PoC — two independent readouts (slots d-1 and d), ~30
+kvB, no new machinery, the pair bound by the chain's own
+prev-linkage; step 4b builds it together with the per-depth
+refute+code key plumbing (two parked heads = two re-commitments under
+per-slot keys). Option (c) — attest a 20-byte digest (40 chunks) and
+re-derive the head in Script with the D29 n4bit flat-round machinery —
+is the agreed LONGER-TERM form: the motivation is not refutation
+weight but flexibility (other games' states may be too large to
+attest whole); side effect, the 40-chunk statements shrink the
+plan-5.3 epoch tables ~2.4x. (c) is PLAN ONLY: it pulls the
+flat-round machinery and the absorb choreography into the refutation
+path and is not to be started with the PoC. Option (b) (a
+venue-attested 192-chunk per-slot transition statement) remains only
+if slot attestations want to be self-contained for other consumers.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
