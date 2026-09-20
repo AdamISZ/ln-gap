@@ -164,3 +164,61 @@ pub fn slash_leaf(table: &EpochTable, j: usize, v: u8, v2: u8) -> ScriptBuf {
 pub fn slash_witness_args(sig_v: Vec<u8>, sig_v2: Vec<u8>) -> Vec<Vec<u8>> {
     vec![sig_v2, sig_v]
 }
+
+/// The equivocation slash leaf, witness-parameterized form (D38): ONE leaf
+/// per chunk position — the two values arrive in the witness — where
+/// [`slash_leaf`] hardcodes a (v, v2) pair per leaf (120 leaves per chunk).
+/// Two possession proofs under two DIFFERENT points at position `j` of this
+/// epoch: possible only if the attester attested two values there, i.e.
+/// equivocated on the epoch's message. (Two distinct fixed-length messages
+/// differ at some chunk, so the chunk-level rule is complete for
+/// message-level equivocation; and signing the SAME value twice opens the
+/// same point — the `v != v2` check keeps that harmless.)
+///
+/// Witness (wire order, bottom first): `sig2 v2 sig1 v1` — v1 on top; the
+/// sigs sign the spend's sighash under the points for v1 and v2.
+pub fn slash_leaf_any(table: &EpochTable, j: usize) -> ScriptBuf {
+    assert!(j < table.chunks);
+    let mut b = Builder::new();
+    for pt in &table.points[j] {
+        b = b.push_slice(pt.serialize());
+    }
+    // stack enters [sig2, v2, sig1, v1, S_0..S_15]: v1 at depth 16, sig1 at 17
+    b = b
+        .push_int(16)
+        .push_opcode(OP_PICK) // copy v1
+        .push_int(15)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_SUB) // 15 - v1
+        .push_opcode(OP_PICK) // select S_{v1}
+        .push_int(18)
+        .push_opcode(OP_ROLL) // sig1 to the top
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_CHECKSIGVERIFY); // abort unless sig1 verifies under S_{v1}
+    // now [sig2, v2, v1, S_0..S_15]: v2 at depth 17, sig2 at 18
+    b = b
+        .push_int(17)
+        .push_opcode(OP_PICK) // copy v2
+        .push_int(15)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_SUB) // 15 - v2
+        .push_opcode(OP_PICK) // select S_{v2}
+        .push_int(19)
+        .push_opcode(OP_ROLL) // sig2 to the top
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_CHECKSIGVERIFY); // abort unless sig2 verifies under S_{v2}
+    // now [v2, v1, S_0..S_15]
+    for _ in 0..8 {
+        b = b.push_opcode(OP_2DROP);
+    }
+    // [v2, v1]: the two values must differ
+    b.push_opcode(OP_NUMNOTEQUAL).push_opcode(OP_VERIFY).push_int(1).into_script()
+}
+
+/// Witness args for [`slash_leaf_any`], wire order (bottom first).
+/// `sig1` / `sig2` sign the spend's sighash under the points for values
+/// `v1` / `v2` respectively.
+pub fn slash_any_witness(sig1: Vec<u8>, v1: u8, sig2: Vec<u8>, v2: u8) -> Vec<Vec<u8>> {
+    assert!(v1 < 16 && v2 < 16 && v1 != v2);
+    vec![sig2, crate::snum(v2), sig1, crate::snum(v1)]
+}

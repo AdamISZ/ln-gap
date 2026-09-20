@@ -815,6 +815,66 @@ by `settle`'s R(empty board)).
   everything else honest; the loser holds no depth-`d` refute key and
   cannot exhibit at all.
 
+## D38. The validator bond: slash pair + the fixed-R key-leak burn
+
+Date: 2026-09-20. Context: pos-factchain plan step 5.
+
+- The bond (`lngap-pos/src/bond.rs`) is a single UTXO, script-only (NUMS
+  internal key — no unilateral keyspend, so the venue cannot yank the
+  stake to race a slash), with three spend families: `reclaim` (the
+  validator's key + CLTV to the covered range's end plus a challenge
+  window — the bond outlives the attestations it secures), `burn`
+  (hash160 mirror of the attester's group SECRET, committed at setup via
+  `Attester::burn_mirror`), and `slash_{slot}_{j}` — one witness-
+  parameterized possession-pair leaf per (covered slot, chunk position)
+  (`slash_leaf_any`, new in lngap-ec-wots: the two values arrive in the
+  witness, so one leaf per chunk, not 120 hardcoded (v, v2) pairs). The
+  covered slots' epoch tables are embedded as leaf constants — the venue
+  registry is build-time data, the same discipline as the game graphs.
+- The slash rule's semantics, pinned after a mid-build design pass: the
+  trigger is two DIFFERENT values opened at one (slot, chunk). Complete
+  for message-level equivocation by pigeonhole (two distinct 96-byte
+  headers differ at some chunk); sound because signing the SAME value
+  twice opens the same point — the leaf's v != v2 check makes the
+  no-equivocation case unprovable-as-evidence, and deterministic per-
+  statement secrets make honest re-attestation byte-identical.
+- The burn path is real only under the fixed-R nonce discipline, now a
+  variant on the attester (`Attester::new_fixed_r`, `PosMiner::
+  new_fixed_r`): one nonce per (epoch, CHUNK) shared across the chunk's
+  sixteen values, so a second value at a chunk is Schnorr nonce reuse
+  and the group key falls out of s - s' = (e - e') * x. The extraction
+  (`extract_group_key`, with `scalar_inverse` — Fermat inversion built
+  only from libsecp256k1's mul_tweak, no hand-rolled field math) runs
+  off-chain from public data (the chunk's nonce point is venue registry
+  data; Script could not do the division anyway — no CSFS — hence the
+  hash mirror). CORRECTION to EC_WOTS.md section 6's phrasing: "ONE
+  nonce R per slot" cannot mean one R for the whole slot — that leaks
+  the key on the first HONEST attestation (s_j - s_k across two chunks).
+  The granularity is per (slot, chunk). A leak forces group-key
+  rotation (the key is public; it could forge all future slots) — the
+  burn is deliberately the heavier path; the slash pair is always on
+  and discipline-independent.
+- Regtest (tests/pos_bond.rs — a self-contained fixture, NOT a harness
+  world: no channel is involved): the venue seals slot 1 carrying X@4,
+  equivocates with a second attested header carrying X@0 (the client
+  names it `Observation::Equivocation`); the watcher slashes at the
+  first differing chunk — 343 vB, pays the watcher — and burns a second
+  bond instance — 143 vB, the value to an OP_RETURN output (the bounty
+  variant, paying the slasher, is one line different; "burn" is the
+  plan's word and the stricter statement). Reclaim: rejected before
+  expiry, mines after — 187 vB. Negatives all rejected: same-value
+  "evidence" (the v != v2 gate), a sig under the wrong value, a wrong
+  burn preimage. Extraction unit tests in ec-wots (inverse roundtrip,
+  the leak, the default discipline's non-leak).
+- Scope, per the step: the bond itself and the enforcement leaves.
+  Deliberately deferred: the watcher/validator plumbing (who watches
+  `PosClient::observe`, who files the spend), the rolling-bond cadence
+  for an unbounded venue (the PoC bond covers a bounded slot range —
+  the amortization question is the epoch-registry one already open),
+  and the FROST deployment's mirror artifact (a quorum must produce
+  hash160(x) at DKG time without revealing x; the PoC's single attester
+  knows its own secret).
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
