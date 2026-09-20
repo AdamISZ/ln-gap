@@ -164,10 +164,13 @@ dispute, and nothing on the stall path.
    at open. A response window needs prover-selected header counts
    (variable-length claims), which remain unbuilt.
 4. **The equivocation leaf** (two reveals under one per-depth key) is not
-   built; a party with mining power could replace its own published move
-   and the counterparty could only prove it holds two conflicting reveals
-   off-chain. VENUE.md §5 lists it as the condition under which the venue
-   may be advisory at all.
+   built ON THIS GRAPH; a party with mining power could replace its own
+   published move and the counterparty could only prove it holds two
+   conflicting reveals off-chain. VENUE.md §5 lists it as the condition
+   under which the venue may be advisory at all. CLOSED on the
+   pos-factchain branch (D39): `equiv_{d}_{i}` leaves on the contract
+   output pay the exhibitor the pot on the exhibit of both preimages of
+   one bit of the mover's per-depth state key.
 5. **`settle` after the deadline pays `R(empty board)`** (the hub, since
    the user forfeits on turn) whatever happened on the venue. A player
    who never claims before the deadline loses; G5's passive user shows it.

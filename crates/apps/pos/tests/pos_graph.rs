@@ -454,7 +454,7 @@ fn wired_pos_graph() {
         let g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut g = g;
         let mut path = Path::open(&rt, &g, &tables);
-        assert_eq!(path.graph.len(), 93, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits)");
+        assert_eq!(path.graph.len(), 282, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 x 21 equivocation exhibits (D39)");
         // slot 1: user's legal X@4; slot 2: hub plays the OCCUPIED cell 4
         rt.mine(1).unwrap();
         path.board = path.venue.seal_move(1, &path.board, 4);

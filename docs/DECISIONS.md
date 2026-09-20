@@ -875,6 +875,63 @@ Date: 2026-09-20. Context: pos-factchain plan step 5.
   hash160(x) at DKG time without revealing x; the PoC's single attester
   knows its own secret).
 
+## D39. The player-equivocation leaf: both preimages of one state-key bit
+
+Date: 2026-09-20. Context: pos-factchain plan step 6; GAME_PROTOCOL.md
+section 5 item 4 (the standing gap), D38 (the venue-side analogue).
+
+The gap, carried since the PoW graph: a mover who gets TWO conflicting
+entries attested at one depth — the reorg-aided double-play — could only
+be proven an equivocator off-chain. The PoS instance now carries the
+per-depth `state` key the entry signature already implies (the venue
+entry's signature IS the reveal of the state bits under the mover's
+depth-`d` Lamport key; 21 bits for tic-tac-toe), plumbed through the
+draft like the refute/code keys (`state_label`, `gen_pos_keys` /
+`collect_keys`, asserted in `PosInstance::new`). The leaf family
+`equiv_{d}_{i}` hangs off the contract output, one leaf per (depth, state
+bit): the 46-byte `LamportExt::equivocation` gadget
+(`hash160_verify(h1)` + `hash160_verify(h0)`) over that key's bit `i`,
+behind the graph's standard 2-of-2 pre-sign, paying the EXHIBITOR (the
+depth's non-mover) the pot. No venue data, no timelock: the evidence is
+self-authenticating — only the key holder can produce a preimage at all,
+and an honest run reveals exactly one per bit (the idempotent
+re-broadcast of the SAME entry after a reorg repeats the same preimages,
+so honest re-publication never opens the leaf). The 2-of-2 pinning makes
+it watchtower-friendly: any holder of the two preimages can broadcast;
+the payout cannot be redirected. One spend of C kills all leaves, so the
+exhibit is a terminal resolution — equivocation is a forfeit.
+
+- The witness is `p0, p1, sig_hub, sig_user` (sig_user on top — the
+  2-of-2 checks FIRST, so the signatures ride on top of the stack, the
+  claim leaf's convention; the first draft of the test got this backwards
+  and the negatives passed vacuously until the positive failed).
+- Sizes: the gadget is 46 bytes of script (the plan's figure, pinned in
+  tests/sim_equiv.rs); the exhibit spend measured 233 vB (user double-
+  played depth 1, exhibitor not the broadcaster) and 241 vB (hub double-
+  played depth 2, the csv branch — the exhibitor IS the broadcaster and
+  waits out `to_self_delay`, the absent-claim discipline). The smallest
+  fraud proof in the graph.
+- Regtest (tests/pos_equiv.rs): both directions mined with real signed
+  entries (the 4b/4c fixtures used dummy sigs — unusable here, the
+  signature IS the evidence); the fork block at the same slot is the
+  step-5 pattern, and the client names it `Observation::Equivocation` —
+  the detection-to-slash link. Negatives all rejected: the same preimage
+  twice, a wrong value, the right preimages under the wrong (depth, bit)
+  leaf, the early broadcaster spend; the honest keystore's refusal to
+  equivocate asserted in both directions (the conflicting reveal is
+  reproduced by hand from the keystore's derivation, the 4b wrong-code
+  pattern).
+- Graph size: 282 pre-signed skeletons per game (93 + 9 x 21). The
+  contract tree's 205 leaves deepen every contract-output spend's control
+  block by ~4 x 32 bytes — ~32 vB on the claim/exhibit paths, accepted.
+- Chess port note: the chess entry signs move||state (SIGNED_BITS = 336),
+  so the family is per (depth, signed bit) — same leaf, more bits.
+- Unchanged deferrals: the PoS sig exhibit (a garbage-signed attested
+  entry is a claim, D31's analogue — the equiv leaf does NOT cover it:
+  garbage sigs open no key, so no equivocation), party policies (actually
+  signing venue entries with the state key is policy, not graph), the
+  S-port.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

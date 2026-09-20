@@ -35,7 +35,9 @@ use lngap_channel::{CommitCtx, Role};
 use lngap_contract::leaves::split_leaf;
 use lngap_contract::Outcome;
 use lngap_ec_wots::EpochTable;
+use lngap_lamport::gadgets::LamportExt;
 use lngap_lamport::winternitz::WotsPublic;
+use lngap_lamport::BitCommit;
 
 use crate::instance::PosDepthKeys;
 use crate::refute;
@@ -106,6 +108,31 @@ pub fn exhibit_leaf(ctx: &CommitCtx, name: &str, l: &Layout, table_prev: &EpochT
         };
     }
     Leaf::new(name.to_string(), b.into_script(), tl)
+}
+
+/// The player-equivocation leaf for one (depth, state bit) on the CONTRACT
+/// output (POS_FACTCHAIN_PLAN.md step 6; D39): the witness exhibits BOTH
+/// preimages of bit `i` of the depth-`d` mover's state key — the 46-byte
+/// `LamportExt::equivocation` gadget (`hash160_verify(h1)` then
+/// `hash160_verify(h0)`). A venue entry's signature IS the reveal of the
+/// state under that key, so both preimages of one bit exist only if the
+/// mover signed two conflicting states at that depth (a reorg-aided
+/// double-play, GAME_PROTOCOL.md section 5 item 4). The proof is
+/// self-authenticating — no venue data, no timelock — and idempotent
+/// re-broadcast of the SAME entry after a reorg reveals the same
+/// preimages, so an honest re-publication never opens the leaf. The spend
+/// is the graph's standard 2-of-2 pre-signed skeleton paying the exhibitor
+/// (the depth's non-mover) the pot; the witness carries
+/// `p0, p1, sig_hub, sig_user` (sig_user on top: the 2-of-2 checks first).
+pub fn equiv_leaf(ctx: &CommitCtx, name: &str, bit: &BitCommit, exhibitor: Role) -> Leaf {
+    let mut b = Builder::new();
+    let mut tl = Timelock::NONE;
+    if exhibitor == ctx.broadcaster && ctx.params.to_self_delay > 0 {
+        b = b.csv(ctx.params.to_self_delay);
+        tl.csv = Some(ctx.params.to_self_delay);
+    }
+    b = ctx.two_of_two_verify(b).equivocation(bit);
+    Leaf::new(name.to_string(), b.push_int(1).into_script(), tl)
 }
 
 /// The tree of the claim output A_d: the mover's refutation plus the

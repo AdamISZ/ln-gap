@@ -12,6 +12,11 @@
 //!   output's self-checking splits.
 //! - `ccode`: the claimant's Lamport outcome-code key, gating the claim
 //!   output's timeout splits.
+//! - `state`: the MOVER's Lamport key over the state bits (D39, plan step
+//!   6). The venue entry's signature is the reveal of the state under this
+//!   key; a mover who double-signs at one depth (a reorg-aided double-play)
+//!   exposes both preimages of every differing bit, and the `equiv_{d}_{i}`
+//!   leaf on the contract output pays the exhibitor the pot.
 //!
 //! The labels are the contract crate's (`key_label(id, seq, depth,
 //! field)`); the exchange mirrors the draft's: each side fills its own keys
@@ -27,10 +32,13 @@
 //!
 //! Deferred from this wiring (the D34/D36 lists): the PoS signature exhibit
 //! (a garbage-signed attested entry is a claim, D31's analogue), the party
-//! policies and the S1-S9 scenario port. The terminal-claim hole (D36) is
-//! CLOSED here: the `exhibit_d` leaves (D37) let the mover of the last move
-//! park the attested terminal pair under a `status != OPEN` gate and split
-//! to R(parked terminal), the checked resolution the thin claim dropped.
+//! policies (including actually signing venue entries with the state key)
+//! and the S1-S9 scenario port. The terminal-claim hole (D36) is CLOSED
+//! here: the `exhibit_d` leaves (D37) let the mover of the last move park
+//! the attested terminal pair under a `status != OPEN` gate and split to
+//! R(parked terminal), the checked resolution the thin claim dropped. The
+//! player-equivocation gap (GAME_PROTOCOL.md section 5 item 4) is CLOSED by
+//! the `equiv_{d}_{i}` leaves (D39).
 
 use anyhow::{bail, ensure, Result};
 use bitcoin::{Amount, OutPoint, TxOut};
@@ -40,6 +48,7 @@ use lngap_channel::{CommitCtx, PresignedTx, Role};
 use lngap_contract::instance::key_label;
 use lngap_contract::{Contract, Outcome, Payout, CODE_BITS};
 use lngap_ec_wots::EpochTable;
+use lngap_factchain::slot::STATE_BITS;
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsPublic;
 use lngap_lamport::PublicKey;
@@ -72,6 +81,10 @@ pub fn code_label(id: u32, seq: u64, d: u32) -> String {
 pub fn ccode_label(id: u32, seq: u64, d: u32) -> String {
     key_label(id, seq, d, "ccode")
 }
+/// The label of the mover's state-signature key at depth `d` (D39).
+pub fn state_label(id: u32, seq: u64, d: u32) -> String {
+    key_label(id, seq, d, "state")
+}
 
 /// What one side contributes at one depth (pubs only; the secrets stay in
 /// its key store).
@@ -80,10 +93,11 @@ pub struct PosKeyOffer {
     pub refute: Option<WotsPublic>,
     pub mover_code: Option<PublicKey>,
     pub claimant_code: Option<PublicKey>,
+    pub state: Option<PublicKey>,
 }
 
-/// Generate `me`'s half of every depth's key set: the refute and code keys
-/// where I move, the claimant code key where I don't.
+/// Generate `me`'s half of every depth's key set: the refute, code and
+/// state keys where I move, the claimant code key where I don't.
 pub fn gen_pos_keys(ks: &mut KeyStore, me: Role, id: u32, seq: u64, max_depth: u32) -> Result<Vec<(u32, PosKeyOffer)>> {
     let mut out = Vec::new();
     for d in 1..=max_depth {
@@ -91,6 +105,7 @@ pub fn gen_pos_keys(ks: &mut KeyStore, me: Role, id: u32, seq: u64, max_depth: u
         if mover_at(d) == me {
             offer.refute = Some(ks.generate_wots(&refute_label(id, seq, d), if d >= 2 { 96 } else { 48 })?);
             offer.mover_code = Some(ks.generate(&code_label(id, seq, d), CODE_BITS)?);
+            offer.state = Some(ks.generate(&state_label(id, seq, d), STATE_BITS)?);
         } else {
             offer.claimant_code = Some(ks.generate(&ccode_label(id, seq, d), CODE_BITS)?);
         }
@@ -106,6 +121,7 @@ pub struct PosDepthKeys {
     pub refute: WotsPublic,
     pub mover_code: PublicKey,
     pub claimant_code: PublicKey,
+    pub state: PublicKey,
 }
 
 /// Merge two sides' offers into the per-depth key sets: each field must
@@ -129,7 +145,8 @@ pub fn collect_keys(mine: &[(u32, PosKeyOffer)], theirs: &[(u32, PosKeyOffer)], 
         };
         let mover_code = take_l(&a.mover_code, &b.mover_code, "mover code")?;
         let claimant_code = take_l(&a.claimant_code, &b.claimant_code, "claimant code")?;
-        out.push(PosDepthKeys { mover, refute, mover_code, claimant_code });
+        let state = take_l(&a.state, &b.state, "state")?;
+        out.push(PosDepthKeys { mover, refute, mover_code, claimant_code, state });
     }
     Ok(out)
 }
@@ -161,6 +178,7 @@ impl PosInstance {
             let want = if d >= 2 { 192 } else { 96 };
             ensure!(k.refute.params.message_digits == want, "depth {d}: refute key size");
             ensure!(k.mover_code.n_bits() == CODE_BITS && k.claimant_code.n_bits() == CODE_BITS, "depth {d}: code key size");
+            ensure!(k.state.n_bits() == STATE_BITS, "depth {d}: state key size");
         }
         let outcomes = Contract::outcomes(&TicTacToe);
         Ok(PosInstance { id, value, deadline, game_id, btc_open, grace, keys, outcomes })
@@ -183,9 +201,11 @@ impl PosInstance {
         &self.keys[(d - 1) as usize]
     }
 
-    /// The contract output's tree: `revoke`, `settle`, `absent_1..=M`, and
+    /// The contract output's tree: `revoke`, `settle`, `absent_1..=M`,
     /// `exhibit_5..=M` (D37 — the terminal-claim hole's fix; the venue's
-    /// epoch tables are embedded in the exhibit leaves' readouts).
+    /// epoch tables are embedded in the exhibit leaves' readouts), and
+    /// `equiv_{d}_{i}` for every depth and state bit (D39 — the
+    /// player-equivocation exhibit).
     pub fn tree(&self, ctx: &CommitCtx, tables: &[EpochTable]) -> Result<TapTree> {
         let mut leaves = vec![ctx.revoke_leaf(), lngap_contract::leaves::settle_leaf(ctx, self.deadline)];
         for d in 1..=self.max_depth() {
@@ -202,6 +222,12 @@ impl PosInstance {
                 &self.depth_keys(d).refute,
                 self.claim_from(d),
             ));
+        }
+        for d in 1..=self.max_depth() {
+            let pk = &self.depth_keys(d).state;
+            for (i, bit) in pk.bits.iter().enumerate() {
+                leaves.push(graph::equiv_leaf(ctx, &format!("equiv_{d}_{i}"), bit, mover_at(d).other()));
+            }
         }
         TapTree::new(leaves)
     }
@@ -283,6 +309,32 @@ impl PosInstance {
                 let leaf = format!("split_{}", o.name);
                 let tx = build_spend(e_op, &e_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, e_prev.value - fee));
                 out.push(PresignedTx::new(format!("{name}/{leaf}"), tx, vec![e_prev.clone()], &e_tree, &leaf, format!("exhibit split at depth {d}: {}", o.name))?);
+            }
+        }
+        // the player-equivocation leaves (D39, plan step 6): the exhibit of
+        // BOTH preimages of one bit of the depth-`d` mover's state key —
+        // possible only if the mover double-signed at that depth — pays the
+        // exhibitor (the non-mover) the pot. The proof is self-authenticating
+        // (no venue data, no timelock); the skeleton is the graph's standard
+        // 2-of-2 pre-sign with the payout pinned to the victim, so any holder
+        // of the two preimages (a watchtower, say) can broadcast it.
+        for d in 1..=self.max_depth() {
+            let exhibitor = mover_at(d).other();
+            for i in 0..STATE_BITS {
+                let name = format!("equiv_{d}_{i}");
+                let tx = build_spend(
+                    outpoint,
+                    &tree0.leaf(&name)?.timelock,
+                    vec![TxOut { value: self.value - fee, script_pubkey: ctx.key(exhibitor).payout_spk.clone() }],
+                );
+                out.push(PresignedTx::new(
+                    name.clone(),
+                    tx,
+                    vec![prevout.clone()],
+                    &tree0,
+                    &name,
+                    format!("player equivocation at depth {d}, state bit {i}: the mover forfeits"),
+                )?);
             }
         }
         Ok(out)
