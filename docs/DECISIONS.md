@@ -932,6 +932,61 @@ exhibit is a terminal resolution — equivocation is a forfeit.
   signing venue entries with the state key is policy, not graph), the
   S-port.
 
+## D40. The PS scenario suite: the PoS graph measured against the PoW baselines
+
+Date: 2026-09-20. Context: pos-factchain plan step 7;
+harness/src/scenarios/pos_stall.rs.
+
+The stall suite's PoS analogues run on regtest with REAL signed venue
+entries (the D39 state key signs every entry; the venue's native check
+verifies it against the claim-native mirror commitments of the same key —
+the draft now carries both commitment forms). No channel wrapper: C is
+funded directly and the graph is played by hand (the party policies stay
+deferred; the force-close commitment, ~240 vB and unchanged by the venue
+swap, is excluded from the tx tables). The suite is registered in
+`scenarios::all()` so `cargo run -p lngap-harness --bin scenarios`
+regenerates SCENARIOS.md with the PS sections; tests/pos_stall.rs wraps
+each in `cargo test`.
+
+Measured (pot 200k sat, 1k sat pre-signed fee per tx):
+
+| scenario | PoS (txs, vB) | PoW analogue (txs, vB) |
+|---|---|---|
+| PS1 cooperative | 0, 0 | S1: 0 |
+| PS2/PS3 stall at 2 / mid-game | 2, **414** | S2A/S2B: 3, ~4.5-5.0k (incl. commitment) |
+| PS4 loser refuses fold | 2, **39,488** (exhibit 34.4k + split 5.0k) | S3: 3, ~5.0k |
+| PS5 spurious absence claim | 3, **39,598** (claim 214 + refute 34.4k + checked split) | S4/S6: bisection, 44.2k in 20 txs (S6), ~75k worst |
+| PS6A illegal move off the refutation | 3, **39,528** (disprove 4.9k) | S5A: 3, ~6.6k |
+| PS6B fabricated terminal off the exhibit | 2, **39,539** (disprove status_mismatch) | no PoW analogue |
+| PS7 double-played slot (venue reorg + mover double-sign) | 1, **233** | NONE (the GAME_PROTOCOL 5.4 gap; closed by D39) |
+| PS8 baseless terminal exhibit | gate rejects, never confirms; then 2, 414 | S7: pays the framed party |
+| PS9 garbage-signed attested entry | DEFERRED (the PoS sig exhibit, D39's list) | S8/S9 |
+
+The honest summary of the trade: the PoS graph moves cost from the
+VALIDITY leg to the PUBLICATION leg. The common failure (a bare stall) is
+~10x cheaper than the PoW stall graph (414 vB vs ~4.5 kvB — the thin
+claim carries no venue proof). Anything that runs the EC-OTS readout
+(the refutation or the terminal exhibit) pays a fixed ~34.4 kvB — heavier
+than the PoW stall proof's ~6.1 kvB — but the bisection is gone entirely:
+the spurious/fabricated-claim classes that cost 44-75 kvB and ~20
+transactions in the PoW graph now cost 39.6 kvB in 3 transactions, and
+the exhibitor of a false claim is never waiting out nine rounds. PS8's
+asymmetry with S7 is real and acceptable: the PoS exhibit is not a claim
+(it parks attested data or aborts), so a baseless one has no on-chain
+footprint to punish — the attacker pays only the failed broadcast.
+
+The pre-signed graph is 282 skeletons per game (73 PoW stall ttt / 129
+with D31 / 354 chess). PS9's deferral is the last open resolution gap:
+a garbage-signed attested entry counts as held and resolves as if valid
+unless its claimed transition trips a disprove — the sig exhibit (D31's
+PoS analogue) remains to build.
+
+Deferred, unchanged: the PoS sig exhibit, the party policies (this
+suite's choreography is the specification they implement), the chess PoS
+port (PC1-PC9 need the chess disprove family over the parked pair — the
+12-predicate set was never ported; that is the next increment, not a
+scenario-suite item), the S-port.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
