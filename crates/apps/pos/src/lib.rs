@@ -28,6 +28,8 @@ use lngap_n4bit::{Digest, DIGEST_BYTES};
 
 pub mod graph;
 pub mod refute;
+pub mod instance;
+pub mod ttt;
 
 /// Attested chunks per header: one per nibble (96 bytes = 192 chunks).
 pub const HEADER_CHUNKS: usize = HEADER_BYTES * 2;

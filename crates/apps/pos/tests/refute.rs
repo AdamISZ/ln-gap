@@ -15,8 +15,7 @@ use lngap_btc::witness::tapscript_witness;
 use lngap_ec_wots::{Attester, EpochTable};
 use lngap_factchain::slot::SlotEntry;
 use lngap_pos::refute::{
-    disprove_leaf_move_range, disprove_witness, refute_key, refute_leaf, refute_witness,
-    HEAD_CHUNK_START, HEAD_CHUNKS,
+    disprove_witness, refute_key, refute_leaf, refute_witness, HEAD_CHUNK_START, HEAD_CHUNKS,
 };
 use lngap_pos::{PosMiner, SealedBlock};
 
@@ -79,8 +78,16 @@ fn refute_and_disprove_on_regtest() {
     let commit_sig = key.sign(&head).unwrap();
     assert_eq!(key.public().verify(&commit_sig).unwrap(), head.to_vec());
 
-    // the trees: the refutation spends into the disprove output (the park)
-    let dis_leaf = disprove_leaf_move_range(&key.public());
+    // the trees: the refutation spends into the disprove output (the park);
+    // the disprove leaf is the ttt family's out-of-range check (depth 1)
+    let dis_leaf = {
+        let l = lngap_pos::ttt::Layout::at(1, 1, lngap_channel::Role::User);
+        let fam = lngap_pos::ttt::disprove_leaves(&l, &key.public());
+        fam.into_iter()
+            .find(|l| l.name == "cell_out_of_range")
+            .unwrap()
+            .script
+    };
     let dis_tree = TapTree::new(vec![Leaf::new("d", dis_leaf.clone(), Timelock::NONE)]).unwrap();
     let ref_leaf = refute_leaf(&table, &key.public());
     let funded = fund(&rt, ref_leaf.clone(), "r");

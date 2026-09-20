@@ -95,36 +95,75 @@ pub fn refute_witness(
     w
 }
 
-/// The follow-on disprove leaf off a refutation output, demonstrating the
-/// park: the tuple arrives as the re-commitment reveal (public once the
-/// refutation spent) and the predicate proves the move was out of range
-/// (`mv` is head byte 4 — digits 8 and 9; legal tic-tac-toe cells are
-/// 0..=8). The real predicates (the twelve chess leaves / the tic-tac-toe
-/// disprove set) land with the contract integration in step 4, reading the
-/// same registers.
-pub fn disprove_leaf_move_range(key: &WotsPublic) -> ScriptBuf {
-    let mut b = Builder::new()
-        .wots_verify(key)
-        // d_j sits at depth 95 - j: d_8 (mv hi) at 87, d_9 (mv lo) at 86
-        .push_int(87)
-        .push_opcode(OP_PICK)
-        .push_opcode(OP_IF)
-        .push_int(1) // a nonzero high nibble is out of range
-        .push_opcode(OP_ELSE)
-        .push_int(86)
-        .push_opcode(OP_PICK)
-        .push_int(8)
-        .push_opcode(OP_GREATERTHAN)
-        .push_opcode(OP_ENDIF)
-        .push_opcode(OP_VERIFY); // only a real illegality passes
-    // the register file is fully read; drop it (cleanstack: one element)
-    for _ in 0..HEAD_CHUNKS / 2 {
-        b = b.push_opcode(OP_2DROP);
+/// The disprove witness: the re-commitment reveal alone.
+pub fn disprove_witness(sig: &WotsSig) -> Vec<Vec<u8>> {
+    wots_wire(sig)
+}
+
+// ----- the two-head refutation (D35, plan 5.1 option (a)) -----
+
+/// The Winternitz parameters of a PAIR refute key: the refutation at depth
+/// `d >= 2` re-commits `head(d-1) || head(d)` (the prior state lives in the
+/// previous slot's head — the tuple (state, move, state') spans two slots).
+pub fn pair_params() -> WotsParams {
+    WotsParams::for_bytes(2 * HEAD_BYTES as u32)
+}
+
+/// A pair refute key from entropy. (In the graph: the mover's, one per
+/// depth, pinned at open; the label-disciplined derivation is in
+/// `crate::instance`.)
+pub fn pair_key(entropy: [u8; 32]) -> WotsSecret {
+    WotsSecret::from_entropy(pair_params(), entropy)
+}
+
+/// The two-head refutation leaf: the pair key's re-commitment of
+/// `head(d-1) || head(d)`, each of the 192 re-committed digits tied
+/// nibble-equal to the readout of that head's chunks — the prior head's
+/// under slot `d-1`'s table, the new head's under slot `d`'s. The heads'
+/// slots are bound by the epoch tables (epoch = slot); no covenant needed.
+/// Witness (consumption order): the pair reveal, then the prior head's
+/// chunk items ascending, then the new head's.
+pub fn refute_leaf_pair(table_prev: &EpochTable, table: &EpochTable, key: &WotsPublic) -> ScriptBuf {
+    let mut b = Builder::new().wots_verify(key);
+    // the re-committed digits to the altstack (d_0 comes out first)
+    for _ in 0..2 * HEAD_CHUNKS {
+        b = b.push_opcode(OP_TOALTSTACK);
+    }
+    // the prior head's chunks tie to digits 0..HEAD_CHUNKS
+    for j in HEAD_CHUNK_START..HEAD_CHUNK_START + HEAD_CHUNKS {
+        b = readout_value_fragment(b, &table_prev.points[j]);
+        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_EQUALVERIFY);
+    }
+    // then the new head's tie to digits HEAD_CHUNKS..
+    for j in HEAD_CHUNK_START..HEAD_CHUNK_START + HEAD_CHUNKS {
+        b = readout_value_fragment(b, &table.points[j]);
+        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_EQUALVERIFY);
     }
     b.push_int(1).into_script()
 }
 
-/// The disprove witness: the re-commitment reveal alone.
-pub fn disprove_witness(sig: &WotsSig) -> Vec<Vec<u8>> {
-    wots_wire(sig)
+/// The two-head refutation witness, wire order: the NEW head's chunk items
+/// (descending), then the PRIOR head's (descending — its chunk 0 is consumed
+/// first after the reveal), then the pair reveal. `sigs_prev`/`sigs` must
+/// sign the spend's sighash under the two slots' tables' head-chunk points.
+pub fn refute_witness_pair(
+    head_prev: &[u8; HEAD_BYTES],
+    sigs_prev: &[Vec<u8>],
+    head: &[u8; HEAD_BYTES],
+    sigs: &[Vec<u8>],
+    sig: &WotsSig,
+) -> Vec<Vec<u8>> {
+    assert_eq!(sigs_prev.len(), HEAD_CHUNKS);
+    assert_eq!(sigs.len(), HEAD_CHUNKS);
+    let mut w = Vec::with_capacity(4 * HEAD_CHUNKS + 2 * sig.params.total_digits() as usize);
+    for j in (0..HEAD_CHUNKS).rev() {
+        w.push(sigs[j].clone());
+        w.push(snum(chunk_value(head, j)));
+    }
+    for j in (0..HEAD_CHUNKS).rev() {
+        w.push(sigs_prev[j].clone());
+        w.push(snum(chunk_value(head_prev, j)));
+    }
+    w.extend(wots_wire(sig));
+    w
 }

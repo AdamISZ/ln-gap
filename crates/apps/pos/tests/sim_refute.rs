@@ -4,10 +4,7 @@
 //! the source of truth for the crypto; this catches stack bugs.
 
 use lngap_ec_wots::Attester;
-use lngap_pos::refute::{
-    disprove_leaf_move_range, disprove_witness, refute_key, refute_leaf, refute_witness,
-    HEAD_CHUNKS,
-};
+use lngap_pos::refute::{pair_key, refute_key, refute_leaf, refute_leaf_pair, refute_witness, refute_witness_pair, HEAD_CHUNKS};
 use lngap_pos::HEADER_CHUNKS;
 
 const DUMMY_SIG: [u8; 64] = [0x30; 64];
@@ -81,23 +78,53 @@ fn refute_rejects_an_out_of_range_value() {
     assert!(lngap_script32::sim::run(leaf.as_script(), w).is_err());
 }
 
-#[test]
-fn disprove_fires_on_an_out_of_range_move() {
-    let key = refute_key([9u8; 32]);
-    let sig = key.sign(&head_with(9)).unwrap();
-    let leaf = disprove_leaf_move_range(&key.public());
-    let end = lngap_script32::sim::run(leaf.as_script(), disprove_witness(&sig))
-        .expect("mv = 9 is illegal: the disprove must run");
-    assert_eq!(end, vec![vec![1]]);
+// ----- the two-head refutation (D35) -----
+
+/// Two slots' tables and their attested heads (mv 4 at slot 1, mv 0 at 2).
+fn pair_setup() -> (
+    lngap_ec_wots::EpochTable,
+    lngap_ec_wots::EpochTable,
+    [u8; 48],
+    [u8; 48],
+) {
+    let att = Attester::new([7u8; 32]);
+    let t1 = att.epoch_table(1, HEADER_CHUNKS);
+    let t2 = att.epoch_table(2, HEADER_CHUNKS);
+    let h1 = head_with(4);
+    let h2 = head_with(0);
+    let hdr1 = header_with(&h1);
+    let mut hdr2 = header_with(&h2);
+    hdr2[88..92].copy_from_slice(&2u32.to_le_bytes());
+    assert!(att.attest(&t1, &hdr1).verify(&t1, &hdr1));
+    assert!(att.attest(&t2, &hdr2).verify(&t2, &hdr2));
+    (t1, t2, h1, h2)
+}
+
+fn pair_msg(h1: &[u8; 48], h2: &[u8; 48]) -> Vec<u8> {
+    let mut m = h1.to_vec();
+    m.extend_from_slice(h2);
+    m
 }
 
 #[test]
-fn disprove_cannot_fire_on_a_legal_move() {
-    let key = refute_key([9u8; 32]);
-    let sig = key.sign(&head_with(5)).unwrap();
-    let leaf = disprove_leaf_move_range(&key.public());
-    assert!(
-        lngap_script32::sim::run(leaf.as_script(), disprove_witness(&sig)).is_err(),
-        "mv = 5 is legal: the predicate must fail at VERIFY"
-    );
+fn refute_pair_runs() {
+    let (t1, t2, h1, h2) = pair_setup();
+    let key = pair_key([9u8; 32]);
+    let sig = key.sign(&pair_msg(&h1, &h2)).unwrap();
+    let leaf = refute_leaf_pair(&t1, &t2, &key.public());
+    let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
+    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness_pair(&h1, &sigs, &h2, &sigs, &sig))
+        .expect("a correct two-head refutation must run");
+    assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1");
+}
+
+#[test]
+fn refute_pair_rejects_a_mismatched_recommitment() {
+    // the pair reveal signs a DIFFERENT prior head than the one read out
+    let (t1, t2, h1, h2) = pair_setup();
+    let key = pair_key([9u8; 32]);
+    let sig = key.sign(&pair_msg(&head_with(5), &h2)).unwrap();
+    let leaf = refute_leaf_pair(&t1, &t2, &key.public());
+    let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
+    assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness_pair(&h1, &sigs, &h2, &sigs, &sig)).is_err());
 }

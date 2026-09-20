@@ -541,6 +541,7 @@ dependencies = [
  "lngap-lamport",
  "lngap-n4bit",
  "lngap-script32",
+ "lngap-tictactoe",
 ]
 
 [[package]]

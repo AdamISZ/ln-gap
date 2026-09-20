@@ -678,6 +678,81 @@ path and is not to be started with the PoC. Option (b) (a
 venue-attested 192-chunk per-slot transition statement) remains only
 if slot attestations want to be self-contained for other consumers.
 
+## D36. The wired PoS absence-claim graph: two-head refutation, per-depth keys, the ttt disprove family
+
+Date: 2026-09-19. Context: pos-factchain plan step 4b; builds D34's leaf
+family out to the wired graph and puts D35's option (a) on regtest.
+
+- The two-head refutation (D35 (a)): at depth `d >= 2` the refutation leaf
+  reads out BOTH slots' heads under the two epochs' tables and the mover
+  re-commits `head(d-1) || head(d)` under a per-depth 96-byte WOTS pair key
+  (`refute_leaf_pair`); depth 1 keeps D33's single-head leaf (the prior is
+  the constant initial board). A head's slot binding is its epoch table
+  (epoch = slot); `wrong_slot` additionally pins each head's word0 to the
+  game's constants, so an empty slot's zero head (or a wrong-depth,
+  wrong-mover entry) is itself disprovable. Measured: the pair refutation
+  is 34,436 vB (leaf ~116 KB script, ~16.6 KB of args — the witness
+  discount is the whole story), the depth-1 refutation 17,329 vB.
+- The disprove family over the parked pair (`lngap_pos::ttt`):
+  `wrong_slot`, `prior_closed`, `not_on_turn`, `cell_out_of_range`,
+  `cell_occupied_0..8`, `board_mismatch_0..8`, `turn_not_flipped`,
+  `status_mismatch` — 24 leaves at depth >= 2, 13 at depth 1 (the
+  constant-prior leaves that can never fire are dropped, the old graph's
+  PriorState::Constant discipline). Each leaf: `wots_verify`, gather the
+  read digits via the altstack, compute, `OP_VERIFY`, drop the register
+  file (cleanstack). Sim: every leaf agrees with its native mirror over
+  legal tuples and each illegal kind, plus a wrong-claim sweep (every
+  illegal transition fires some leaf — tests/sim_ttt.rs). Regtest:
+  `cell_occupied_4` fires at 4,888 vB and nothing fires on a legal tuple;
+  the depth-1 out-of-range disprove is 2,500 vB (leaf 7,312 B). The park
+  covers the whole 96-byte pair — the sigs region included, ready for the
+  deferred sig exhibit. (`code_mismatch` does not port: a PoS refutation
+  carries no code reveal for it to judge. Its job moved into the splits.)
+- The refuted output's mover splits are SELF-CHECKING
+  (`ttt::checked_split_leaf`): CSV `delta + delta'` + 2-of-2 + the code
+  reveal + `wots_verify` of the pair + `code == R(parked new state)`
+  proven in-leaf (`resolution_fragment`). Without it the mover could
+  reveal a false code over a legal parked tuple (no claim-carried code
+  exists to mismatch against); with it a legal refutation resolves to the
+  mover (R of an open state forfeits the claimant) and a false code fails
+  on-chain. Measured: 4,957 vB at depth >= 2, 2,635 vB at depth 1; the
+  wrong-code split is rejected on regtest.
+- The wiring the bare leaf family lacked: `absent_d` is 2-of-2 (plus the
+  broadcaster's `to_self_delay` when the claimant broadcasts) so the claim
+  transaction is pre-signed and the claim output is pinned to the claim
+  tree; the refute leaf is gated by the mover's payment key and its
+  skeleton pre-signed, pinning the refutation's output to the refuted tree
+  — ungated, the refutation could skip the disprove stage by spending the
+  claim output elsewhere (safe for a legal move, theft for an illegal
+  one). Disprove spends are the claimant's runtime transactions (the
+  witness is the refutation's published reveal; nothing to pre-sign). 73
+  pre-signed skeletons per game (settle + 9 x (claim, refute, 3 + 3
+  splits)) — the same count as the PoW stall graph's 73, coincidentally.
+- The key plumbing (the party layer's existing discipline): per depth,
+  `refute` (WOTS, 96 B from depth 2 / 48 B at depth 1, the mover's) and
+  `code` / `ccode` (Lamport CODE_BITS, the mover's / the claimant's),
+  generated in each party's KeyStore under `key_label(id, seq, d, field)`
+  and exchanged as public offers (`gen_pos_keys` / `collect_keys`); both
+  parties build the same `PosInstance` (the test asserts identical trees —
+  the draft's agreement property). The instance lives in lngap-pos, not as
+  a `GraphShape` variant in the shared contract crate: the PoS shape has
+  no claim keys and no bisection, and the venue's epoch tables are
+  build-time data, not wire data. Plan 5.4 answered affirmatively: the
+  refutation assembles at dispute time with no counterparty round (the
+  chunk signatures are computable from the venue's published attestation;
+  the mover's gate signature was pre-signed at setup).
+- Discovered, NOT fixed (deliberate): the terminal-claim hole. A claim at
+  a depth past the game's natural end ("mover didn't move at d" — true,
+  the game was already over) splits to a false outcome, because the thin
+  claim parks no state and no legal refutation exists. The fix is a
+  mover-side terminal-exhibit leaf family — the same two-head machinery
+  over the last move's slot pair with a `status != OPEN` gate, splits
+  paying R(parked terminal state) — flagged for the next increment. Until
+  then a contract left open past the game's end is unsafe against the
+  loser. (The old stall claim read the state off the chain and computed R;
+  the thin PoS claim dropped exactly that, and this is the price.)
+- Unchanged from D34: the timeout split is 193 vB.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
