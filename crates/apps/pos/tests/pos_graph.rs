@@ -15,7 +15,14 @@
 //! - C: hub never published at slot 2: no refutation exists and the user's
 //!   timeout split pays after `delta`;
 //! - D: the depth-1 single-head form (user's legal opening stands, hub's
-//!   disprove fails, the user's checked split pays UserWins).
+//!   disprove fails, the user's checked split pays UserWins);
+//! - E: the game is OVER (the user's win at depth 5): the winner's
+//!   terminal exhibit (D37) parks the attested pair under the
+//!   `status != OPEN` gate and the self-checking split pays
+//!   R(parked terminal) = UserWins — the 4b graph's terminal-claim hole
+//!   closed;
+//! - F: the gate rejects an OPEN state (no mid-game self-claim), and a
+//!   drawn game at depth 9 — unresolvable in 4b's graph — pays Draw.
 //!
 //! The venue entries' state signatures are dummies here — a garbage-signed
 //! attested entry is the PoS sig exhibit's case (deferred, D36); the leaves
@@ -123,8 +130,8 @@ struct Game {
 impl Game {
     /// The draft: both sides generate their per-depth keys under the
     /// standard labels, exchange the public offers, and build the SAME
-    /// instance (checked: both trees agree).
-    fn open(btc_open: u32, deadline: u32, value: Amount) -> Game {
+    /// instance (checked: both trees agree, exhibits included).
+    fn open(btc_open: u32, deadline: u32, value: Amount, tables: &[EpochTable]) -> Game {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("pos4b/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("pos4b/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("pos4b/user-ks"));
@@ -150,8 +157,8 @@ impl Game {
         // the draft's agreement property: both sides build the same output
         let ctx = g.ctx();
         assert_eq!(
-            g.inst.tree(&ctx).unwrap().script_pubkey(),
-            inst_h.tree(&ctx).unwrap().script_pubkey(),
+            g.inst.tree(&ctx, tables).unwrap().script_pubkey(),
+            inst_h.tree(&ctx, tables).unwrap().script_pubkey(),
             "both parties must build the same contract output"
         );
         g
@@ -201,7 +208,7 @@ struct Path {
 impl Path {
     fn open(rt: &Regtest, g: &Game, tables: &[EpochTable]) -> Path {
         let ctx = g.ctx();
-        let tree = g.inst.tree(&ctx).unwrap();
+        let tree = g.inst.tree(&ctx, tables).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
         let graph = g.inst.graph(&ctx, c_op, &c_prev, tables).unwrap();
         Path { venue: Venue::new(), graph, board: Board::empty(), pair_sig: None }
@@ -261,6 +268,53 @@ impl Path {
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
     }
 
+    /// The exhibit witness at depth `d` (the gated pair readout plus both
+    /// parties' signatures), WITHOUT broadcasting — the open-state gate
+    /// negative needs it dry.
+    fn exhibit_witness(&mut self, g: &mut Game, d: u32) -> Vec<Vec<u8>> {
+        let p = skel(&self.graph, &format!("exhibit_{d}"));
+        let tx = &p.tx;
+        let c_prev = &p.prevouts[0];
+        let new_head = self.venue.head(d);
+        let prev_head = self.venue.head(d - 1);
+        let mut msg = prev_head.to_vec();
+        msg.extend_from_slice(&new_head);
+        let pair_sig = {
+            let (mover_ks, _) = g.keys_of(instance::mover_at(d));
+            mover_ks.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap()
+        };
+        self.pair_sig = Some(pair_sig.clone());
+        let new_block = &self.venue.sealed[&d];
+        let prev_block = &self.venue.sealed[&(d - 1)];
+        let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
+            .map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], tx, c_prev, &p.leaf.script))
+            .collect();
+        let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
+            .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, c_prev, &p.leaf.script))
+            .collect();
+        let mut w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig);
+        let sig_u = sign_tx(&g.user.payment, tx, c_prev, &p.leaf.script);
+        let sig_h = sign_tx(&g.hub.payment, tx, c_prev, &p.leaf.script);
+        w.push(sig_h);
+        w.push(sig_u);
+        w
+    }
+
+    /// The winner's terminal exhibit at depth `d` (D37): the gated two-head
+    /// readout of slots `d-1` and `d` under the depth-`d` refute key, on
+    /// the pre-signed 2-of-2 skeleton spending the CONTRACT output (its
+    /// output is pinned to the refuted tree of depth `d`). Returns E's
+    /// (outpoint, prevout).
+    fn exhibit(&mut self, rt: &Regtest, g: &mut Game, d: u32) -> (OutPoint, TxOut) {
+        let w = self.exhibit_witness(g, d);
+        let p = skel(&self.graph, &format!("exhibit_{d}"));
+        let mut tx = p.tx.clone();
+        tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
+        rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the exhibit at depth {d} must mine: {e}"));
+        println!("REGTEST 4c: terminal exhibit at depth {d}: {} vB", tx.vsize());
+        (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
+    }
+
     /// The claimant's disprove spend over the parked tuple (built at
     /// runtime — the claimant's own money claim; the pair reveal is copied
     /// from the refutation's published witness). Caller mines or rejects.
@@ -307,14 +361,30 @@ impl Path {
         self.checked_witness_with(g, d, code, &reveal)
     }
 
+    /// A self-checking split witness off an EXHIBIT output (the exhibit
+    /// output's tree IS the refuted tree of depth `d`; the skeletons are
+    /// labelled `exhibit_d/…`).
+    fn exhibit_checked_witness(&self, g: &mut Game, d: u32, code: u8) -> Vec<Vec<u8>> {
+        let reveal = g
+            .keys_of(instance::mover_at(d))
+            .0
+            .reveal_uint(&instance::code_label(CONTRACT_ID, 1, d), u32::from(code))
+            .unwrap();
+        self.checked_witness_at(g, &format!("exhibit_{d}"), code, &reveal)
+    }
+
     /// As [`Path::checked_witness`], with an explicitly supplied code
     /// reveal (for the adversarial wrong-code negative: the honest
     /// keystore's one-time reveal discipline refuses to equivocate).
     fn checked_witness_with(&self, g: &Game, d: u32, code: u8, reveal: &lngap_lamport::Reveal) -> Vec<Vec<u8>> {
-        let p = skel(&self.graph, &format!("absent_{d}/refuted/split_{}", self.outcome_name(code)));
+        self.checked_witness_at(g, &format!("absent_{d}/refuted"), code, reveal)
+    }
+
+    fn checked_witness_at(&self, g: &Game, base: &str, code: u8, reveal: &lngap_lamport::Reveal) -> Vec<Vec<u8>> {
+        let p = skel(&self.graph, &format!("{base}/split_{}", self.outcome_name(code)));
         let sig_u = sign_tx(&g.user.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
-        ttt::checked_split_witness(sig_u, sig_h, &reveal, self.pair_sig.as_ref().expect("the refutation went first"))
+        ttt::checked_split_witness(sig_u, sig_h, reveal, self.pair_sig.as_ref().expect("the refutation/exhibit went first"))
     }
 
     fn outcome_name(&self, code: u8) -> &'static str {
@@ -381,10 +451,10 @@ fn wired_pos_graph() {
 
     // ================= path A: an illegal (occupied-cell) move is killed ==
     {
-        let g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value);
+        let g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut g = g;
         let mut path = Path::open(&rt, &g, &tables);
-        assert_eq!(path.graph.len(), 73, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits)");
+        assert_eq!(path.graph.len(), 93, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits)");
         // slot 1: user's legal X@4; slot 2: hub plays the OCCUPIED cell 4
         rt.mine(1).unwrap();
         path.board = path.venue.seal_move(1, &path.board, 4);
@@ -411,7 +481,7 @@ fn wired_pos_graph() {
 
     // ================= path B: a legal refutation stands =================
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut path = Path::open(&rt, &g, &tables);
         rt.mine(1).unwrap();
         path.board = path.venue.seal_move(1, &path.board, 4);
@@ -438,7 +508,7 @@ fn wired_pos_graph() {
 
     // ================= path C: a real stall pays the claimant ============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut path = Path::open(&rt, &g, &tables);
         rt.mine(1).unwrap();
         path.board = path.venue.seal_move(1, &path.board, 4);
@@ -455,7 +525,7 @@ fn wired_pos_graph() {
 
     // ================= path D: the depth-1 single-head form ==============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut path = Path::open(&rt, &g, &tables);
         rt.mine(1).unwrap();
         path.board = path.venue.seal_move(1, &path.board, 4); // legal opening
@@ -473,5 +543,82 @@ fn wired_pos_graph() {
         let w = path.checked_witness(&mut g, 1, 0);
         let tx = run(&rt, skel(&path.graph, "absent_1/refuted/split_UserWins"), w);
         println!("REGTEST 4b: checked split (depth 1): {} vB", tx.vsize());
+    }
+
+    // ============ path E: the terminal exhibit pays the winner (D37) ====
+    {
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut path = Path::open(&rt, &g, &tables);
+        // the winning line: X@0, O@3, X@1, O@4, X@2 — the top row,
+        // terminal at depth 5 with the user the last mover
+        for (i, mv) in [0u8, 3, 1, 4, 2].into_iter().enumerate() {
+            rt.mine(1).unwrap();
+            path.board = path.venue.seal_move(i as u32 + 1, &path.board, mv);
+        }
+        assert!(TicTacToe.turn(&path.board).is_none(), "the line must be terminal at depth 5");
+        // the loser cannot exhibit: the depth-5 refute key is the user's,
+        // never generated in the hub's keystore
+        assert!(
+            g.hub_ks.sign_wots(&instance::refute_label(CONTRACT_ID, 1, 5), &[0u8; 96]).is_err(),
+            "the hub holds no depth-5 refute key"
+        );
+        // past the window, the winner exhibits: the parked pair is the
+        // attested terminal tuple
+        let need = g.inst.claim_from(5).saturating_sub(rt.height().unwrap()) + 1;
+        rt.mine(u64::from(need)).unwrap();
+        let (e_op, e_prev) = path.exhibit(&rt, &mut g, 5);
+        // no disprove fires on the legal terminal move
+        rt.mine(u64::from(g.params.delta) + 1).unwrap();
+        for leaf in ["disprove_wrong_slot", "disprove_status_mismatch", "disprove_board_mismatch_2"] {
+            let bad = path.disprove(&rt, &g, 5, e_op, &e_prev, leaf);
+            assert!(rt.test_accept(&bad).is_err(), "{leaf} must not fire on the exhibited terminal move");
+        }
+        // the split pays R(parked terminal) = UserWins — a false code fails
+        rt.mine(u64::from(g.params.delta_prime) + 1).unwrap();
+        let w = path.checked_witness_at(&g, "exhibit_5", 1, &adversarial_code_reveal(5, 1)); // claims HubWins
+        let bad = dry(skel(&path.graph, "exhibit_5/split_HubWins"), w);
+        assert!(rt.test_accept(&bad).is_err(), "R(parked terminal) = UserWins; the HubWins code must fail");
+        let w = path.exhibit_checked_witness(&mut g, 5, 0);
+        let tx = run(&rt, skel(&path.graph, "exhibit_5/split_UserWins"), w);
+        println!("REGTEST 4c: exhibit split (win at 5): {} vB", tx.vsize());
+    }
+
+    // ============ path F: the gate rejects open states; a draw pays =====
+    {
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut path = Path::open(&rt, &g, &tables);
+        // the drawn line XOX/XOO/OXX: 0,1,3,4,2 then 5,7,6,8
+        for (i, mv) in [0u8, 1, 3, 4, 2].into_iter().enumerate() {
+            rt.mine(1).unwrap();
+            path.board = path.venue.seal_move(i as u32 + 1, &path.board, mv);
+        }
+        assert!(TicTacToe.turn(&path.board).is_some(), "the board must still be OPEN at depth 5");
+        // the gate: the exhibit leaf rejects an OPEN parked state even
+        // though the readout and both signatures are honest — no mid-game
+        // self-claim
+        let need = g.inst.claim_from(5).saturating_sub(rt.height().unwrap()) + 1;
+        rt.mine(u64::from(need)).unwrap();
+        let w = path.exhibit_witness(&mut g, 5);
+        let bad = dry(skel(&path.graph, "exhibit_5"), w);
+        assert!(rt.test_accept(&bad).is_err(), "the status gate must reject an open state");
+        // play on to the draw at depth 9 — the case 4b's graph could not
+        // resolve at all
+        for (i, mv) in [5u8, 7, 6, 8].into_iter().enumerate() {
+            rt.mine(1).unwrap();
+            path.board = path.venue.seal_move(6 + i as u32, &path.board, mv);
+        }
+        assert!(TicTacToe.turn(&path.board).is_none(), "the line must be a draw at depth 9");
+        let need = g.inst.claim_from(9).saturating_sub(rt.height().unwrap()) + 1;
+        rt.mine(u64::from(need)).unwrap();
+        let (e_op, e_prev) = path.exhibit(&rt, &mut g, 9);
+        rt.mine(u64::from(g.params.delta) + 1).unwrap();
+        for leaf in ["disprove_wrong_slot", "disprove_status_mismatch", "disprove_board_mismatch_8"] {
+            let bad = path.disprove(&rt, &g, 9, e_op, &e_prev, leaf);
+            assert!(rt.test_accept(&bad).is_err(), "{leaf} must not fire on the drawn terminal move");
+        }
+        rt.mine(u64::from(g.params.delta_prime) + 1).unwrap();
+        let w = path.exhibit_checked_witness(&mut g, 9, 2);
+        let tx = run(&rt, skel(&path.graph, "exhibit_9/split_Draw"), w);
+        println!("REGTEST 4c: exhibit split (draw at 9): {} vB", tx.vsize());
     }
 }

@@ -297,6 +297,67 @@ fn resolution_fragment_checks_the_code() {
     }
 }
 
+// ----- the terminal exhibit's status gate (D37) -----
+
+/// Dummy 64-byte sigs for the readout's possession proofs: the simulator's
+/// CHECKSIG stub pops both elements and continues (sim_refute.rs's
+/// discipline); the WOTS re-commitment work runs for real.
+const DUMMY_SIG: [u8; 64] = [0x30; 64];
+
+#[test]
+fn terminal_gate_admits_only_terminal_states() {
+    // the gate fragment over the pair file (the readout follows it in the
+    // real leaf; here the file is dropped instead): runs iff
+    // status(new) != OPEN
+    let sk = pair_key([9u8; 32]);
+    let l = Layout::at(5, 1, Role::User);
+    let prior = after(&[0, 3, 1, 4]); // X@0, O@3, X@1, O@4 — user on turn
+    let p_head = head(1, 4, 1, 4, state_u32(&prior));
+    let cases: Vec<(Board, bool)> = vec![
+        (play(&prior, 2).unwrap(), true),            // X@2 completes the top row
+        (after(&[0, 1, 3, 4, 2, 5, 7, 6, 8]), true), // the drawn board
+        (play(&prior, 8).unwrap(), false),           // still open
+        (after(&[4]), false),                        // one move in
+    ];
+    for (b, terminal) in cases {
+        let n_head = head(1, 5, 0, 2, state_u32(&b)); // the mv field is not the gate's business
+        let mut msg = p_head.to_vec();
+        msg.extend_from_slice(&n_head);
+        let sig = sk.sign(&msg).unwrap();
+        let mut bd = lngap_lamport::winternitz::WotsExt::wots_verify(bitcoin::script::Builder::new(), &sk.public());
+        bd = ttt::terminal_gate_fragment(bd, l.file, l.new);
+        for _ in 0..l.file / 2 {
+            bd = bd.push_opcode(bitcoin::opcodes::all::OP_2DROP);
+        }
+        let res = lngap_script32::sim::run(bd.push_int(1).into_script().as_script(), refute::disprove_witness(&sig));
+        assert_eq!(res.is_ok(), terminal, "the gate must admit exactly the terminal states: {b:?}");
+    }
+}
+
+#[test]
+fn exhibit_leaf_runs_only_when_terminal() {
+    // the FULL exhibit leaf: the gated two-head readout over the two slots'
+    // epoch tables (the tables' points are embedded; the possession sigs
+    // are dummies under the sim's CHECKSIG stub)
+    let att = lngap_ec_wots::Attester::new([7u8; 32]);
+    let t4 = att.epoch_table(4, lngap_pos::HEADER_CHUNKS);
+    let t5 = att.epoch_table(5, lngap_pos::HEADER_CHUNKS);
+    let key = pair_key([9u8; 32]);
+    let l = Layout::at(5, 1, Role::User);
+    let prior = after(&[0, 3, 1, 4]);
+    let p_head = head(1, 4, 1, 4, state_u32(&prior));
+    let sigs: Vec<Vec<u8>> = (0..refute::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
+    for (b, terminal) in [(play(&prior, 2).unwrap(), true), (play(&prior, 8).unwrap(), false)] {
+        let n_head = head(1, 5, 0, 2, state_u32(&b));
+        let mut msg = p_head.to_vec();
+        msg.extend_from_slice(&n_head);
+        let sig = key.sign(&msg).unwrap();
+        let leaf = refute::refute_leaf_pair_gated(&t4, &t5, &key.public(), |bd| ttt::terminal_gate_fragment(bd, l.file, l.new));
+        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&p_head, &sigs, &n_head, &sigs, &sig));
+        assert_eq!(res.is_ok(), terminal, "the exhibit leaf must admit exactly the terminal state");
+    }
+}
+
 /// Sizes for the record (no chain needed).
 #[test]
 fn print_family_sizes() {

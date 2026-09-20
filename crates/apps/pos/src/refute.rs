@@ -124,7 +124,25 @@ pub fn pair_key(entropy: [u8; 32]) -> WotsSecret {
 /// Witness (consumption order): the pair reveal, then the prior head's
 /// chunk items ascending, then the new head's.
 pub fn refute_leaf_pair(table_prev: &EpochTable, table: &EpochTable, key: &WotsPublic) -> ScriptBuf {
-    let mut b = Builder::new().wots_verify(key);
+    refute_leaf_pair_gated(table_prev, table, key, |b| b)
+}
+
+/// [`refute_leaf_pair`] with a GATE over the re-committed digits: `gate`
+/// runs on the register file (the 192 message digits, digit `j` at stack
+/// depth `191 - j`) right after the re-commitment verify, before the
+/// readout ties the digits to the attestation. The conjunction is
+/// order-free — a digit that fails the readout was never the attested
+/// value — so the gate's verdict over the file is a verdict over the
+/// attested pair. (The terminal exhibit, D37: the gate is
+/// `status != OPEN` on the new head, so the leaf fires only on a finished
+/// game.)
+pub fn refute_leaf_pair_gated(
+    table_prev: &EpochTable,
+    table: &EpochTable,
+    key: &WotsPublic,
+    gate: impl FnOnce(Builder) -> Builder,
+) -> ScriptBuf {
+    let mut b = gate(Builder::new().wots_verify(key));
     // the re-committed digits to the altstack (d_0 comes out first)
     for _ in 0..2 * HEAD_CHUNKS {
         b = b.push_opcode(OP_TOALTSTACK);

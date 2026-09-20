@@ -753,6 +753,68 @@ family out to the wired graph and puts D35's option (a) on regtest.
   the thin PoS claim dropped exactly that, and this is the price.)
 - Unchanged from D34: the timeout split is 193 vB.
 
+## D37. The terminal exhibit closes the terminal-claim hole: R(s) back on the claim path
+
+Date: 2026-09-20. Context: pos-factchain plan step 4c; closes D36's last
+bullet (the hole: a claim at a depth past the game's natural end is
+vacuously TRUE and splits to a false outcome — the thin claim parks no
+state and no legal refutation exists — and a game ending at the last depth
+had no honest initiating leaf at all, so a loser refusing to fold was paid
+by `settle`'s R(empty board)).
+
+- The fix restores R(s) to the claim path, which the PoW stall graph had
+  all along (its claim revealed R(s_d) and computed it in-leaf; the thin
+  PoS claim dropped exactly that). Per depth `d` in `5..=max_depth`
+  (`MIN_EXHIBIT_DEPTH`; tic-tac-toe cannot be terminal before move 5 — the
+  never-fire-trim discipline), the contract output carries `exhibit_d`:
+  the mover of move `d` — the last mover, never the loser in these games —
+  exhibits the attested pair `head(d-1) || head(d)` under the depth-`d`
+  REFUTE key, with a `status != OPEN` gate on the register file
+  (`ttt::terminal_gate_fragment`: two bit picks off the file, ~40 bytes).
+  The exhibit output's tree IS the refuted tree verbatim: the disprove
+  family guards the exhibited move's legality, then the self-checking
+  splits pay R(parked terminal state).
+- The gate is load-bearing, not decorative: without it the exhibit fires
+  on any attested OPEN state and R(open) pays the mover who just moved — a
+  mid-game self-claim button the disprove family cannot see (the exhibited
+  move is legal). With it, terminality is read off the state itself, so a
+  closure rule of any complexity (checkmate, stalemate, move limits) comes
+  through the same two bits; the leaf never models when the game ended.
+- The exhibit REUSES the depth-`d` refute key rather than taking a new
+  label: both leaves bind the same two epoch tables, so the signed message
+  is provably the same 96 bytes, and the contexts are mutually exclusive
+  (the contract output is spent once — `exhibit_d` on it, `refute` under
+  `absent_d`'s output). WOTS one-time-ness is preserved by construction;
+  the draft exchange is unchanged.
+- Wiring: `exhibit_d` is `absent_d`'s shape — CLTV to after slot `d`'s
+  window, 2-of-2 (pre-signed, output pinned to the exhibit tree) — not the
+  refute leaf's mover-gated shape. 93 pre-signed skeletons per game (73 +
+  5 x (exhibit + 3 splits)). The exhibit assembles at dispute time with no
+  counterparty round (the plan-5.4 property carries over).
+- Design rejection worth recording: the cheaper "pad" fix (extend the
+  absence family one depth past the natural end — `prior_closed` already
+  judges a post-terminal move, so a defended illegal move-10 refutation
+  dies) was REJECTED once the exhibit exists: the pad keeps an
+  UNCHECKED-code claim path alive past the checked one, and for a draw at
+  9 the last mover strictly prefers it (claim at 10, assert "I win", full
+  pot over the draw half; the loser has no counter — nothing parked to
+  disprove, and the exhibit key is the winner's). The pad's only
+  independent value was initiation in a world without the exhibit. (For
+  games with INTERIOR draws — chess stalemate at `t` — the last mover
+  could still prefer a vacuous dead-depth claim at `t+1`; the close is a
+  DUAL exhibit, a second leaf keyed by the non-mover over the same pair,
+  so either party can force the checked terminal resolution first. ttt
+  needs none of it: draws land only at max depth. Flagged for the chess
+  port, not built.)
+- Sim: the gate fragment admits exactly the terminal states (win at 5,
+  the draw, and two open boards), and the full exhibit leaf runs only
+  when terminal (tests/sim_ttt.rs). Regtest: the exhibit at depth 5 is
+  34,503 vB and pays UserWins (the wrong-code split rejected in-leaf); the
+  exhibit at depth 9 (the drawn board) is 34,505 vB and pays Draw, 5,001
+  vB the split; the open-state exhibit is rejected by the gate with
+  everything else honest; the loser holds no depth-`d` refute key and
+  cannot exhibit at all.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

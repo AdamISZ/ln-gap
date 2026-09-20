@@ -27,7 +27,10 @@
 //!
 //! Deferred from this wiring (the D34/D36 lists): the PoS signature exhibit
 //! (a garbage-signed attested entry is a claim, D31's analogue), the party
-//! policies and the S1-S9 scenario port, and the terminal-claim hole (D36).
+//! policies and the S1-S9 scenario port. The terminal-claim hole (D36) is
+//! CLOSED here: the `exhibit_d` leaves (D37) let the mover of the last move
+//! park the attested terminal pair under a `status != OPEN` gate and split
+//! to R(parked terminal), the checked resolution the thin claim dropped.
 
 use anyhow::{bail, ensure, Result};
 use bitcoin::{Amount, OutPoint, TxOut};
@@ -50,6 +53,12 @@ use crate::ttt::Layout;
 pub fn mover_at(d: u32) -> Role {
     if d % 2 == 1 { Role::User } else { Role::Hub }
 }
+
+/// The first depth tic-tac-toe can be terminal at (the earliest win is
+/// move 5). The terminal-exhibit leaves exist from here to `max_depth`
+/// (D37) — shallower exhibits could never pass the status gate, the old
+/// graph's never-fire-trim discipline.
+pub const MIN_EXHIBIT_DEPTH: u32 = 5;
 
 /// The label of the mover's refute key at depth `d`.
 pub fn refute_label(id: u32, seq: u64, d: u32) -> String {
@@ -174,11 +183,25 @@ impl PosInstance {
         &self.keys[(d - 1) as usize]
     }
 
-    /// The contract output's tree: `revoke`, `settle`, and `absent_1..=M`.
-    pub fn tree(&self, ctx: &CommitCtx) -> Result<TapTree> {
+    /// The contract output's tree: `revoke`, `settle`, `absent_1..=M`, and
+    /// `exhibit_5..=M` (D37 — the terminal-claim hole's fix; the venue's
+    /// epoch tables are embedded in the exhibit leaves' readouts).
+    pub fn tree(&self, ctx: &CommitCtx, tables: &[EpochTable]) -> Result<TapTree> {
         let mut leaves = vec![ctx.revoke_leaf(), lngap_contract::leaves::settle_leaf(ctx, self.deadline)];
         for d in 1..=self.max_depth() {
             leaves.push(graph::absent_leaf(ctx, &format!("absent_{d}"), mover_at(d).other(), self.claim_from(d)));
+        }
+        for d in MIN_EXHIBIT_DEPTH..=self.max_depth() {
+            let l = self.layout(d);
+            leaves.push(graph::exhibit_leaf(
+                ctx,
+                &format!("exhibit_{d}"),
+                &l,
+                &tables[(d - 1) as usize],
+                &tables[d as usize],
+                &self.depth_keys(d).refute,
+                self.claim_from(d),
+            ));
         }
         TapTree::new(leaves)
     }
@@ -210,12 +233,15 @@ impl PosInstance {
 
     /// The pre-signed skeletons hanging off the contract output: `settle`,
     /// and per depth the absence claim, the refutation, the timeout splits,
-    /// and the self-checking splits (labels `absent_d/…`). The disprove
-    /// spends are the claimant's runtime transactions.
+    /// and the self-checking splits (labels `absent_d/…`); plus per
+    /// TERMINAL depth the exhibit and its self-checking splits (labels
+    /// `exhibit_d/…`, D37 — the exhibit output's tree IS the refuted tree:
+    /// the disprove family, then the splits paying R(parked terminal)).
+    /// The disprove spends are the counterparty's runtime transactions.
     pub fn graph(&self, ctx: &CommitCtx, outpoint: OutPoint, prevout: &TxOut, tables: &[EpochTable]) -> Result<Vec<PresignedTx>> {
         let fee = ctx.params.presign_fee;
         let mut out = Vec::new();
-        let tree0 = self.tree(ctx)?;
+        let tree0 = self.tree(ctx, tables)?;
         let r = Contract::resolution(&TicTacToe, &Board::empty());
         let tx = build_spend(outpoint, &tree0.leaf("settle")?.timelock, self.dist_outputs(ctx, r.payout, self.value - fee));
         out.push(PresignedTx::new("settle", tx, vec![prevout.clone()], &tree0, "settle", format!("settle: R(s) = {}", r.name))?);
@@ -240,6 +266,23 @@ impl PosInstance {
                 let leaf = format!("split_{}", o.name);
                 let tx = build_spend(p_op, &p_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, p_prev.value - fee));
                 out.push(PresignedTx::new(format!("{name}/refuted/{leaf}"), tx, vec![p_prev.clone()], &p_tree, &leaf, format!("split of the refuted output at depth {d}: {}", o.name))?);
+            }
+        }
+        // the terminal exhibits (D37): `exhibit_d` spends the contract
+        // output to the refuted tree of depth `d` (the disprove family
+        // guards the exhibited move's legality; the splits pay R(parked
+        // terminal) — the winner's unilateral terminal claim).
+        for d in MIN_EXHIBIT_DEPTH..=self.max_depth() {
+            let e_tree = self.refuted_tree(ctx, d)?;
+            let name = format!("exhibit_{d}");
+            let tx = build_spend(outpoint, &tree0.leaf(&name)?.timelock, vec![TxOut { value: self.value - fee, script_pubkey: e_tree.script_pubkey() }]);
+            let e_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
+            let e_prev = tx.output[0].clone();
+            out.push(PresignedTx::new(name.clone(), tx, vec![prevout.clone()], &tree0, &name, format!("terminal exhibit at depth {d}"))?);
+            for o in &self.outcomes {
+                let leaf = format!("split_{}", o.name);
+                let tx = build_spend(e_op, &e_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, e_prev.value - fee));
+                out.push(PresignedTx::new(format!("{name}/{leaf}"), tx, vec![e_prev.clone()], &e_tree, &leaf, format!("exhibit split at depth {d}: {}", o.name))?);
             }
         }
         Ok(out)

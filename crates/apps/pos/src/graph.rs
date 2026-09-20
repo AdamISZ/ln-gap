@@ -71,6 +71,43 @@ pub fn refute_leaf(ctx: &CommitCtx, l: &Layout, table_prev: Option<&EpochTable>,
     Leaf::new("refute", b.into_script(), Timelock::NONE)
 }
 
+/// The terminal-exhibit leaf for one depth on the CONTRACT output (D37,
+/// the terminal-claim hole's fix): the mover of move `d` — the winner, or
+/// the last mover of a draw — exhibits the attested pair
+/// `head(d-1) || head(d)` with the status gate on top: the leaf fires only
+/// when the parked new state is TERMINAL, and the exhibit output's tree
+/// (the refuted tree verbatim) pays R(parked terminal). Without the gate
+/// the exhibit would fire on any attested open state, and R(open) pays the
+/// mover who just moved — a mid-game self-claim button the disprove family
+/// cannot see (the exhibited move is legal).
+///
+/// The wiring is `absent_d`'s: CLTV to after slot `d`'s window (the
+/// attestation must exist) plus 2-of-2, so the exhibit transaction is
+/// pre-signed and the exhibit output is pinned to its tree. The key is the
+/// depth-`d` refute key — both leaves bind the same two epoch tables, so
+/// the signed message is provably the same 96 bytes, and the contexts are
+/// mutually exclusive (the contract output is spent once): the WOTS
+/// one-time-ness is preserved by construction. The exhibit exists from
+/// depth 5 (tic-tac-toe cannot be terminal before move 5 — the
+/// never-fire-trim discipline).
+pub fn exhibit_leaf(ctx: &CommitCtx, name: &str, l: &Layout, table_prev: &EpochTable, table: &EpochTable, key: &WotsPublic, claim_from: u32) -> Leaf {
+    let mut b = Builder::new().cltv(claim_from);
+    let mut tl = Timelock::cltv(claim_from);
+    if l.mover == ctx.broadcaster && ctx.params.to_self_delay > 0 {
+        b = b.csv(ctx.params.to_self_delay);
+        tl.csv = Some(ctx.params.to_self_delay);
+    }
+    b = ctx.two_of_two_verify(b);
+    let body = refute::refute_leaf_pair_gated(table_prev, table, key, |b| ttt::terminal_gate_fragment(b, l.file, l.new));
+    for ins in body.instructions() {
+        b = match ins.expect("valid script") {
+            bitcoin::script::Instruction::Op(op) => b.push_opcode(op),
+            bitcoin::script::Instruction::PushBytes(pb) => b.push_slice(pb),
+        };
+    }
+    Leaf::new(name.to_string(), b.into_script(), tl)
+}
+
 /// The tree of the claim output A_d: the mover's refutation plus the
 /// claimant's timeout splits after the dispute window (`delta`), gated by
 /// the claimant's code reveal.

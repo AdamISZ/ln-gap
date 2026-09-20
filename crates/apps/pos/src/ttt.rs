@@ -580,6 +580,39 @@ fn status_mismatch(l: &Layout, key: &WotsPublic) -> PosLeaf {
     }
 }
 
+// ----- the terminal exhibit's status gate (D37) -----
+
+/// The terminal gate on the register file: require the parked NEW head's
+/// status != OPEN (state bits 19..21 — nibble 4 bit 3, nibble 5 bit 0 of
+/// the head's state word; file digits `new_off + 11` / `new_off + 10`).
+/// Runs on the file right after the pair key's `wots_verify`, consuming
+/// only the two picked copies — the file stays intact for the readout
+/// (the conjunction is order-free: a digit that fails the readout was
+/// never the attested value, so the gate judges the attested state).
+///
+/// The gate is what keeps the exhibit from being a mid-game self-claim
+/// button: without it the exhibit fires on any attested OPEN state and
+/// R(open) pays the mover who just moved. Terminality is read off the
+/// state itself — the leaf never models when or why the game ended, so an
+/// arbitrarily complex closure rule (checkmate, stalemate, move limits)
+/// comes through the same two bits.
+pub fn terminal_gate_fragment(mut b: Builder, file: usize, new_off: usize) -> Builder {
+    let d4 = file - 1 - (new_off + 11); // n4's depth in the file
+    let d5 = file - 1 - (new_off + 10); // n5's
+    b = b.push_int(d4 as i64).push_opcode(OP_PICK); // [n4]
+    b = b.push_int((d5 + 1) as i64).push_opcode(OP_PICK); // [n4, n5] (one deeper after the first pick)
+    b = bit0(b); // [n4, b20]
+    b = b.push_opcode(OP_SWAP); // [b20, n4]
+    b = bit3(b); // [b20, b19]
+    b
+        .push_opcode(OP_SWAP) // [b19, b20]
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_ADD) // [b19, 2*b20]
+        .push_opcode(OP_ADD) // [status]
+        .push_opcode(OP_0NOTEQUAL)
+        .push_opcode(OP_VERIFY)
+}
+
 // ----- the self-checking split (the refuted output's mover splits) -----
 
 /// The resolution fragment over the parked file: push R(new state) and
