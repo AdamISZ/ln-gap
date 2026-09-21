@@ -1,5 +1,5 @@
 //! Run every scenario against regtest, print the narrative, and write
-//! docs/SCENARIOS.md. With `--keep`, each scenario's regtest datadir is left
+//! design-notes/SCENARIOS.md. With `--keep`, each scenario's regtest datadir is left
 //! at ./regtest-data/<scenario>/ together with its report (SCENARIO.md); the
 //! directory is wiped at the start of the next run of that scenario, after
 //! stopping any node tools/explorer.sh still has on it.
@@ -57,11 +57,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
     if filter.is_none() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/SCENARIOS.md");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../design-notes/SCENARIOS.md");
         std::fs::write(&path, out)?;
         eprintln!("wrote {}", path.display());
     } else {
-        eprintln!("(single scenario: docs/SCENARIOS.md left untouched; the report is in regtest-data/<id>/SCENARIO.md with --keep)");
+        eprintln!("(single scenario: design-notes/SCENARIOS.md left untouched; the report is in regtest-data/<id>/SCENARIO.md with --keep)");
     }
     if !failures.is_empty() {
         anyhow::bail!("failed scenarios: {failures:?}");

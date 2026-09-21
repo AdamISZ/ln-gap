@@ -1,6 +1,6 @@
 //! Scenario definitions shared by the tests and the runner binary. Each
 //! scenario drives a fresh harness, asserts the plan's expected outcome, and
-//! returns a report for `docs/SCENARIOS.md`.
+//! returns a report for `design-notes/SCENARIOS.md`.
 
 pub mod names;
 pub mod fc_names;

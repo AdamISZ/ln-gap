@@ -196,7 +196,7 @@ next power of 2 for k=2 bisection.
    branch `ttt-venue`): `FactChainShape` carries no prev-link, PoW or
    root predicate, and until D23 the claim's hash was not even the
    chain's, so N8 and N9 only ever showed that a wrong *end state* is
-   caught. The slot claim of docs/GAME_PROTOCOL.md §3 is the full version;
+   caught. The slot claim of design-notes/GAME_PROTOCOL.md §3 is the full version;
    the names contracts still use `FactChainShape`.
 
 6. **Heaviest-chain is structural, not an explicit on-chain check**: N9

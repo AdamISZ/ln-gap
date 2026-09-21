@@ -1,6 +1,6 @@
 //! One channel (user vs hub), one fact-chain miner, one game of chess
 //! played on the fact chain and settled with the stall graph
-//! (`lngap-chess-fc`, docs/DECISIONS.md D28). The user is White and moves
+//! (`lngap-chess-fc`, design-notes/DECISIONS.md D28). The user is White and moves
 //! at odd depths. As in `game_world`, the world mines one Bitcoin block
 //! and one fact-chain block per step; the brains publish moves into their
 //! slots and react to the venue by queueing stall proofs and lie exhibits.

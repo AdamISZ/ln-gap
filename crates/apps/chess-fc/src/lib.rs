@@ -1,5 +1,5 @@
 //! Chess played on the fact chain, settled in a channel with the stall
-//! graph (docs/DECISIONS.md D28; docs/planning/CHESS_ON_FACTCHAIN.md).
+//! graph (design-notes/DECISIONS.md D28; docs/planning/CHESS_ON_FACTCHAIN.md).
 //!
 //! Every move is a fact-chain entry in its own slot: the 8-byte content
 //! (game, depth, mover, move), the 40-byte state after the move

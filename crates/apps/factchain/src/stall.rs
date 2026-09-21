@@ -1,5 +1,5 @@
 //! The depth-independent stall claim (docs/planning/VENUE.md §10c, as
-//! revised while building it, docs/DECISIONS.md D28): "my entry is in slot
+//! revised while building it, design-notes/DECISIONS.md D28): "my entry is in slot
 //! `d`, the counterparty's in slot `d - 1`, and slot `d + 1` holds nothing
 //! of the counterparty's", one program for every depth; and its variant
 //! the LIE EXHIBIT: "the counterparty's entry is in slot `d`, mine in
