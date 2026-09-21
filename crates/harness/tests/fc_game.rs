@@ -1,4 +1,4 @@
-//! Tic-tac-toe on the fact chain: G1–G6 (design-notes/GAME_PROTOCOL.md). The
+//! Tic-tac-toe on the fact chain: G1–G6 (docs/design-notes/GAME_PROTOCOL.md). The
 //! scenarios live in `lngap_harness::scenarios::fc_game`.
 
 use lngap_harness::scenarios::fc_game::*;

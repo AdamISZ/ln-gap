@@ -30,7 +30,7 @@ response is therefore to resign.
 | G7B | the hub answers the timeout claim with its garbage-signed move | `move_3`, refutation `move_4`, `r3/d4/dispute`, 8 rounds, re-commitments, `cpred_oe_s0a`: disproved at the signature predicate |
 
 G2A and G2B are the point: three transactions whether the stall happens at
-move 2 or move 6. The old tic-tac-toe (design-notes/SCENARIOS.md, T-scenarios)
+move 2 or move 6. The old tic-tac-toe (docs/design-notes/SCENARIOS.md, T-scenarios)
 plays the rest of the game on Bitcoin move by move after a force-close.
 
 ## 2. The protocol

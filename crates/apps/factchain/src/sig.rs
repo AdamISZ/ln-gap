@@ -1,4 +1,4 @@
-//! The SIGNATURE EXHIBIT (design-notes/DECISIONS.md D31): "slot `d` holds the
+//! The SIGNATURE EXHIBIT (docs/design-notes/DECISIONS.md D31): "slot `d` holds the
 //! counterparty's entry, but the preimage it publishes for signed bit `i`
 //! does not open the counterparty's depth-`d` commitment for the bit the
 //! entry's head states". One program for every depth and every bit, like

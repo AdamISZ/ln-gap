@@ -1,4 +1,4 @@
-//! Tic-tac-toe on the fact chain: G1–G6 (design-notes/GAME_PROTOCOL.md).
+//! Tic-tac-toe on the fact chain: G1–G6 (docs/design-notes/GAME_PROTOCOL.md).
 //!
 //! The reference game (user X, hub O): 4, 1, 0, 8, 6, 3, 2 → X wins at
 //! move 7 (XOX/OX./X.O).

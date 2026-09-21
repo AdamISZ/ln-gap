@@ -1,7 +1,7 @@
 //! The PoS venue chain: the fact chain's 96-byte header sealed by an EC-OTS
 //! attestation instead of proof of work.
 //!
-//! Design: design-notes/DECISIONS.md D32 and
+//! Design: docs/design-notes/DECISIONS.md D32 and
 //! docs/planning/hermes-research/POS_FACTCHAIN_PLAN.md. The header is
 //! byte-identical to the PoW chain's (`prev(20) root(20) head(48) height(4)
 //! pad(4)`); the `height` field carries the SLOT (epoch = slot). The seal is
