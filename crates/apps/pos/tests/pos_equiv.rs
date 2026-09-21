@@ -1,26 +1,27 @@
-//! Step 6 of POS_FACTCHAIN_PLAN.md (D39): the player-equivocation leaf on
-//! regtest. The venue entry's signature is the mover's reveal of the state
-//! under the per-depth Lamport state key; a mover who plays TWICE at one
+//! Step 6 of POS_FACTCHAIN_PLAN.md (D39, D43): the player-equivocation leaf
+//! on regtest. The venue entry's signature is the mover's WOTS signature of
+//! the state under the per-depth state key; a mover who plays TWICE at one
 //! depth (a reorg-aided double-play — GAME_PROTOCOL.md section 5 item 4,
-//! the standing gap this step closes) exposes both preimages of every state
-//! bit the two states differ in, and the `equiv_{d}_{i}` leaf on the
-//! contract output pays the exhibitor the pot.
+//! the standing gap this step closes) has publicly double-signed, and the
+//! `equiv_{d}` leaf on the contract output — two full state-key signatures
+//! over DIFFERENT signed regions — pays the exhibitor the pot.
 //!
 //! Paths mined (the node enforcing real timelocks):
 //!
 //! - U: the USER double-plays depth 1 — the venue seals X@4 signed for
 //!   real, a fork block at slot 1 carries a hand-reproduced conflicting
-//!   reveal (the honest keystore refuses to equivocate, asserted), the
+//!   signature (the honest keystore refuses to equivocate, asserted), the
 //!   client names the event `Observation::Equivocation`, and the hub
-//!   exhibits a differing bit: `equiv_1_{i}` takes the pot to the hub
+//!   exhibits both signatures: `equiv_1` takes the pot to the hub
 //!   (the no-csv branch: the exhibitor is not the broadcaster);
 //! - H: the HUB double-plays depth 2 — symmetric, and the csv branch (the
 //!   exhibitor IS the broadcaster): the spend is rejected before
 //!   `to_self_delay` and mines after.
 //!
-//! Negatives: the same preimage twice is not evidence, a wrong value is not
-//! a preimage, the right preimages under the WRONG (depth, bit) leaf fail,
-//! and the honest keystore's refusal is asserted in both directions.
+//! Negatives: the same signature twice is not evidence (no digit differs),
+//! a corrupted signature fails the key's verification, the right signatures
+//! under the WRONG depth's leaf fail, and the honest keystore's refusal is
+//! asserted in both directions.
 
 use bitcoin::key::Keypair;
 use bitcoin::{Amount, Transaction};
@@ -34,8 +35,9 @@ use lngap_ec_wots::{Attester, EpochTable};
 use lngap_factchain::slot::{SlotEntry, STATE_BITS};
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
-use lngap_lamport::Reveal;
+use lngap_lamport::winternitz::WotsSig;
 use lngap_pos::instance::{self, PosInstance};
+use lngap_pos::refute;
 use lngap_pos::{PosClient, PosMiner, SealedBlock, HEADER_CHUNKS};
 use lngap_tictactoe::{Board, TicTacToe};
 
@@ -50,6 +52,16 @@ fn state_bits(b: &Board) -> Vec<bool> {
     let v = TicTacToe.state_bits(b);
     assert_eq!(v.len(), STATE_BITS, "the state key covers exactly the state bits");
     v
+}
+
+fn state_u32(b: &Board) -> u32 {
+    lngap_lamport::bits_to_uint(&state_bits(b))
+}
+
+/// The authorship message of an entry carrying `state` (D43: the 3 state
+/// bytes, big-endian — `ttt::auth_message` of the head).
+fn entry_msg(state: u32) -> Vec<u8> {
+    state.to_be_bytes()[1..].to_vec()
 }
 
 /// The venue's epoch tables, published at contract open.
@@ -73,29 +85,29 @@ impl Venue {
         (Venue { miner: PosMiner::new(SEED, g, 0), sealed: Default::default() }, g)
     }
     /// Seal `slot` carrying `mv` from `board`, signed with the mover's real
-    /// state-key reveal from `ks`. Returns the new board and the reveal.
-    fn seal_move_signed(&mut self, slot: u32, board: &Board, mv: u8, ks: &mut KeyStore) -> (Board, Reveal) {
+    /// state-key signature from `ks`. Returns the new board and the sig.
+    fn seal_move_signed(&mut self, slot: u32, board: &Board, mv: u8, ks: &mut KeyStore) -> (Board, WotsSig) {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap();
-        let reveal = ks.reveal_bits(&instance::state_label(CONTRACT_ID, 1, slot), &state_bits(&new)).unwrap();
+        let sig = ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, slot), &entry_msg(state_u32(&new))).unwrap();
         let entry = SlotEntry {
             game_id: GAME_ID,
             depth: slot as u8,
             mover: mover.idx() as u8,
             mv,
-            state: lngap_lamport::bits_to_uint(&state_bits(&new)),
-            sigs: reveal.preimages.clone(),
+            state: state_u32(&new),
+            sigs: sig.hashes.clone(),
         };
         self.miner.submit(entry.encode());
         let (block, table) = self.miner.seal_next(slot).unwrap();
         assert!(block.verify_seal(&table).is_ok());
         self.sealed.insert(slot, block);
-        (new, reveal)
+        (new, sig)
     }
     /// The equivocation: a SECOND sealed block at `slot`, same parent,
     /// carrying a conflicting move whose signature was reproduced by hand
     /// (the honest keystore refuses to produce it). Returns the block.
-    fn fork_move(&self, slot: u32, parent: &lngap_n4bit::Digest, board: &Board, mv: u8, reveal: &Reveal, tables: &[EpochTable]) -> SealedBlock {
+    fn fork_move(&self, slot: u32, parent: &lngap_n4bit::Digest, board: &Board, mv: u8, sig: &WotsSig, tables: &[EpochTable]) -> SealedBlock {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap();
         let entry = SlotEntry {
@@ -103,8 +115,8 @@ impl Venue {
             depth: slot as u8,
             mover: mover.idx() as u8,
             mv,
-            state: lngap_lamport::bits_to_uint(&state_bits(&new)),
-            sigs: reveal.preimages.clone(),
+            state: state_u32(&new),
+            sigs: sig.hashes.clone(),
         }
         .encode();
         let header = Header::new(parent, &entry_root(&entry), &entry_head(&entry), slot);
@@ -113,13 +125,14 @@ impl Venue {
     }
 }
 
-/// A conflicting reveal of the mover's depth-`d` state key, reproduced by
-/// hand from the keystore's derivation because the honest keystore refuses
-/// to equivocate (asserted at each use site).
-fn adversarial_state_reveal(ks_seed_label: &str, d: u32, bits: &[bool]) -> Reveal {
-    let seed = Seed::from_label(ks_seed_label);
-    let sk = lngap_lamport::SecretKey::from_entropy(STATE_BITS, seed.derive_bytes(&format!("lamport/{}", instance::state_label(CONTRACT_ID, 1, d))));
-    sk.reveal_bits(bits).unwrap()
+/// A conflicting signature under the mover's depth-`d` state key,
+/// reproduced by hand from the keystore's derivation because the honest
+/// keystore refuses to equivocate (asserted at each use site).
+fn adversarial_state_sig(ks_seed_label: &str, d: u32, msg: &[u8]) -> WotsSig {
+    let mut ks = KeyStore::new(Seed::from_label(ks_seed_label));
+    let label = instance::state_label(CONTRACT_ID, 1, d);
+    ks.generate_wots(&label, 3).unwrap();
+    ks.sign_wots(&label, msg).unwrap()
 }
 
 /// The two parties, their keystores, and the agreed instance (pos_graph.rs's
@@ -178,27 +191,18 @@ fn skel<'a>(graph: &'a [PresignedTx], label: &str) -> &'a PresignedTx {
 }
 
 /// The equivocation exhibit's witness for the pre-signed skeleton: the two
-/// preimages (bit-1's above bit-0's), then both parties' signatures — the
-/// leaf checks the 2-of-2 first, so `sig_user` rides on top (consumed
-/// first), exactly the claim leaf's convention.
-fn exhibit_witness(g: &Game, p: &PresignedTx, p0: [u8; 20], p1: [u8; 20]) -> Vec<Vec<u8>> {
+/// conflicting state-key signatures in wire order (the first below the
+/// second), then both parties' signatures — the leaf checks the 2-of-2
+/// first, so `sig_user` rides on top (consumed first), exactly the claim
+/// leaf's convention.
+fn exhibit_witness(g: &Game, p: &PresignedTx, sig_a: &WotsSig, sig_b: &WotsSig) -> Vec<Vec<u8>> {
     let sig_u = sign_tx(&g.user.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
     let sig_h = sign_tx(&g.hub.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
-    vec![p0.to_vec(), p1.to_vec(), sig_h, sig_u]
-}
-
-/// The (p0, p1) exhibit of a differing state bit from the two entries'
-/// reveals; asserts the preimages really open the depth key's bit.
-fn differing_bit(inst: &PosInstance, d: u32, board_a: &Board, reveal_a: &Reveal, board_b: &Board, reveal_b: &Reveal) -> (usize, [u8; 20], [u8; 20]) {
-    let bits_a = state_bits(board_a);
-    let bits_b = state_bits(board_b);
-    let i = (0..STATE_BITS).find(|&i| bits_a[i] != bits_b[i]).expect("conflicting states differ at some bit");
-    let (pa, pb) = (reveal_a.preimages[i], reveal_b.preimages[i]);
-    let (p0, p1) = if bits_a[i] { (pb, pa) } else { (pa, pb) };
-    let c = &inst.depth_keys(d).state.bits[i];
-    assert_eq!(lngap_btc::hash160(&p0), c.h0, "p0 must open the bit's h0");
-    assert_eq!(lngap_btc::hash160(&p1), c.h1, "p1 must open the bit's h1");
-    (i, p0, p1)
+    let mut w = refute::wots_wire(sig_a);
+    w.extend(refute::wots_wire(sig_b));
+    w.push(sig_h);
+    w.push(sig_u);
+    w
 }
 
 #[test]
@@ -216,66 +220,66 @@ fn player_equivocation_leaf() {
         let graph = g.inst.graph(&ctx, c_op, &c_prev, &tables).unwrap();
         assert_eq!(
             graph.len(),
-            282,
-            "settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 x 21 equivocation exhibits"
+            102,
+            "settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43)"
         );
         let (venue, gen_digest) = Venue::new();
         let mut venue = venue;
         let mut client = PosClient::from_checkpoint(0, gen_digest);
         // the honest depth-1 move, signed for real: X@4
         rt.mine(1).unwrap();
-        let (board_a, reveal_a) = venue.seal_move_signed(1, &Board::empty(), 4, &mut g.user_ks);
+        let (_board_a, sig_a) = venue.seal_move_signed(1, &Board::empty(), 4, &mut g.user_ks);
         client.verify_and_append(&venue.sealed[&1], &tables[1]).unwrap();
         // the double-play: X@0 from the empty board. The honest keystore
-        // refuses; the conflicting reveal is reproduced by hand.
+        // refuses; the conflicting signature is reproduced by hand.
         let board_b = TicTacToe.transition(&Board::empty(), &0, Role::User).unwrap();
         assert!(
-            g.user_ks.reveal_bits(&instance::state_label(CONTRACT_ID, 1, 1), &state_bits(&board_b)).is_err(),
+            g.user_ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, 1), &entry_msg(state_u32(&board_b))).is_err(),
             "the honest keystore refuses to equivocate"
         );
-        let reveal_b = adversarial_state_reveal("pos6/user-ks", 1, &state_bits(&board_b));
-        let fork = venue.fork_move(1, &gen_digest, &Board::empty(), 0, &reveal_b, &tables);
+        let sig_b = adversarial_state_sig("pos6/user-ks", 1, &entry_msg(state_u32(&board_b)));
+        let fork = venue.fork_move(1, &gen_digest, &Board::empty(), 0, &sig_b, &tables);
         assert!(
             matches!(client.observe(&fork, &tables[1]), Ok(lngap_pos::Observation::Equivocation(_))),
             "the second sealed block at slot 1 is the equivocation"
         );
-        let (i, p0, p1) = differing_bit(&g.inst, 1, &board_a, &reveal_a, &board_b, &reveal_b);
-        let p = skel(&graph, &format!("equiv_1_{i}"));
+        let p = skel(&graph, "equiv_1");
         // the payout is pinned to the VICTIM (the hub) at setup
         assert_eq!(p.tx.output[0].script_pubkey, g.payout_spk_of(Role::Hub), "the exhibit pays the non-mover");
         // negatives, dry (never broadcast; one spend of C comes last):
-        // the same preimage twice is not evidence
+        // the same signature twice is not evidence (no digit differs)
         let bad = {
             let mut t = p.tx.clone();
-            let w = exhibit_witness(&g, p, p0, p0);
+            let w = exhibit_witness(&g, p, &sig_a, &sig_a);
             t.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
             t
         };
-        assert!(rt.test_accept(&bad).is_err(), "the same preimage twice must not pay");
-        // a wrong value is not a preimage
+        assert!(rt.test_accept(&bad).is_err(), "the same signature twice must not pay");
+        // a corrupted signature fails the state key's verification
+        let mut corrupted = sig_a.clone();
+        corrupted.hashes[0] = [0x42; 20];
         let bad = {
             let mut t = p.tx.clone();
-            let w = exhibit_witness(&g, p, [0x42; 20], p1);
+            let w = exhibit_witness(&g, p, &corrupted, &sig_b);
             t.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
             t
         };
-        assert!(rt.test_accept(&bad).is_err(), "a wrong value must not pay");
-        // the right preimages under the WRONG bit's leaf (depth 1, bit != i)
-        let k = (i + 1) % STATE_BITS;
-        let pk = skel(&graph, &format!("equiv_1_{k}"));
+        assert!(rt.test_accept(&bad).is_err(), "a corrupted signature must not pay");
+        // the right signatures under the WRONG depth's leaf (depth 2's key)
+        let pk = skel(&graph, "equiv_2");
         let bad = {
             let mut t = pk.tx.clone();
-            let w = exhibit_witness(&g, pk, p0, p1);
+            let w = exhibit_witness(&g, pk, &sig_a, &sig_b);
             t.input[0].witness = tapscript_witness(&w, &pk.leaf.script, &pk.control_block);
             t
         };
-        assert!(rt.test_accept(&bad).is_err(), "the exhibit is pinned to its (depth, bit) leaf");
+        assert!(rt.test_accept(&bad).is_err(), "the exhibit is pinned to its depth's key");
         // the real exhibit: the hub takes the pot
         let mut t = p.tx.clone();
-        let w = exhibit_witness(&g, p, p0, p1);
+        let w = exhibit_witness(&g, p, &sig_a, &sig_b);
         t.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         rt.mine_with(&[t.clone()]).unwrap_or_else(|e| panic!("the equivocation exhibit must mine: {e}"));
-        println!("REGTEST 6: player-equivocation exhibit (user double-played depth 1, bit {i}): {} vB", t.vsize());
+        println!("REGTEST 6: player-equivocation exhibit (user double-played depth 1): {} vB", t.vsize());
     }
 
     // ============ path H: the hub double-plays depth 2 (csv branch) =========
@@ -293,38 +297,37 @@ fn player_equivocation_leaf() {
         let (board1, _) = venue.seal_move_signed(1, &Board::empty(), 4, &mut g.user_ks);
         client.verify_and_append(&venue.sealed[&1], &tables[1]).unwrap();
         rt.mine(1).unwrap();
-        let (board_a, reveal_a) = venue.seal_move_signed(2, &board1, 0, &mut g.hub_ks);
+        let (_board_a, sig_a) = venue.seal_move_signed(2, &board1, 0, &mut g.hub_ks);
         client.verify_and_append(&venue.sealed[&2], &tables[2]).unwrap();
         // the hub's double-play: O@1 from the post-slot-1 board
         let board_b = TicTacToe.transition(&board1, &1, Role::Hub).unwrap();
         assert!(
-            g.hub_ks.reveal_bits(&instance::state_label(CONTRACT_ID, 1, 2), &state_bits(&board_b)).is_err(),
+            g.hub_ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, 2), &entry_msg(state_u32(&board_b))).is_err(),
             "the honest keystore refuses to equivocate"
         );
-        let reveal_b = adversarial_state_reveal("pos6/hub-ks", 2, &state_bits(&board_b));
+        let sig_b = adversarial_state_sig("pos6/hub-ks", 2, &entry_msg(state_u32(&board_b)));
         let parent = venue.sealed[&1].header.digest();
-        let fork = venue.fork_move(2, &parent, &board1, 1, &reveal_b, &tables);
+        let fork = venue.fork_move(2, &parent, &board1, 1, &sig_b, &tables);
         assert!(
             matches!(client.observe(&fork, &tables[2]), Ok(lngap_pos::Observation::Equivocation(_))),
             "the second sealed block at slot 2 is the equivocation"
         );
-        let (j, p0, p1) = differing_bit(&g.inst, 2, &board_a, &reveal_a, &board_b, &reveal_b);
-        let p = skel(&graph, &format!("equiv_2_{j}"));
+        let p = skel(&graph, "equiv_2");
         assert_eq!(p.tx.output[0].script_pubkey, g.payout_spk_of(Role::User), "the exhibit pays the non-mover");
         // the csv branch: the exhibitor IS the broadcaster, so the spend
         // waits out to_self_delay
         let early = {
             let mut t = p.tx.clone();
-            let w = exhibit_witness(&g, p, p0, p1);
+            let w = exhibit_witness(&g, p, &sig_a, &sig_b);
             t.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
             t
         };
         assert!(rt.test_accept(&early).is_err(), "the broadcaster's exhibit must wait out to_self_delay");
         rt.mine(u64::from(g.params.to_self_delay) + 1).unwrap();
         let mut t = p.tx.clone();
-        let w = exhibit_witness(&g, p, p0, p1);
+        let w = exhibit_witness(&g, p, &sig_a, &sig_b);
         t.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         rt.mine_with(&[t.clone()]).unwrap_or_else(|e| panic!("the equivocation exhibit must mine after the delay: {e}"));
-        println!("REGTEST 6: player-equivocation exhibit (hub double-played depth 2, bit {j}): {} vB", t.vsize());
+        println!("REGTEST 6: player-equivocation exhibit (hub double-played depth 2): {} vB", t.vsize());
     }
 }

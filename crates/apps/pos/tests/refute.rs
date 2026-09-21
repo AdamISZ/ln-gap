@@ -21,15 +21,18 @@ use lngap_pos::{PosMiner, SealedBlock};
 
 const SEED: [u8; 32] = [7u8; 32];
 /// The entry's claimed state in this fixture (sealed_move) and the state
-/// key the D41 authorship fragment checks the presented preimages against.
+/// key the D41 authorship fragment checks the presented signature against.
 const FIXTURE_STATE: u32 = 0x12345;
 
-fn state_key() -> lngap_lamport::SecretKey {
-    lngap_lamport::SecretKey::from_entropy(lngap_factchain::slot::STATE_BITS, [0x33; 32])
+/// The fixture state key (D43: Winternitz over the head's 3 state bytes).
+fn state_key() -> lngap_lamport::winternitz::WotsSecret {
+    lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [0x33; 32])
 }
 
-fn state_reveal(state: u32) -> lngap_lamport::Reveal {
-    state_key().reveal_bits(&lngap_lamport::uint_to_bits(state, lngap_factchain::slot::STATE_BITS)).unwrap()
+/// The state-key signature over the head's signed region (the authorship
+/// block for a refute of `head`).
+fn state_sig(head: &[u8; 48]) -> lngap_lamport::winternitz::WotsSig {
+    state_key().sign(&lngap_pos::ttt::auth_message(head)).unwrap()
 }
 
 fn sink() -> ScriptBuf {
@@ -115,7 +118,7 @@ fn refute_and_disprove_on_regtest() {
     let head_sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
         .map(|j| sign_chunk(&block.attestation.secrets[HEAD_CHUNK_START + j], &rtx, &funded.prev, &ref_leaf))
         .collect();
-    let args = refute_witness(&head_sigs, &commit_sig, &state_reveal(FIXTURE_STATE));
+    let args = refute_witness(&head_sigs, &commit_sig, &state_sig(&head));
     let arg_bytes: usize = args.iter().map(|a| a.len()).sum();
     rtx.input[0].witness = tapscript_witness(&args, &ref_leaf, &funded.tree.control_block("r").unwrap());
     let h = rt
@@ -180,9 +183,9 @@ fn refute_and_disprove_on_regtest() {
         dtx.vsize()
     );
 
-    // ---- negative (D41): a refutation carrying JUNK preimages (the
-    // garbage-signed entry's own sigs region) fails the authorship
-    // fragment, whatever the re-commitment ----
+    // ---- negative (D41): a refutation carrying a signature that does not
+    // open the mover's state key (the garbage-signed entry's own sigs
+    // region) fails the authorship fragment, whatever the re-commitment ----
     let (block_j, table_j) = sealed_move(5);
     let head_j = block_j.header.head();
     let sig_j = key.sign(&head_j).unwrap();
@@ -199,7 +202,9 @@ fn refute_and_disprove_on_regtest() {
     let head_sigs_j: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
         .map(|j| sign_chunk(&block_j.attestation.secrets[HEAD_CHUNK_START + j], &rtx_j, &funded_j.prev, &ref_leaf_j))
         .collect();
-    let junk = lngap_lamport::Reveal { preimages: vec![[0x11; 20]; 21] };
+    let junk = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [0x99; 32])
+        .sign(&lngap_pos::ttt::auth_message(&head_j))
+        .unwrap();
     let args_j = refute_witness(&head_sigs_j, &sig_j, &junk);
     rtx_j.input[0].witness = tapscript_witness(&args_j, &ref_leaf_j, &funded_j.tree.control_block("r").unwrap());
     assert!(
@@ -209,7 +214,6 @@ fn refute_and_disprove_on_regtest() {
 
     // ---- negative: a re-commitment to a different tuple fails the tie ----
     let (block2, table2) = sealed_move(5); // a LEGAL move attested
-    let head2 = block2.header.head();
     let bad_sig = key.sign(&head_with_legal_mismatch()).unwrap(); // signs neither
     let ref_leaf2 = refute_leaf(&table2, &key.public(), |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key().public()));
     let funded2 = fund(&rt, ref_leaf2.clone(), "r");
@@ -226,7 +230,7 @@ fn refute_and_disprove_on_regtest() {
         .collect();
     // the fragment reads the FILE's claimed state (the mismatched head's:
     // zero); the tie then fails the re-commitment against the attestation
-    let args2 = refute_witness(&head_sigs2, &bad_sig, &state_reveal(0));
+    let args2 = refute_witness(&head_sigs2, &bad_sig, &state_key().sign(&[0u8; 3]).unwrap());
     let mut rtx2 = rtx2;
     rtx2.input[0].witness = tapscript_witness(&args2, &ref_leaf2, &funded2.tree.control_block("r").unwrap());
     assert!(

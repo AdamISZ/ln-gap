@@ -136,8 +136,10 @@ impl ChessEntry {
         v
     }
     pub fn encode(&self) -> Vec<u8> {
-        assert_eq!(self.sigs.len(), SIGNED_BITS);
-        let mut v = Vec::with_capacity(ENTRY_BYTES);
+        // the sig count is the signing scheme's (per-bit Lamport for the
+        // PoW graphs; D43's Winternitz reveals for the PoS graph) — the
+        // wire is just the content then the 20-byte elements
+        let mut v = Vec::with_capacity(48 + self.sigs.len() * 20);
         v.extend_from_slice(&SlotEntry::word0(self.game_id, self.depth, self.mover).to_be_bytes());
         v.extend_from_slice(&Self::word1(self.state.mv).to_be_bytes());
         v.extend_from_slice(&self.state.to_e());
@@ -147,7 +149,7 @@ impl ChessEntry {
         v
     }
     pub fn decode(b: &[u8]) -> Result<ChessEntry> {
-        ensure!(b.len() == ENTRY_BYTES, "a chess entry is {ENTRY_BYTES} bytes, got {}", b.len());
+        ensure!(b.len() >= 48 && (b.len() - 48).is_multiple_of(20), "a chess entry is 48 content bytes plus 20-byte sig elements, got {}", b.len());
         let w0 = u32::from_be_bytes(b[0..4].try_into().unwrap());
         let w1 = u32::from_be_bytes(b[4..8].try_into().unwrap());
         let state = ChessState::from_e(b[8..48].try_into().unwrap())?;

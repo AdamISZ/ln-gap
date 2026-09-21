@@ -88,8 +88,10 @@ impl SlotEntry {
         (u32::from(mv) << 24) | state
     }
     pub fn encode(&self) -> Vec<u8> {
-        assert_eq!(self.sigs.len(), STATE_BITS);
-        let mut v = Vec::with_capacity(ENTRY_BYTES);
+        // the sig count is the signing scheme's (per-bit Lamport for the
+        // PoW graphs; D43's Winternitz reveals for the PoS graph) — the
+        // wire is just the content then the 20-byte elements
+        let mut v = Vec::with_capacity(ENTRY_HEAD + self.sigs.len() * CHUNK);
         v.extend_from_slice(&Self::word0(self.game_id, self.depth, self.mover).to_be_bytes());
         v.extend_from_slice(&Self::word1(self.mv, self.state).to_be_bytes());
         for s in &self.sigs {
@@ -98,7 +100,7 @@ impl SlotEntry {
         v
     }
     pub fn decode(b: &[u8]) -> Option<SlotEntry> {
-        if b.len() != ENTRY_BYTES {
+        if b.len() < ENTRY_HEAD || !(b.len() - ENTRY_HEAD).is_multiple_of(CHUNK) {
             return None;
         }
         let w0 = u32::from_be_bytes(b[0..4].try_into().ok()?);

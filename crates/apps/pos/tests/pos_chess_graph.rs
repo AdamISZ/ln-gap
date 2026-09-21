@@ -27,7 +27,7 @@
 //!   `chess_kingattacked` disprove — a TWO-ELEMENT exhibit — takes the
 //!   pot;
 //! - G: a garbage-signed attested entry admits no refutation (the D41
-//!   authorship fragment rejects the junk preimages).
+//!   authorship fragment rejects the junk signature).
 
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1::{SecretKey, SECP256K1};
@@ -40,10 +40,10 @@ use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PresignedTx, Role};
 use lngap_chess::certificate::find_kind;
 use lngap_chess::leaf::{exhibit_values, Kind};
 use lngap_chess::{apply, Move};
-use lngap_chess_fc::{ChessEntry, ChessState, SIGNED_BITS};
+use lngap_chess_fc::{ChessEntry, ChessState};
 use lngap_ec_wots::{Attester, EpochTable};
 use lngap_lamport::keystore::KeyStore;
-use lngap_lamport::winternitz::WotsSig;
+use lngap_lamport::winternitz::{WotsParams, WotsSig};
 use lngap_pos::chess;
 use lngap_pos::instance::{self, Game as WhichGame, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
@@ -57,6 +57,18 @@ const CONTRACT_ID: u32 = 1;
 const MAX_DEPTH: u32 = 5;
 /// The slot the absence claim is played at in paths A-C.
 const D: u32 = 2;
+/// The chess state key's WOTS length in digits (84 message + 3 checksum
+/// over the 42 signed bytes — the 40 state bytes then the move, D43).
+const STATE_DIGITS: usize = 87;
+
+/// An entry's authorship message (D43): the 40 state bytes, then the
+/// move's two bytes (low first) — `chess::auth_message` of the head.
+fn entry_msg(e: &ChessEntry) -> Vec<u8> {
+    let mv = u32::from(e.state.mv.to_u16());
+    let mut m = e.state.to_e().to_vec();
+    m.extend_from_slice(&(mv as u16).to_le_bytes());
+    m
+}
 
 /// The venue's epoch tables, published at contract open (the attester's
 /// deterministic per-slot registry).
@@ -98,21 +110,24 @@ impl Venue {
         }
     }
     /// Seal `slot` with the entry for `state` (after move `state.depth`)
-    /// SIGNED with the mover's state key over the signed bits (D41: the
+    /// SIGNED with the mover's state key over the signed region (D41: the
     /// refute leaves check it). The venue is a dumb sequencer: an illegal
     /// move seals just the same.
     fn seal_move(&mut self, slot: u32, state: &ChessState, ks: &mut KeyStore) {
         assert_eq!(u32::from(state.depth), slot);
         let mover = instance::mover_at(slot);
-        let reveal = ks
-            .reveal_bits(&instance::state_label(CONTRACT_ID, 1, slot), &ChessEntry::signed_bits(state))
+        let sig = ks
+            .sign_wots(
+                &instance::state_label(CONTRACT_ID, 1, slot),
+                &entry_msg(&ChessEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, state: state.clone(), sigs: vec![] }),
+            )
             .unwrap();
         let entry = ChessEntry {
             game_id: GAME_ID,
             depth: slot as u8,
             mover: mover.idx() as u8,
             state: state.clone(),
-            sigs: reveal.preimages.clone(),
+            sigs: sig.hashes.clone(),
         };
         self.miner.submit(entry.encode());
         let (block, table) = self.miner.seal_next(slot).unwrap();
@@ -129,7 +144,7 @@ impl Venue {
             depth: slot as u8,
             mover: mover.idx() as u8,
             state: state.clone(),
-            sigs: vec![[0x11; 20]; SIGNED_BITS],
+            sigs: vec![[0x11; 20]; STATE_DIGITS],
         };
         self.miner.submit(entry.encode());
         let (block, table) = self.miner.seal_next(slot).unwrap();
@@ -240,14 +255,13 @@ fn skel<'a>(graph: &'a [PresignedTx], label: &str) -> &'a PresignedTx {
     graph.iter().find(|p| p.label == label).unwrap_or_else(|| panic!("no skeleton {label}"))
 }
 
-/// The state-key reveal over a sealed head's CLAIMED state||move (the D41
-/// authorship block), from that depth's mover's keystore — the same bits
-/// as the published entry's, so the same preimages (idempotent re-reveal).
-fn auth_reveal(g: &mut Game, d: u32, head: &[u8; 48]) -> lngap_lamport::Reveal {
-    let state = ChessState::from_e(head[8..48].try_into().unwrap()).unwrap();
+/// The state-key signature over a sealed head's signed region (the D41
+/// authorship block), from that depth's mover's keystore — the same
+/// message as the published entry's, so the same signature (idempotent).
+fn auth_sig(g: &mut Game, d: u32, head: &[u8; 48]) -> WotsSig {
     g.keys_of(instance::mover_at(d))
         .0
-        .reveal_bits(&instance::state_label(CONTRACT_ID, 1, d), &ChessEntry::signed_bits(&state))
+        .sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &chess::auth_message(head))
         .unwrap()
 }
 
@@ -311,8 +325,8 @@ impl Path {
             msg.extend_from_slice(&new_head);
             let pair_sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap();
             self.pair_sig = Some(pair_sig.clone());
-            let prev_reveal = auth_reveal(g, d - 1, &prev_head);
-            let new_reveal = auth_reveal(g, d, &new_head);
+            let _prev_sig = auth_sig(g, d - 1, &prev_head); // chess authorship is new-head-only (D42); the call keeps the keystore's one-time discipline
+            let new_sig = auth_sig(g, d, &new_head);
             let new_block = &self.venue.sealed[&d];
             let prev_block = &self.venue.sealed[&(d - 1)];
             let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
@@ -321,16 +335,16 @@ impl Path {
             let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_reveal])
+            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig])
         } else {
             let sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());
-            let new_reveal = auth_reveal(g, d, &new_head);
+            let new_sig = auth_sig(g, d, &new_head);
             let new_block = &self.venue.sealed[&d];
             let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness(&sigs, &sig, &new_reveal)
+            refute::refute_witness(&sigs, &sig, &new_sig)
         };
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), &tx, &a_prev, &p.leaf.script);
         let mut w = w;
@@ -346,18 +360,16 @@ impl Path {
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
     }
 
-    /// The depth-`d` refutation carrying the entry's OWN junk preimages
-    /// instead of the mover's reveal over the claimed state — the D41
+    /// The depth-`d` refutation carrying the entry's OWN junk signature
+    /// instead of the mover's signature over the claimed state — the D41
     /// negative, assembled but NOT broadcast (the caller test_accepts the
     /// rejection).
     fn refute_with_junk(&mut self, g: &mut Game, d: u32) -> Transaction {
-        let junk_r = lngap_lamport::Reveal {
-            preimages: vec![[0x11; 20]; SIGNED_BITS],
-        };
         let p = skel(&self.graph, &format!("absent_{d}/refute"));
         let tx = &p.tx;
         let a_prev = &p.prevouts[0];
         let (prev_head, new_head) = (self.venue.head(d - 1), self.venue.head(d));
+        let junk_r = WotsSig::from_hashes(WotsParams::for_bytes(42), &chess::auth_message(&new_head), vec![[0x11; 20]; STATE_DIGITS]).unwrap();
         let mut msg = prev_head.to_vec();
         msg.extend_from_slice(&new_head);
         let pair_sig = g
@@ -507,8 +519,8 @@ fn wired_pos_chess_graph() {
         let mut path = Path::open(&rt, &g, &tables);
         assert_eq!(
             path.graph.len(),
-            1 + MAX_DEPTH as usize * 8 + MAX_DEPTH as usize * SIGNED_BITS,
-            "the wired chess graph: settle + {MAX_DEPTH} x (claim, refute, 3 + 3 splits) + {MAX_DEPTH} x {SIGNED_BITS} equivocation exhibits (D39); NO exhibit family (D42)"
+            1 + MAX_DEPTH as usize * 8 + MAX_DEPTH as usize,
+            "the wired chess graph: settle + {MAX_DEPTH} x (claim, refute, 3 + 3 splits) + {MAX_DEPTH} per-depth equivocation exhibits (D39, D43); NO exhibit family (D42)"
         );
         // slot 1: user's legal e2e4; slot 2: hub's c8e6 — a bishop jumping
         // the d7 pawn

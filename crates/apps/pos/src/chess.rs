@@ -48,10 +48,10 @@
 //!   indexing commentary. (chess-fc's entry decode still cross-checks it
 //!   for clients.)
 //!
-//! The D41 authorship fragment is over chess's SIGNED_BITS = 336 (the state
-//! bits, then the move's 16 bits — the chess-fc `places()` mapping), so the
-//! mover's per-depth state key is 336 Lamport bits and the D39 equivocation
-//! family is per (depth, signed bit).
+//! The D41 authorship fragment covers chess's signed region (the state
+//! bytes, then the move's two bytes — the D43 tied-WOTS form, 84 digits),
+//! so the mover's per-depth state key is an 87-digit Winternitz key and
+//! the D39 equivocation family is per depth (two full signatures convict).
 //!
 //! The native mirrors decode the parked heads and re-run the certificate
 //! search (`find_kind`), the same oracle the chess-fc test suite uses; they
@@ -72,7 +72,7 @@ use lngap_btc::tx::Timelock;
 use lngap_channel::{CommitCtx, Role};
 use lngap_chess::certificate::find_kind;
 use lngap_chess::leaf::{leaf_over_registers, Kind, Registers};
-use lngap_chess_fc::{ChessState, SIGNED_BITS, STATE_BYTES};
+use lngap_chess_fc::{ChessState, STATE_BYTES};
 use lngap_factchain::HEAD_BYTES;
 use lngap_lamport::winternitz::{WotsExt, WotsPublic};
 use lngap_lamport::PublicKey;
@@ -174,42 +174,46 @@ fn kind_leaf(l: &Layout, key: &WotsPublic, kind: Kind) -> PosLeaf {
     }
 }
 
-// ----- the authorship fragment (D41, chess bit mapping) ----
+// ----- the authorship fragment (D41; D43 tied-WOTS form) ----
 
-/// Signed bit `i`'s home in a head: (head digit, nibble bit 0..4). The
-/// state's bits first (`lngap_chess_fc::ChessEntry::signed_bits`): bit `i`
-/// is bit `i % 8` (least significant first) of state byte `i / 8` — head
-/// byte `8 + i / 8`. Then the move's 16 bits, low byte first: bit `t` at
-/// head byte `5 - t / 8` (chess-fc's `places()`), bit `t % 8`. Byte `b`'s
-/// low nibble (bits 0..4) is head digit `2b + 1`, its high nibble digit
-/// `2b`.
-fn place(i: usize) -> (usize, usize) {
-    let (byte, j) = if i < 8 * STATE_BYTES { (8 + i / 8, i % 8) } else { (5 - (i - 8 * STATE_BYTES) / 8, (i - 8 * STATE_BYTES) % 8) };
-    if j < 4 { (2 * byte + 1, j) } else { (2 * byte, j - 4) }
+/// The signed region's positions in the register file at this head offset.
+/// Chess signs state||move (the chess-fc `places()` mapping, nibble-wise):
+/// the 40 state bytes sit at head digits 16..96 (message digits 0..80),
+/// then the move's two bytes low-byte-first (head bytes 5 then 4 — digits
+/// 10, 11 then 8, 9).
+pub fn authorship_positions(head_off: usize) -> [usize; 84] {
+    let mut p = [0usize; 84];
+    for (j, x) in p.iter_mut().enumerate() {
+        *x = match j {
+            0..=79 => head_off + 16 + j,
+            80 => head_off + 10,
+            81 => head_off + 11,
+            82 => head_off + 8,
+            _ => head_off + 9,
+        };
+    }
+    p
 }
 
-/// The chess authorship fragment: per parked head, the 336 preimages of
-/// THAT head's mover's state key, each opening the commitment of the bit
-/// value the head's claimed state||move has at that bit. Identical in
-/// shape to ttt's (whose docs apply), differing only in the bit mapping
-/// and count; ~19 kvB of script per head where ttt's is ~1.9.
-pub fn authorship_fragment(mut b: Builder, file: usize, head_off: usize, key: &PublicKey) -> Builder {
-    assert_eq!(key.bits.len(), SIGNED_BITS, "a chess state key is {SIGNED_BITS} bits");
-    for i in 0..SIGNED_BITS {
-        let (dig, bit) = place(i);
-        let d = head_off + dig; // the file digit holding signed bit i
-        b = b.push_int(file as i64).push_opcode(OP_ROLL).push_opcode(OP_HASH160); // [.. H(p_i)]
-        b = b.push_int((file - d) as i64).push_opcode(OP_PICK); // [.. H(p_i), digit] (shifted one deep by H)
-        b = ttt::nib_bit(b, bit); // [.. H(p_i), bit]
-        b = b
-            .push_opcode(OP_IF)
-            .push_bytes(&key.bits[i].h1)
-            .push_opcode(OP_ELSE)
-            .push_bytes(&key.bits[i].h0)
-            .push_opcode(OP_ENDIF) // [.. H(p_i), h_b]
-            .push_opcode(OP_EQUALVERIFY);
-    }
-    b
+/// The off-chain side of the same convention: the state key signs the
+/// head's state bytes then the move (low byte first) — 42 bytes.
+pub fn auth_message(head: &[u8; HEAD_BYTES]) -> Vec<u8> {
+    let mut m = head[8..48].to_vec();
+    m.push(head[5]);
+    m.push(head[4]);
+    m
+}
+
+/// The chess authorship fragment: per parked head, the mover's state-key
+/// WOTS signature over the head's signed region, the message digits PICKed
+/// off the register file (ttt's fragment docs apply — the D43 tied-WOTS
+/// form). 84 message + 3 checksum digits where the Lamport form carried
+/// 336 preimages (~9 kvB of script per head, ~30 KB); the pair refute's
+/// stack budget relaxes by the same factor (the D42 new-head-only
+/// narrowing is now a size choice, not a necessity).
+pub fn authorship_fragment(b: Builder, file: usize, head_off: usize, key: &WotsPublic) -> Builder {
+    assert_eq!(key.params.message_digits as usize, 84, "a chess state key covers the 42 signed bytes");
+    b.wots_verify_tied(key, file, &authorship_positions(head_off))
 }
 
 // ----- the self-checking split (the refuted output's mover splits) ----
@@ -270,24 +274,6 @@ pub fn checked_split_leaf(
 mod tests {
     use super::*;
 
-    /// The bit mapping agrees with chess-fc's `places()` and the head's
-    /// nibble order, on the values the encoding actually produces.
-    #[test]
-    fn place_matches_the_entry_layout() {
-        // state bit 0 is the low bit of head byte 8 = digit 17, bit 0
-        assert_eq!(place(0), (17, 0));
-        // state bit 4 is the low bit of the high nibble of byte 8 = digit 16
-        assert_eq!(place(4), (16, 0));
-        // state bit 319: byte 47, bit 7 -> digit 94, nibble bit 3
-        assert_eq!(place(319), (94, 3));
-        // move bit 0: byte 5 bit 0 -> digit 11, nibble bit 0
-        assert_eq!(place(320), (11, 0));
-        // move bit 8: byte 4 bit 0 -> digit 9
-        assert_eq!(place(328), (9, 0));
-        // move bit 15: byte 4 bit 7 -> digit 8, nibble bit 3
-        assert_eq!(place(335), (8, 3));
-    }
-
     /// The initial head's pad decodes back to the initial state, and the
     /// side digit sits where the resolution fragment reads it.
     #[test]
@@ -300,5 +286,20 @@ mod tests {
         assert_eq!(p[SIDE_DIGIT], 0);
         // word0 carries (game 7, depth 0): digits 0..4 = 0x0007
         assert_eq!(&p[0..4], &[0, 0, 0, 7]);
+    }
+
+    /// The authorship convention: the message bytes map to the in-script
+    /// positions nibble-for-nibble (the tie only holds if they agree).
+    #[test]
+    fn auth_message_matches_positions() {
+        let h = initial_head(7);
+        let m = auth_message(&h);
+        assert_eq!(m.len(), 42);
+        let hd = pad(&h); // the head's digits
+        let pos = authorship_positions(0);
+        for (j, &p) in pos.iter().enumerate() {
+            let want = lngap_lamport::winternitz::message_digits(&m)[j];
+            assert_eq!(hd[p] as u8, want, "message digit {j} at file position {p}");
+        }
     }
 }

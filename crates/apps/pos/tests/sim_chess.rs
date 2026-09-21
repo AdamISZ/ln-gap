@@ -12,9 +12,9 @@
 
 use lngap_channel::Role;
 use lngap_chess::certificate::{find_kind, mechanical_successor};
-use lngap_chess::leaf::{exhibit_values, Kind};
-use lngap_chess::{apply, Move, Position};
-use lngap_chess_fc::{ChessEntry, ChessState};
+use lngap_chess::leaf::exhibit_values;
+use lngap_chess::{apply, Move};
+use lngap_chess_fc::ChessState;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_pos::chess;
 use lngap_pos::instance::mover_at;
@@ -300,7 +300,7 @@ fn refute_leaf_runs_only_with_true_authorship() {
     let new = play(&prior, "e7e5").unwrap();
     let p_head = chess::head(GAME, 1, Role::User, &prior);
     let n_head = chess::head(GAME, 2, Role::Hub, &new);
-    let sk_new = lngap_lamport::SecretKey::from_entropy(lngap_chess_fc::SIGNED_BITS, [0x51; 32]);
+    let sk_new = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(42), [0x51; 32]);
     let sigs: Vec<Vec<u8>> = (0..refute::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     let leaf = refute::refute_leaf_pair_gated(&t1, &t2, &key.public(), |bd| {
         chess::authorship_fragment(bd, l.file, l.new, &sk_new.public())
@@ -308,14 +308,14 @@ fn refute_leaf_runs_only_with_true_authorship() {
     let mut msg = p_head.to_vec();
     msg.extend_from_slice(&n_head);
     let sig = key.sign(&msg).unwrap();
-    let reveal_new = sk_new.reveal_bits(&ChessEntry::signed_bits(&new)).unwrap();
-    let good = refute::refute_witness_pair(&sigs, &sigs, &sig, &[&reveal_new]);
+    let sig_new = sk_new.sign(&chess::auth_message(&n_head)).unwrap();
+    let good = refute::refute_witness_pair(&sigs, &sigs, &sig, &[&sig_new]);
     assert!(lngap_script32::sim::run(leaf.as_script(), good).is_ok(), "true authorship must pass");
-    // a garbage-signed entry: the reveal of the WRONG bits (a different
-    // successor's) must fail the fragment
+    // a garbage-signed entry: a signature over a DIFFERENT successor's
+    // region must fail the fragment (the tie forces the file's digits)
     let wrong = play(&prior, "c7c5").unwrap();
-    let bad_reveal = sk_new.reveal_bits(&ChessEntry::signed_bits(&wrong)).unwrap();
-    let bad = refute::refute_witness_pair(&sigs, &sigs, &sig, &[&bad_reveal]);
+    let bad_sig = sk_new.sign(&chess::auth_message(&chess::head(GAME, 2, Role::Hub, &wrong))).unwrap();
+    let bad = refute::refute_witness_pair(&sigs, &sigs, &sig, &[&bad_sig]);
     assert!(lngap_script32::sim::run(leaf.as_script(), bad).is_err(), "garbage authorship must be rejected");
 }
 

@@ -42,7 +42,7 @@ use lngap_contract::Contract;
 use lngap_ec_wots::{Attester, EpochTable};
 use lngap_factchain::slot::SlotEntry;
 use lngap_lamport::keystore::KeyStore;
-use lngap_lamport::winternitz::WotsSig;
+use lngap_lamport::winternitz::{WotsParams, WotsSig};
 use lngap_pos::instance::{self, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
@@ -55,6 +55,9 @@ const CONTRACT_ID: u32 = 1;
 const MAX_DEPTH: u32 = 9;
 /// The slot the absence claim is played at in paths A-C.
 const D: u32 = 2;
+/// The ttt state key's WOTS length in digits (6 message + 2 checksum over
+/// the 3 signed state bytes, D43).
+const STATE_DIGITS: usize = 8;
 
 fn state_u32(b: &Board) -> u32 {
     lngap_lamport::bits_to_uint(&TicTacToe.state_bits(b))
@@ -95,14 +98,14 @@ impl Venue {
             n.turn = mover.other();
             n
         });
-        let reveal = ks.reveal_bits(&instance::state_label(CONTRACT_ID, 1, slot), &lngap_lamport::uint_to_bits(state_u32(&new), 21)).unwrap();
+        let sig = ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, slot), &state_u32(&new).to_be_bytes()[1..]).unwrap();
         let entry = SlotEntry {
             game_id: GAME_ID,
             depth: slot as u8,
             mover: mover.idx() as u8,
             mv,
             state: state_u32(&new),
-            sigs: reveal.preimages.clone(),
+            sigs: sig.hashes.clone(),
         };
         self.miner.submit(entry.encode());
         let (block, table) = self.miner.seal_next(slot).unwrap();
@@ -122,7 +125,7 @@ impl Venue {
             mover: mover.idx() as u8,
             mv,
             state: state_u32(&new),
-            sigs: vec![[0x11; 20]; 21],
+            sigs: vec![[0x11; 20]; STATE_DIGITS],
         };
         self.miner.submit(entry.encode());
         let (block, table) = self.miner.seal_next(slot).unwrap();
@@ -227,14 +230,13 @@ fn seal_move(path: &mut Path, g: &mut Game, slot: u32, mv: u8) {
     path.board = path.venue.seal_move(slot, &path.board, mv, g.keys_of(mover).0);
 }
 
-/// The state-key reveal over a sealed head's CLAIMED state (the D41
-/// authorship block), from that depth's mover's keystore — the same bits
-/// as the published entry's, so the same preimages (idempotent re-reveal).
-fn auth_reveal(g: &mut Game, d: u32, head: &[u8; 48]) -> lngap_lamport::Reveal {
-    let state = u32::from_be_bytes(head[4..8].try_into().unwrap()) & 0x00ff_ffff;
+/// The state-key signature over a sealed head's CLAIMED state (the D41
+/// authorship block), from that depth's mover's keystore — the same
+/// message as the published entry's, so the same signature (idempotent).
+fn auth_sig(g: &mut Game, d: u32, head: &[u8; 48]) -> WotsSig {
     g.keys_of(instance::mover_at(d))
         .0
-        .reveal_bits(&instance::state_label(CONTRACT_ID, 1, d), &lngap_lamport::uint_to_bits(state, 21))
+        .sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &ttt::auth_message(head))
         .unwrap()
 }
 
@@ -283,8 +285,8 @@ impl Path {
             msg.extend_from_slice(&new_head);
             let pair_sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap();
             self.pair_sig = Some(pair_sig.clone());
-            let prev_reveal = auth_reveal(g, d - 1, &prev_head);
-            let new_reveal = auth_reveal(g, d, &new_head);
+            let prev_sig = auth_sig(g, d - 1, &prev_head);
+            let new_sig = auth_sig(g, d, &new_head);
             let new_block = &self.venue.sealed[&d];
             let prev_block = &self.venue.sealed[&(d - 1)];
             let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
@@ -293,16 +295,16 @@ impl Path {
             let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_reveal, &prev_reveal])
+            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig, &prev_sig])
         } else {
             let sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());
-            let new_reveal = auth_reveal(g, d, &new_head);
+            let new_sig = auth_sig(g, d, &new_head);
             let new_block = &self.venue.sealed[&d];
             let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness(&sigs, &sig, &new_reveal)
+            refute::refute_witness(&sigs, &sig, &new_sig)
         };
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), &tx, &a_prev, &p.leaf.script);
         let mut w = w;
@@ -320,11 +322,11 @@ impl Path {
     fn refute_with_preimages(&mut self, rt: &Regtest, g: &mut Game, d: u32, junk: bool) -> Transaction {
         assert!(junk, "the honest refutation is refute()");
         let _ = rt;
-        let junk_r = lngap_lamport::Reveal { preimages: vec![[0x11; 20]; 21] };
         let p = skel(&self.graph, &format!("absent_{d}/refute"));
         let tx = &p.tx;
         let a_prev = &p.prevouts[0];
         let (prev_head, new_head) = (self.venue.head(d - 1), self.venue.head(d));
+        let mk_junk = |head: &[u8; 48]| WotsSig::from_hashes(WotsParams::for_bytes(3), &ttt::auth_message(head), vec![[0x11; 20]; STATE_DIGITS]).unwrap();
         let mut msg = prev_head.to_vec();
         msg.extend_from_slice(&new_head);
         let pair_sig = g
@@ -340,7 +342,7 @@ impl Path {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, a_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&junk_r, &junk_r]);
+        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&mk_junk(&new_head), &mk_junk(&prev_head)]);
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
         w.push(mover_sig);
         let mut tx = p.tx.clone();
@@ -364,8 +366,8 @@ impl Path {
             mover_ks.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap()
         };
         self.pair_sig = Some(pair_sig.clone());
-        let prev_reveal = auth_reveal(g, d - 1, &prev_head);
-        let new_reveal = auth_reveal(g, d, &new_head);
+        let prev_sig = auth_sig(g, d - 1, &prev_head);
+        let new_sig = auth_sig(g, d, &new_head);
         let new_block = &self.venue.sealed[&d];
         let prev_block = &self.venue.sealed[&(d - 1)];
         let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
@@ -374,7 +376,7 @@ impl Path {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, c_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_reveal, &prev_reveal]);
+        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig, &prev_sig]);
         let sig_u = sign_tx(&g.user.payment, tx, c_prev, &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, tx, c_prev, &p.leaf.script);
         w.push(sig_h);
@@ -536,7 +538,7 @@ fn wired_pos_graph() {
         let g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
         let mut g = g;
         let mut path = Path::open(&rt, &g, &tables);
-        assert_eq!(path.graph.len(), 282, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 x 21 equivocation exhibits (D39)");
+        assert_eq!(path.graph.len(), 102, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43)");
         // slot 1: user's legal X@4; slot 2: hub plays the OCCUPIED cell 4
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4);
@@ -764,8 +766,8 @@ fn wired_pos_graph() {
             .0
             .sign_wots(&instance::refute_label(CONTRACT_ID, 1, D), &msg)
             .unwrap();
-        let prev_reveal = auth_reveal(&mut g, D - 1, &prev_head);
-        let new_reveal = auth_reveal(&mut g, D, &new_head);
+        let prev_sig = auth_sig(&mut g, D - 1, &prev_head);
+        let new_sig = auth_sig(&mut g, D, &new_head);
         let mut tx = p.tx.clone();
         let new_block = &path.venue.sealed[&D];
         let prev_block = &path.venue.sealed[&(D - 1)];
@@ -775,7 +777,7 @@ fn wired_pos_graph() {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_reveal, &prev_reveal]);
+        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig, &prev_sig]);
         w.push(sign_tx(g.payment_of(instance::mover_at(D)), &tx, &a_prev, &p.leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         // mine_with (generateblock), not test_accept: the fee placeholder is

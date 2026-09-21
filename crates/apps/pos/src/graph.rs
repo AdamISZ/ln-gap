@@ -27,6 +27,7 @@
 //! carries no code reveal for a `code_mismatch` leaf to judge.
 
 use anyhow::Result;
+use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
 use lngap_btc::script::BuilderExt;
 use lngap_btc::taptree::{Leaf, TapTree};
@@ -35,9 +36,7 @@ use lngap_channel::{CommitCtx, Role};
 use lngap_contract::leaves::split_leaf;
 use lngap_contract::Outcome;
 use lngap_ec_wots::EpochTable;
-use lngap_lamport::gadgets::LamportExt;
-use lngap_lamport::winternitz::WotsPublic;
-use lngap_lamport::BitCommit;
+use lngap_lamport::winternitz::{WotsExt, WotsPublic};
 
 use crate::chess;
 use crate::instance::{Game, PosDepthKeys};
@@ -45,8 +44,10 @@ use crate::refute;
 use crate::ttt::{self, Layout};
 
 /// The authorship fragment of the instance's game (D41; the chess mapping
-/// is chess.rs's).
-fn authorship(b: Builder, game: Game, file: usize, head_off: usize, key: &lngap_lamport::PublicKey) -> Builder {
+/// is chess.rs's). D43: the per-depth state key is a Winternitz key and
+/// the fragment is the tied verify (the signed region's digits are the
+/// register file's own).
+fn authorship(b: Builder, game: Game, file: usize, head_off: usize, key: &WotsPublic) -> Builder {
     match game {
         Game::Ttt => ttt::authorship_fragment(b, file, head_off, key),
         Game::Chess => chess::authorship_fragment(b, file, head_off, key),
@@ -68,9 +69,9 @@ pub fn absent_leaf(ctx: &CommitCtx, name: &str, claimant: Role, claim_from: u32)
 /// The mover's refutation leaf on the claim output: the mover's payment
 /// signature first (the pre-signed skeleton pins the output to the refuted
 /// tree), then the readout-and-park. The D41 authorship fragment rides the
-/// gate slot: per parked head, the witness's preimages of THAT head's
-/// mover's state key must open the head's claimed state bit by bit (21 per
-/// head for tic-tac-toe, 336 for chess) — a garbage-signed attested entry
+/// gate slot: per parked head, the witness must carry THAT head's mover's
+/// state-key signature over the head's signed region (the D43 tied-WOTS
+/// verify against the parked digits) — a garbage-signed attested entry
 /// admits no refutation.
 pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Leaf {
     let body = match table_prev {
@@ -150,28 +151,60 @@ pub fn exhibit_leaf(
     Leaf::new(name.to_string(), b.into_script(), tl)
 }
 
-/// The player-equivocation leaf for one (depth, state bit) on the CONTRACT
-/// output (POS_FACTCHAIN_PLAN.md step 6; D39): the witness exhibits BOTH
-/// preimages of bit `i` of the depth-`d` mover's state key — the 46-byte
-/// `LamportExt::equivocation` gadget (`hash160_verify(h1)` then
-/// `hash160_verify(h0)`). A venue entry's signature IS the reveal of the
-/// state under that key, so both preimages of one bit exist only if the
-/// mover signed two conflicting states at that depth (a reorg-aided
-/// double-play, GAME_PROTOCOL.md section 5 item 4). The proof is
-/// self-authenticating — no venue data, no timelock — and idempotent
-/// re-broadcast of the SAME entry after a reorg reveals the same
-/// preimages, so an honest re-publication never opens the leaf. The spend
-/// is the graph's standard 2-of-2 pre-signed skeleton paying the exhibitor
-/// (the depth's non-mover) the pot; the witness carries
-/// `p0, p1, sig_hub, sig_user` (sig_user on top: the 2-of-2 checks first).
-pub fn equiv_leaf(ctx: &CommitCtx, name: &str, bit: &BitCommit, exhibitor: Role) -> Leaf {
+/// The player-equivocation leaf for one depth on the CONTRACT output
+/// (POS_FACTCHAIN_PLAN.md step 6; D39; D43's per-depth form): the witness
+/// exhibits TWO full signatures under the depth-`d` mover's state key over
+/// DIFFERENT signed regions — possible only if the mover double-signed at
+/// that depth (a reorg-aided double-play, GAME_PROTOCOL.md section 5 item
+/// 4). With the Lamport per-bit key this was one bit's two preimages (the
+/// `equiv_{d}_{i}` family); a WOTS signature's reveal is forced given the message, so two
+/// distinct valid signatures under one key are the equivocation proof (the
+/// checksum guarantees at least one digit where one side needed a preimage
+/// the other can't supply), and the family collapses to one leaf per depth.
+/// Idempotent re-broadcast of the SAME entry re-presents the same
+/// signature, which never fires the differ check. The spend is the graph's
+/// standard 2-of-2 pre-signed skeleton paying the exhibitor (the depth's
+/// non-mover) the pot; the witness carries the two signatures in wire order
+/// (`wots_wire` of the first, then the second), then the two payment
+/// signatures (sig_user on top: the 2-of-2 checks first).
+///
+/// The choreography: the FIRST wots_verify consumes the SECOND wire block
+/// (the topmost), leaving its message digits; those park to the altstack so
+/// the SECOND verify can reach the first block below them; the parked
+/// vector restores ON TOP. The differ then compares the two parked message
+/// vectors ([a below, b on top]: b_j at depth m-1-j, a_j at 2m-1-j).
+pub fn equiv_leaf(ctx: &CommitCtx, name: &str, key: &WotsPublic, exhibitor: Role) -> Leaf {
     let mut b = Builder::new();
     let mut tl = Timelock::NONE;
     if exhibitor == ctx.broadcaster && ctx.params.to_self_delay > 0 {
         b = b.csv(ctx.params.to_self_delay);
         tl.csv = Some(ctx.params.to_self_delay);
     }
-    b = ctx.two_of_two_verify(b).equivocation(bit);
+    let m = key.params.message_digits as usize;
+    b = ctx.two_of_two_verify(b).wots_verify(key);
+    for _ in 0..m {
+        b = b.push_opcode(OP_TOALTSTACK); // park the second signature's digits
+    }
+    b = b.wots_verify(key);
+    for _ in 0..m {
+        b = b.push_opcode(OP_FROMALTSTACK); // restore them on top
+    }
+    // the two parked message vectors must DIFFER
+    b = b.push_int(0);
+    for j in 0..m {
+        b = b
+            .push_int((m - j) as i64) // b_j (the top vector, one deeper under the accumulator)
+            .push_opcode(OP_PICK)
+            .push_int((2 * m - j + 1) as i64) // a_j (the deeper vector, post-pick)
+            .push_opcode(OP_PICK)
+            .push_opcode(OP_SUB)
+            .push_opcode(OP_0NOTEQUAL)
+            .push_opcode(OP_ADD);
+    }
+    b = b.push_opcode(OP_VERIFY); // some digit differs
+    for _ in 0..m {
+        b = b.push_opcode(OP_2DROP);
+    }
     Leaf::new(name.to_string(), b.push_int(1).into_script(), tl)
 }
 

@@ -9,17 +9,15 @@ use lngap_pos::HEADER_CHUNKS;
 
 const DUMMY_SIG: [u8; 64] = [0x30; 64];
 
-/// The fixture heads carry state 0 (all bits false); the D41 authorship
-/// fragments check the presented preimages against these per-head state
-/// keys.
-fn state_key(seed: u8) -> lngap_lamport::SecretKey {
-    lngap_lamport::SecretKey::from_entropy(lngap_factchain::slot::STATE_BITS, [seed; 32])
+/// The fixture heads carry state 0 (all bytes zero); the D41 authorship
+/// fragments check the presented state-key signatures against the per-head
+/// state keys (D43: Winternitz over the 3 state bytes).
+fn state_key(seed: u8) -> lngap_lamport::winternitz::WotsSecret {
+    lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [seed; 32])
 }
 
-fn zero_state_reveal(seed: u8) -> lngap_lamport::Reveal {
-    state_key(seed)
-        .reveal_bits(&[false; lngap_factchain::slot::STATE_BITS])
-        .unwrap()
+fn zero_state_sig(seed: u8) -> lngap_lamport::winternitz::WotsSig {
+    state_key(seed).sign(&[0u8; 3]).unwrap()
 }
 
 /// The authorship gate for a depth-1 (single-head) leaf.
@@ -70,24 +68,25 @@ fn refute_runs() {
     let sig = key.sign(&head).unwrap();
     assert_eq!(key.public().verify(&sig).unwrap(), head.to_vec());
     let leaf = refute_leaf(&table, &key.public(), auth1(1));
-    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness(&sigs, &sig, &zero_state_reveal(1)))
+    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness(&sigs, &sig, &zero_state_sig(1)))
         .expect("a correct refutation must run");
     assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1");
 }
 
 #[test]
 fn refute_rejects_junk_preimages() {
-    // D41: the authorship fragment — the presented preimages must open the
-    // mover's state key bit by bit against the claimed state
+    // D41: the authorship fragment — the presented signature must chain to
+    // the mover's state key against the claimed (parked) state
     let (table, head, sigs) = setup(5);
     let key = refute_key([9u8; 32]);
     let sig = key.sign(&head).unwrap();
     let leaf = refute_leaf(&table, &key.public(), auth1(1));
-    let junk = lngap_lamport::Reveal { preimages: vec![[0x11; 20]; 21] };
+    // a signature under a DIFFERENT key
+    let junk = state_key(99).sign(&[0u8; 3]).unwrap();
     assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness(&sigs, &sig, &junk)).is_err());
-    // and one wrong bit's preimage among twenty good ones
-    let mut r = zero_state_reveal(1);
-    r.preimages[7] = [0x12; 20];
+    // and one corrupted reveal among seven good ones
+    let mut r = zero_state_sig(1);
+    r.hashes[3] = [0x12; 20];
     assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness(&sigs, &sig, &r)).is_err());
 }
 
@@ -128,7 +127,7 @@ fn refute_pair_runs() {
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     let end = lngap_script32::sim::run(
         leaf.as_script(),
-        refute_witness_pair(&sigs, &sigs, &sig, &[&zero_state_reveal(2), &zero_state_reveal(1)]),
+        refute_witness_pair(&sigs, &sigs, &sig, &[&zero_state_sig(2), &zero_state_sig(1)]),
     )
         .expect("a correct two-head refutation must run");
     assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1");
@@ -142,13 +141,13 @@ fn refute_pair_rejects_a_mismatched_recommitment() {
     // holds — which the sim's CHECKSIG stub cannot see: the negative is
     // testable only with real sigs (regtest; pos_graph's mismatched-pair
     // case). The choreography still runs here, pinning the witness shape.
-    let (t1, t2, h1, h2) = pair_setup();
+    let (t1, t2, _h1, h2) = pair_setup();
     let key = pair_key([9u8; 32]);
     let sig = key.sign(&pair_msg(&head_with(5), &h2)).unwrap();
     let leaf = refute_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     let _ = lngap_script32::sim::run(
         leaf.as_script(),
-        refute_witness_pair(&sigs, &sigs, &sig, &[&zero_state_reveal(2), &zero_state_reveal(1)]),
+        refute_witness_pair(&sigs, &sigs, &sig, &[&zero_state_sig(2), &zero_state_sig(1)]),
     );
 }

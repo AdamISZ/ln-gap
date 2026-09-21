@@ -12,11 +12,12 @@
 //!   output's self-checking splits.
 //! - `ccode`: the claimant's Lamport outcome-code key, gating the claim
 //!   output's timeout splits.
-//! - `state`: the MOVER's Lamport key over the state bits (D39, plan step
-//!   6). The venue entry's signature is the reveal of the state under this
+//! - `state`: the MOVER's Winternitz key over the state's signed bytes
+//!   (D39, plan step 6; D43's WOTS form — was a per-bit Lamport key). The
+//!   venue entry's signature is the reveal of the signed region under this
 //!   key; a mover who double-signs at one depth (a reorg-aided double-play)
-//!   exposes both preimages of every differing bit, and the `equiv_{d}_{i}`
-//!   leaf on the contract output pays the exhibitor the pot.
+//!   is convicted by the two full signatures, and the `equiv_d` leaf on the
+//!   contract output pays the exhibitor the pot.
 //!
 //! The labels are the contract crate's (`key_label(id, seq, depth,
 //! field)`); the exchange mirrors the draft's: each side fills its own keys
@@ -51,9 +52,8 @@ use lngap_channel::{CommitCtx, PresignedTx, Role};
 use lngap_contract::instance::key_label;
 use lngap_contract::{Contract, Outcome, Payout, CODE_BITS};
 use lngap_ec_wots::EpochTable;
-use lngap_factchain::slot::STATE_BITS;
 use lngap_lamport::keystore::KeyStore;
-use lngap_lamport::winternitz::WotsPublic;
+use lngap_lamport::winternitz::{WotsParams, WotsPublic};
 use lngap_lamport::PublicKey;
 use lngap_tictactoe::{Board, TicTacToe};
 
@@ -76,13 +76,12 @@ pub enum Game {
 }
 
 impl Game {
-    /// Bits in the per-depth mover state key: tic-tac-toe's 21 state bits;
-    /// chess's signed state||move (D39's chess port note: same leaf, more
-    /// bits).
-    pub fn state_bits(self) -> usize {
+    /// Bytes the per-depth mover state key signs (D43: the Winternitz
+    /// message): tic-tac-toe's 3 state bytes; chess's state||move (42).
+    pub fn state_bytes(self) -> u32 {
         match self {
-            Game::Ttt => STATE_BITS,
-            Game::Chess => lngap_chess_fc::SIGNED_BITS,
+            Game::Ttt => 3,
+            Game::Chess => 42,
         }
     }
     /// The first depth a terminal exhibit exists at, if the game has the
@@ -131,12 +130,12 @@ pub struct PosKeyOffer {
     pub refute: Option<WotsPublic>,
     pub mover_code: Option<PublicKey>,
     pub claimant_code: Option<PublicKey>,
-    pub state: Option<PublicKey>,
+    pub state: Option<WotsPublic>,
 }
 
 /// Generate `me`'s half of every depth's key set: the refute, code and
 /// state keys where I move, the claimant code key where I don't. The state
-/// key's size is the game's (`Game::state_bits`).
+/// key's size is the game's (`Game::state_bytes`).
 pub fn gen_pos_keys(ks: &mut KeyStore, me: Role, id: u32, seq: u64, max_depth: u32, game: Game) -> Result<Vec<(u32, PosKeyOffer)>> {
     let mut out = Vec::new();
     for d in 1..=max_depth {
@@ -144,7 +143,7 @@ pub fn gen_pos_keys(ks: &mut KeyStore, me: Role, id: u32, seq: u64, max_depth: u
         if mover_at(d) == me {
             offer.refute = Some(ks.generate_wots(&refute_label(id, seq, d), if d >= 2 { 96 } else { 48 })?);
             offer.mover_code = Some(ks.generate(&code_label(id, seq, d), CODE_BITS)?);
-            offer.state = Some(ks.generate(&state_label(id, seq, d), game.state_bits())?);
+            offer.state = Some(ks.generate_wots(&state_label(id, seq, d), game.state_bytes())?);
         } else {
             offer.claimant_code = Some(ks.generate(&ccode_label(id, seq, d), CODE_BITS)?);
         }
@@ -160,7 +159,7 @@ pub struct PosDepthKeys {
     pub refute: WotsPublic,
     pub mover_code: PublicKey,
     pub claimant_code: PublicKey,
-    pub state: PublicKey,
+    pub state: WotsPublic,
 }
 
 /// Merge two sides' offers into the per-depth key sets: each field must
@@ -184,7 +183,7 @@ pub fn collect_keys(mine: &[(u32, PosKeyOffer)], theirs: &[(u32, PosKeyOffer)], 
         };
         let mover_code = take_l(&a.mover_code, &b.mover_code, "mover code")?;
         let claimant_code = take_l(&a.claimant_code, &b.claimant_code, "claimant code")?;
-        let state = take_l(&a.state, &b.state, "state")?;
+        let state = take(&a.state, &b.state)?;
         out.push(PosDepthKeys { mover, refute, mover_code, claimant_code, state });
     }
     Ok(out)
@@ -220,7 +219,7 @@ impl PosInstance {
             let want = if d >= 2 { 192 } else { 96 };
             ensure!(k.refute.params.message_digits == want, "depth {d}: refute key size");
             ensure!(k.mover_code.n_bits() == CODE_BITS && k.claimant_code.n_bits() == CODE_BITS, "depth {d}: code key size");
-            ensure!(k.state.n_bits() == game.state_bits(), "depth {d}: state key size");
+            ensure!(k.state.params == WotsParams::for_bytes(game.state_bytes()), "depth {d}: state key size");
         }
         // the outcome list is the two games' shared one (UserWins 0 /
         // HubWins 1 / Draw 2); chess's Draw split can never fire on this
@@ -248,8 +247,9 @@ impl PosInstance {
 
     /// The contract output's tree: `revoke`, `settle`, `absent_1..=M`,
     /// `exhibit_5..=M` for tic-tac-toe (D37 — the terminal-claim hole's
-    /// fix; chess has no exhibit family, D42), and `equiv_{d}_{i}` for
-    /// every depth and state bit (D39 — the player-equivocation exhibit).
+    /// fix; chess has no exhibit family, D42), and `equiv_d` for every
+    /// depth (D39, D43 — the player-equivocation exhibit, one leaf per
+    /// depth: two full state-key signatures over different regions).
     pub fn tree(&self, ctx: &CommitCtx, tables: &[EpochTable]) -> Result<TapTree> {
         let mut leaves = vec![ctx.revoke_leaf(), lngap_contract::leaves::settle_leaf(ctx, self.deadline)];
         for d in 1..=self.max_depth() {
@@ -272,9 +272,7 @@ impl PosInstance {
         }
         for d in 1..=self.max_depth() {
             let pk = &self.depth_keys(d).state;
-            for (i, bit) in pk.bits.iter().enumerate() {
-                leaves.push(graph::equiv_leaf(ctx, &format!("equiv_{d}_{i}"), bit, mover_at(d).other()));
-            }
+            leaves.push(graph::equiv_leaf(ctx, &format!("equiv_{d}"), pk, mover_at(d).other()));
         }
         TapTree::new(leaves)
     }
@@ -361,32 +359,31 @@ impl PosInstance {
             }
             }
         }
-        // the player-equivocation leaves (D39, plan step 6): the exhibit of
-        // BOTH preimages of one bit of the depth-`d` mover's state key —
-        // possible only if the mover double-signed at that depth — pays the
-        // exhibitor (the non-mover) the pot. The proof is self-authenticating
-        // (no venue data, no timelock); the skeleton is the graph's standard
-        // 2-of-2 pre-sign with the payout pinned to the victim, so any holder
-        // of the two preimages (a watchtower, say) can broadcast it. The
-        // family's size is the game's (336 signed bits for chess).
+        // the player-equivocation leaves (D39, plan step 6; D43's per-depth
+        // form): the exhibit of BOTH signatures of the depth-`d` mover's
+        // state key over two different signed regions — possible only if
+        // the mover double-signed at that depth — pays the exhibitor (the
+        // non-mover) the pot. The proof is self-authenticating (no venue
+        // data, no timelock); the skeleton is the graph's standard 2-of-2
+        // pre-sign with the payout pinned to the victim, so any holder of
+        // the two signatures (a watchtower, say) can broadcast it. One leaf
+        // per depth (the per-bit family collapsed with the WOTS key).
         for d in 1..=self.max_depth() {
             let exhibitor = mover_at(d).other();
-            for i in 0..self.game.state_bits() {
-                let name = format!("equiv_{d}_{i}");
-                let tx = build_spend(
-                    outpoint,
-                    &tree0.leaf(&name)?.timelock,
-                    vec![TxOut { value: self.value - fee, script_pubkey: ctx.key(exhibitor).payout_spk.clone() }],
-                );
-                out.push(PresignedTx::new(
-                    name.clone(),
-                    tx,
-                    vec![prevout.clone()],
-                    &tree0,
-                    &name,
-                    format!("player equivocation at depth {d}, state bit {i}: the mover forfeits"),
-                )?);
-            }
+            let name = format!("equiv_{d}");
+            let tx = build_spend(
+                outpoint,
+                &tree0.leaf(&name)?.timelock,
+                vec![TxOut { value: self.value - fee, script_pubkey: ctx.key(exhibitor).payout_spk.clone() }],
+            );
+            out.push(PresignedTx::new(
+                name.clone(),
+                tx,
+                vec![prevout.clone()],
+                &tree0,
+                &name,
+                format!("player equivocation at depth {d}: the mover forfeits"),
+            )?);
         }
         Ok(out)
     }

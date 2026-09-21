@@ -60,6 +60,24 @@ pub fn wots_wire(sig: &WotsSig) -> Vec<Vec<u8>> {
     w
 }
 
+/// A TIED authorship signature's witness block in wire order (D43): per
+/// digit, the reveal hash; the CHECKSUM digits also carry their declared
+/// value (the message digits' values are the register file's own digits —
+/// `wots_verify_tied` PICKs them, nothing to carry). Wire-order ascending,
+/// so the last checksum digit's pair is consumed first.
+pub fn wots_wire_tied(sig: &WotsSig) -> Vec<Vec<u8>> {
+    let n = sig.params.total_digits() as usize;
+    let msg = sig.params.message_digits as usize;
+    let mut w = Vec::with_capacity(n + (n - msg));
+    for i in 0..n {
+        w.push(sig.hashes[i].to_vec());
+        if i >= msg {
+            w.push(snum(sig.digits[i]));
+        }
+    }
+    w
+}
+
 /// The refutation leaf for one slot: `table` is the slot's epoch table (only
 /// the head chunks' points are embedded in the script) and `key` the mover's
 /// refute key for the slot. `gate` runs on the register file right after the
@@ -83,25 +101,29 @@ pub fn refute_leaf(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Build
 /// The refutation witness, wire order. `head_sigs[j]` must sign the spend's
 /// sighash under the point for the attested value of head chunk `j`
 /// (= header chunk `HEAD_CHUNK_START + j`); `sig` re-commits the head.
-/// `preimages` is the mover's state-key reveal over the head's claimed
-/// state (the D41 authorship block, consumed bit-ascending off the block
-/// top: `preimages[0]` LAST in wire order). The block's length is the
-/// game's signed-bits count (21 tic-tac-toe, 336 chess).
-pub fn refute_witness(head_sigs: &[Vec<u8>], sig: &WotsSig, preimages: &lngap_lamport::Reveal) -> Vec<Vec<u8>> {
+/// `auth` is the mover's state-key signature over the head's signed region
+/// (the D41 authorship block, D43's tied-WOTS form: the reveal hashes
+/// ride below the register file; the message digits are the file's own).
+pub fn refute_witness(head_sigs: &[Vec<u8>], sig: &WotsSig, auth: &WotsSig) -> Vec<Vec<u8>> {
     assert_eq!(head_sigs.len(), HEAD_CHUNKS);
-    let n_auth = preimages.preimages.len();
-    let mut w = Vec::with_capacity(HEAD_CHUNKS + n_auth + 2 * sig.params.total_digits() as usize);
+    let mut w = Vec::with_capacity(HEAD_CHUNKS + auth.params.total_digits() as usize + 2 * sig.params.total_digits() as usize);
     // chunk sigs, descending: head chunk 0's sig ends up consumed first
     for j in (0..HEAD_CHUNKS).rev() {
         w.push(head_sigs[j].clone());
     }
-    // the authorship block: the last bit's preimage first, bit-0's last
-    // (the fragment consumes bit 0 off the block top)
-    for i in (0..n_auth).rev() {
-        w.push(preimages.preimages[i].to_vec());
-    }
+    w.extend(wots_wire_tied(auth));
     w.extend(wots_wire(sig));
     w
+}
+
+/// The venue-side check of an entry's authorship signature (D41/D43):
+/// `sigs` must be the state-key WOTS signature over `msg` (the game's
+/// `auth_message` of the entry's head).
+pub fn check_entry_sig(pk: &WotsPublic, msg: &[u8], sigs: &[[u8; 20]]) -> bool {
+    match WotsSig::from_hashes(pk.params, msg, sigs.to_vec()) {
+        Ok(sig) => pk.verify(&sig).is_ok(),
+        Err(_) => false,
+    }
 }
 
 /// The disprove witness: the re-commitment reveal alone.
@@ -162,21 +184,21 @@ pub fn refute_leaf_pair_gated(
 /// consumed first after the reveal), then the pair reveal. `sigs_prev`/`sigs`
 /// must sign the spend's sighash under the two slots' tables' head-chunk
 /// points. Between the chunk sigs and the reveal: the authorship blocks
-/// (D41) — `auth` in CONSUMPTION order: the block the gate checks FIRST
-/// (`auth[0]`, the new head's) lands on the region top (each block's bit-0
-/// last); tic-tac-toe passes both heads' blocks (`[new, prev]`), chess the
-/// judged head's alone (D42: the pair refute's stack budget). Each block's
-/// length is the game's signed-bits count (21 ttt, 336 chess).
+/// (D41, D43 tied-WOTS form) — `auth` in CONSUMPTION order: the block the
+/// gate checks FIRST (`auth[0]`, the new head's) lands on the region top;
+/// tic-tac-toe passes both heads' blocks (`[new, prev]`), chess the judged
+/// head's alone (D42: the pair refute's stack budget — D43 makes
+/// both-heads fit again; the narrowing stands as a size choice).
 pub fn refute_witness_pair(
     sigs_prev: &[Vec<u8>],
     sigs: &[Vec<u8>],
     sig: &WotsSig,
-    auth: &[&lngap_lamport::Reveal],
+    auth: &[&WotsSig],
 ) -> Vec<Vec<u8>> {
     assert_eq!(sigs_prev.len(), HEAD_CHUNKS);
     assert_eq!(sigs.len(), HEAD_CHUNKS);
     assert!(!auth.is_empty() && auth.len() <= 2, "one block per parked head");
-    let n_auth: usize = auth.iter().map(|r| r.preimages.len()).sum();
+    let n_auth: usize = auth.iter().map(|s| s.params.total_digits() as usize + s.params.checksum_digits as usize).sum();
     let mut w = Vec::with_capacity(2 * HEAD_CHUNKS + n_auth + 2 * sig.params.total_digits() as usize);
     for j in (0..HEAD_CHUNKS).rev() {
         w.push(sigs[j].clone());
@@ -185,9 +207,7 @@ pub fn refute_witness_pair(
         w.push(sigs_prev[j].clone());
     }
     for block in auth.iter().rev() {
-        for i in (0..block.preimages.len()).rev() {
-            w.push(block.preimages[i].to_vec());
-        }
+        w.extend(wots_wire_tied(block));
     }
     w.extend(wots_wire(sig));
     w

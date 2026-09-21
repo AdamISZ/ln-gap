@@ -33,13 +33,11 @@ use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PartyPubKeys, Presigned
 use lngap_chess::certificate::{find_kind, mechanical_successor};
 use lngap_chess::leaf::exhibit_values;
 use lngap_chess::{apply, Move};
-use lngap_chess_fc::{ChessEntry, ChessState, SIGNED_BITS};
+use lngap_chess_fc::{ChessEntry, ChessState};
 use lngap_ec_wots::{Attester, EpochTable};
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
-use lngap_lamport::winternitz::WotsSig;
-use lngap_lamport::Reveal;
-use lngap_n4bit::{hash_claim, Digest};
+use lngap_lamport::winternitz::{WotsParams, WotsPublic, WotsSig};
 use lngap_pos::chess;
 use lngap_pos::instance::{self, Game as WhichGame, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
@@ -62,6 +60,21 @@ const POT: u64 = 1_000_000;
 /// The pre-sign fee per hop: the chess pair readout is ~44 kvB, so the 1k
 /// placeholder would sit under the relay floor (D42).
 const FEE: u64 = 60_000;
+/// The skeleton count at open: settle + 8x(claim, refute, 3+3 splits) + 8
+/// per-depth equiv leaves (D43).
+const GRAPH_LEN: usize = 73;
+/// The chess state key's reveal length (the tied-WOTS authorship: 84
+/// message + 3 checksum digits over the 42 signed bytes).
+const STATE_DIGITS: usize = 87;
+
+/// An entry's authorship message (D43): the 40 state bytes, then the
+/// move's two bytes (low first) — `chess::auth_message` of the head.
+fn entry_msg(e: &ChessEntry) -> Vec<u8> {
+    let mv = u32::from(e.state.mv.to_u16());
+    let mut m = e.state.to_e().to_vec();
+    m.extend_from_slice(&(mv as u16).to_le_bytes());
+    m
+}
 
 fn epoch_tables() -> Vec<EpochTable> {
     let attester = Attester::new(SEED);
@@ -83,13 +96,15 @@ fn sign_tx(kp: &Keypair, tx: &Transaction, prev: &TxOut, leaf: &bitcoin::ScriptB
     sign_tapscript(kp, tx, 0, std::slice::from_ref(prev), leaf).unwrap().as_ref().to_vec()
 }
 
-/// A conflicting reveal of the mover's depth-`d` state key, reproduced by
-/// hand from the keystore's derivation (the honest keystore refuses to
-/// equivocate — asserted at the use site; the 4b wrong-code pattern).
-fn adversarial_state_reveal(ks_seed_label: &str, d: u32, bits: &[bool]) -> Reveal {
-    let seed = Seed::from_label(ks_seed_label);
-    let sk = lngap_lamport::SecretKey::from_entropy(SIGNED_BITS, seed.derive_bytes(&format!("lamport/{}", instance::state_label(CONTRACT_ID, 1, d))));
-    sk.reveal_bits(bits).unwrap()
+/// A conflicting signature under the mover's depth-`d` state key,
+/// reproduced by hand from the keystore's derivation (the honest keystore
+/// refuses to equivocate — asserted at the use site; the 4b wrong-code
+/// pattern).
+fn adversarial_state_sig(ks_seed_label: &str, d: u32, msg: &[u8]) -> WotsSig {
+    let mut ks = KeyStore::new(Seed::from_label(ks_seed_label));
+    let label = instance::state_label(CONTRACT_ID, 1, d);
+    ks.generate_wots(&label, 42).unwrap();
+    ks.sign_wots(&label, msg).unwrap()
 }
 
 /// One PoS-venue chess game with its contract funded on a fresh regtest:
@@ -112,7 +127,7 @@ struct ChessPosGame {
     /// state key's claim-native mirror commitments (in a deployment these
     /// ride the draft's public offers; the contract leaf uses the hash160
     /// form of the same key).
-    venue_commits: HashMap<u32, Vec<[Digest; 2]>>,
+    venue_commits: HashMap<u32, WotsPublic>,
     graph: Vec<PresignedTx>,
     /// The position after the last sealed move.
     state: ChessState,
@@ -154,7 +169,7 @@ impl ChessPosGame {
         let mut venue_commits = HashMap::new();
         for d in 1..=MAX_DEPTH {
             let ks = if instance::mover_at(d) == Role::User { &mut user_ks } else { &mut hub_ks };
-            venue_commits.insert(d, ks.commit_with(&instance::state_label(CONTRACT_ID, 1, d), |p| hash_claim(p))?);
+            venue_commits.insert(d, ks.wots_public(&instance::state_label(CONTRACT_ID, 1, d))?);
         }
         let attester = Attester::new(SEED);
         let (gen, _t0) = lngap_pos::genesis(&attester);
@@ -189,8 +204,8 @@ impl ChessPosGame {
         ensure!(g.rt.height()? == btc_open, "the funding mined exactly one block");
         g.graph = g.inst.graph(&ctx, c_op, &c_prev, &g.tables)?;
         ensure!(
-            g.graph.len() == (1 + MAX_DEPTH as usize * 8 + MAX_DEPTH as usize * SIGNED_BITS) as usize,
-            "the wired chess graph: settle + {MAX_DEPTH}x(claim, refute, 3+3 splits) + {MAX_DEPTH}x{SIGNED_BITS} equiv; NO exhibit family (D42)"
+            g.graph.len() == GRAPH_LEN,
+            "the wired chess graph: settle + {MAX_DEPTH}x(claim, refute, 3+3 splits) + {MAX_DEPTH} per-depth equiv (D43); NO exhibit family (D42)"
         );
         g.say(format!(
             "game opened: contract {CONTRACT_ID}, pot {} sat; {} pre-signed transactions",
@@ -239,7 +254,7 @@ impl ChessPosGame {
         self.client.verify_and_append(&block, &table).map_err(|e| anyhow::anyhow!(e))?;
         self.next_slot += 1;
         if let Some((e, new)) = entry {
-            ensure!(e.check_sigs(&self.venue_commits[&slot]), "slot {slot}: the entry does not open the mover's state key");
+            ensure!(refute::check_entry_sig(&self.venue_commits[&slot], &entry_msg(&e), &e.sigs), "slot {slot}: the entry does not open the mover's state key");
             let mv = new.mv;
             self.state = new;
             self.depth = slot;
@@ -256,8 +271,9 @@ impl ChessPosGame {
     }
 
     /// One Bitcoin block, one venue slot: play `uci` (legal), signed for
-    /// real. Returns the new state and the state reveal (evidence material).
-    fn play(&mut self, uci: &str) -> Result<(ChessState, Reveal)> {
+    /// real. Returns the new state and the state signature (evidence
+    /// material).
+    fn play(&mut self, uci: &str) -> Result<(ChessState, WotsSig)> {
         self.rt.mine(1)?;
         let slot = self.next_slot;
         let mover = instance::mover_at(slot);
@@ -265,16 +281,16 @@ impl ChessPosGame {
         let mut pos = apply(&self.state.pos, mv).map_err(|v| anyhow::anyhow!("{v}"))?;
         pos.fullmove = 0;
         let new = ChessState { pos, mv, depth: slot as u8 };
-        let reveal = self.ks(mover).reveal_bits(&instance::state_label(CONTRACT_ID, 1, slot), &ChessEntry::signed_bits(&new))?;
+        let sig = self.ks(mover).sign_wots(&instance::state_label(CONTRACT_ID, 1, slot), &entry_msg(&ChessEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, state: new.clone(), sigs: vec![] }))?;
         let entry = ChessEntry {
             game_id: GAME_ID,
             depth: slot as u8,
             mover: mover.idx() as u8,
             state: new.clone(),
-            sigs: reveal.preimages.clone(),
+            sigs: sig.hashes.clone(),
         };
         self.seal(Some((entry, new.clone())))?;
-        Ok((new, reveal))
+        Ok((new, sig))
     }
 
     /// One empty venue slot (the mover stalls, or the game is over).
@@ -308,13 +324,13 @@ impl ChessPosGame {
         let mut pos = mechanical_successor(&self.state.pos, mv);
         pos.fullmove = 0;
         let new = ChessState { pos, mv, depth: slot as u8 };
-        let reveal = self.ks(mover).reveal_bits(&instance::state_label(CONTRACT_ID, 1, slot), &ChessEntry::signed_bits(&new))?;
+        let sig = self.ks(mover).sign_wots(&instance::state_label(CONTRACT_ID, 1, slot), &entry_msg(&ChessEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, state: new.clone(), sigs: vec![] }))?;
         let entry = ChessEntry {
             game_id: GAME_ID,
             depth: slot as u8,
             mover: mover.idx() as u8,
             state: new.clone(),
-            sigs: reveal.preimages.clone(),
+            sigs: sig.hashes.clone(),
         };
         self.seal(Some((entry, new)))?;
         self.say(format!("slot {slot} holds {mover}'s move {uci} — attested, NOT legal"));
@@ -338,7 +354,7 @@ impl ChessPosGame {
             depth: slot as u8,
             mover: mover.idx() as u8,
             state: new,
-            sigs: vec![[0x11; 20]; SIGNED_BITS],
+            sigs: vec![[0x11; 20]; STATE_DIGITS],
         };
         self.miner.submit(entry.encode());
         let (block, table) = self.miner.seal_next(slot).map_err(|e| anyhow::anyhow!(e))?;
@@ -349,34 +365,34 @@ impl ChessPosGame {
         Ok(())
     }
 
-    /// The state-key reveal over a sealed head's CLAIMED state||move (the
-    /// D41 authorship block), from that depth's mover's keystore — the same
-    /// bits as the published entry's, so the same preimages (idempotent).
-    fn auth_reveal(&mut self, d: u32, head: &[u8; 48]) -> Reveal {
-        let state = ChessState::from_e(head[8..48].try_into().unwrap()).unwrap();
+    /// The state-key signature over a sealed head's signed region (the D41
+    /// authorship block), from that depth's mover's keystore — the same
+    /// message as the published entry's, so the same signature
+    /// (idempotent).
+    fn auth_sig(&mut self, d: u32, head: &[u8; 48]) -> WotsSig {
         self.ks(instance::mover_at(d))
-            .reveal_bits(&instance::state_label(CONTRACT_ID, 1, d), &ChessEntry::signed_bits(&state))
+            .sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &chess::auth_message(head))
             .unwrap()
     }
 
     /// The mover at depth `d` plays a SECOND, conflicting move in a fork
     /// block at the same slot (the venue equivocates). The client names the
-    /// event; the conflicting state reveal is hand-reproduced.
-    fn double_play(&mut self, d: u32, uci: &str, prior: &ChessState) -> Result<(ChessState, Reveal)> {
+    /// event; the conflicting state signature is hand-reproduced.
+    fn double_play(&mut self, d: u32, uci: &str, prior: &ChessState) -> Result<(ChessState, WotsSig)> {
         let mover = instance::mover_at(d);
         let mv = Move::parse(uci).ok_or_else(|| anyhow::anyhow!("bad uci {uci}"))?;
         let mut pos = apply(&prior.pos, mv).map_err(|v| anyhow::anyhow!("{v}"))?;
         pos.fullmove = 0;
         let new = ChessState { pos, mv, depth: d as u8 };
-        let bits = ChessEntry::signed_bits(&new);
-        ensure!(self.ks(mover).reveal_bits(&instance::state_label(CONTRACT_ID, 1, d), &bits).is_err(), "the honest keystore refuses to equivocate");
-        let reveal = adversarial_state_reveal(&format!("pc/{}-ks", mover.name()), d, &bits);
+        let msg = entry_msg(&ChessEntry { game_id: GAME_ID, depth: d as u8, mover: mover.idx() as u8, state: new.clone(), sigs: vec![] });
+        ensure!(self.ks(mover).sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &msg).is_err(), "the honest keystore refuses to equivocate");
+        let sig = adversarial_state_sig(&format!("pc/{}-ks", mover.name()), d, &msg);
         let entry = ChessEntry {
             game_id: GAME_ID,
             depth: d as u8,
             mover: mover.idx() as u8,
             state: new.clone(),
-            sigs: reveal.preimages.clone(),
+            sigs: sig.hashes.clone(),
         }
         .encode();
         let parent = self.sealed[&(d - 1)].header.digest();
@@ -388,7 +404,7 @@ impl ChessPosGame {
             "the second sealed block at slot {d} is the equivocation"
         );
         self.say(format!("slot {d} sealed TWICE ({mover}'s double-play): the client names the equivocation"));
-        Ok((new, reveal))
+        Ok((new, sig))
     }
 
     fn skel(&self, label: &str) -> &PresignedTx {
@@ -457,9 +473,9 @@ impl ChessPosGame {
         let mover = instance::mover_at(d);
         let pair_sig = self.ks(mover).sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).map_err(|e| anyhow::anyhow!(e))?;
         let new_r = if junk {
-            Reveal { preimages: vec![[0x11; 20]; SIGNED_BITS] }
+            WotsSig::from_hashes(WotsParams::for_bytes(42), &chess::auth_message(&new_head), vec![[0x11; 20]; STATE_DIGITS]).unwrap()
         } else {
-            self.auth_reveal(d, &new_head)
+            self.auth_sig(d, &new_head)
         };
         let sign_at = |block: &SealedBlock| -> Vec<Vec<u8>> {
             (0..HEAD_CHUNKS).map(|j| sign_tx(&Keypair::from_secret_key(SECP256K1, &block.attestation.secrets[HEAD_CHUNK_START + j]), &tx, &prev, &leaf)).collect()
@@ -579,22 +595,19 @@ impl ChessPosGame {
         Ok(())
     }
 
-    /// The equivocation exhibit (D39): both preimages of a differing signed
-    /// bit of the depth-`d` mover's key, from the two conflicting entries.
-    fn equiv_exhibit(&mut self, d: u32, state_a: &ChessState, reveal_a: &Reveal, state_b: &ChessState, reveal_b: &Reveal) -> Result<()> {
-        let bits_a = ChessEntry::signed_bits(state_a);
-        let bits_b = ChessEntry::signed_bits(state_b);
-        let i = (0..SIGNED_BITS).find(|&i| bits_a[i] != bits_b[i]).expect("conflicting states differ at some bit");
-        let (pa, pb) = (reveal_a.preimages[i], reveal_b.preimages[i]);
-        let (p0, p1) = if bits_a[i] { (pb, pa) } else { (pa, pb) };
-        let c = &self.inst.depth_keys(d).state.bits[i];
-        assert_eq!(lngap_btc::hash160(&p0), c.h0, "p0 must open the bit's h0");
-        assert_eq!(lngap_btc::hash160(&p1), c.h1, "p1 must open the bit's h1");
-        let label = format!("equiv_{d}_{i}");
+    /// The equivocation exhibit (D39, D43's per-depth form): both
+    /// signatures of the depth-`d` mover's state key, from the two
+    /// conflicting entries.
+    fn equiv_exhibit(&mut self, d: u32, _state_a: &ChessState, sig_a: &WotsSig, _state_b: &ChessState, sig_b: &WotsSig) -> Result<()> {
+        let label = format!("equiv_{d}");
         let [sig_h, sig_u] = self.sigs22(&label);
         let exhibitor = instance::mover_at(d).other();
-        self.say(format!("{exhibitor} exhibits the double-signed state bit {i} at depth {d}"));
-        self.run(&label, vec![p0.to_vec(), p1.to_vec(), sig_h, sig_u], exhibitor)?;
+        self.say(format!("{exhibitor} exhibits the two conflicting state signatures at depth {d}"));
+        let mut w = refute::wots_wire(sig_a);
+        w.extend(refute::wots_wire(sig_b));
+        w.push(sig_h);
+        w.push(sig_u);
+        self.run(&label, w, exhibitor)?;
         Ok(())
     }
 
@@ -647,7 +660,7 @@ fn stall(sc: &'static Scenario, d: u32, opening: &[&str]) -> Result<Report> {
 pub const PC1: Scenario = Scenario {
     id: "PC1",
     title: "PoS graph, chess: cooperative game, nothing on Bitcoin",
-    expected: "fool's mate on the PoS venue, each entry's signature verified against the mover's per-depth key; no Bitcoin transaction; 2,753 pre-signed transactions at open",
+    expected: "fool's mate on the PoS venue, each entry's signature verified against the mover's per-depth key; no Bitcoin transaction; 73 pre-signed transactions at open (D43's per-depth equiv leaves)",
     run: || {
         let mut g = ChessPosGame::open(sat(POT))?;
         for uci in ["f2f3", "e7e5", "g2g4", "d8h4"] {
@@ -738,16 +751,16 @@ pub const PC6: Scenario = Scenario {
 pub const PC7: Scenario = Scenario {
     id: "PC7",
     title: "PoS graph, chess: a double-played slot (venue equivocation + the mover's double-sign) pays the victim",
-    expected: "the venue seals slot 2 twice with conflicting hub entries (e7e5 and c7c5; the client names the equivocation); the user exhibits both preimages of a differing signed bit of the hub's depth-2 key (equiv_2_{i}, a 336-bit family) and takes the pot: one transaction",
+    expected: "the venue seals slot 2 twice with conflicting hub entries (e7e5 and c7c5; the client names the equivocation); the user exhibits both signatures of the hub's depth-2 state key (equiv_2, the per-depth D43 form) and takes the pot: one transaction",
     run: || {
         let mut g = ChessPosGame::open(sat(POT))?;
         g.play("e2e4")?;
         let prior = g.state.clone();
-        let (state_a, reveal_a) = g.play("e7e5")?; // honestly signed
-        let (state_b, reveal_b) = g.double_play(2, "c7c5", &prior)?; // the fork block
+        let (state_a, sig_a) = g.play("e7e5")?; // honestly signed
+        let (state_b, sig_b) = g.double_play(2, "c7c5", &prior)?; // the fork block
         g.wait_to(g.mature_at(2))?;
-        g.equiv_exhibit(2, &state_a, &reveal_a, &state_b, &reveal_b)?;
-        ensure!(roles(&g).len() == 1 && roles(&g)[0].starts_with("equiv_2_"), "{:?}", roles(&g));
+        g.equiv_exhibit(2, &state_a, &sig_a, &state_b, &sig_b)?;
+        ensure!(roles(&g) == ["equiv_2".to_string()], "{:?}", roles(&g));
         ensure!(g.balances() == [sat(POT - FEE), sat(0)], "{:?}", g.balances());
         Ok(report(&g, &PC7))
     },

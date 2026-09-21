@@ -10,7 +10,7 @@
 
 use lngap_channel::Role;
 use lngap_contract::Contract;
-use lngap_lamport::winternitz::{WotsSecret, WotsPublic};
+use lngap_lamport::winternitz::WotsSecret;
 use lngap_lamport::bits_to_uint;
 use lngap_pos::refute::{self, pair_key, refute_key};
 use lngap_pos::ttt::{self, Layout};
@@ -349,23 +349,24 @@ fn exhibit_leaf_runs_only_when_terminal() {
     let prior = after(&[0, 3, 1, 4]);
     let p_head = head(1, 4, 1, 4, state_u32(&prior));
     // the per-head state keys (fixture): the prior head is the hub's move
-    // at depth 4, the new the user's at depth 5
-    let sk_prev = lngap_lamport::SecretKey::from_entropy(lngap_factchain::slot::STATE_BITS, [0x52; 32]);
-    let sk_new = lngap_lamport::SecretKey::from_entropy(lngap_factchain::slot::STATE_BITS, [0x51; 32]);
-    let reveal_prev = sk_prev.reveal_bits(&lngap_lamport::uint_to_bits(state_u32(&prior), lngap_factchain::slot::STATE_BITS)).unwrap();
+    // at depth 4, the new the user's at depth 5 (D43: WOTS over the 3
+    // state bytes)
+    let sk_prev = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [0x52; 32]);
+    let sk_new = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [0x51; 32]);
+    let sig_prev = sk_prev.sign(&ttt::auth_message(&p_head)).unwrap();
     let sigs: Vec<Vec<u8>> = (0..refute::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     for (b, terminal) in [(play(&prior, 2).unwrap(), true), (play(&prior, 8).unwrap(), false)] {
         let n_head = head(1, 5, 0, 2, state_u32(&b));
         let mut msg = p_head.to_vec();
         msg.extend_from_slice(&n_head);
         let sig = key.sign(&msg).unwrap();
-        let reveal_new = sk_new.reveal_bits(&lngap_lamport::uint_to_bits(state_u32(&b), lngap_factchain::slot::STATE_BITS)).unwrap();
+        let sig_new = sk_new.sign(&ttt::auth_message(&n_head)).unwrap();
         let leaf = refute::refute_leaf_pair_gated(&t4, &t5, &key.public(), |bd| {
             let bd = ttt::authorship_fragment(bd, l.file, l.new, &sk_new.public());
             let bd = ttt::authorship_fragment(bd, l.file, 0, &sk_prev.public());
             ttt::terminal_gate_fragment(bd, l.file, l.new)
         });
-        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&sigs, &sigs, &sig, &[&reveal_new, &reveal_prev]));
+        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&sigs, &sigs, &sig, &[&sig_new, &sig_prev]));
         assert_eq!(res.is_ok(), terminal, "the exhibit leaf must admit exactly the terminal state");
     }
 }
