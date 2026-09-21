@@ -9,7 +9,9 @@ use lngap_channel::{ChannelState, ContractOutput, Role};
 use lngap_contract::claim::{end_label, index_label, round_label};
 use lngap_contract::inner::{self, InnerKeys};
 use lngap_contract::instance::key_label;
-use lngap_contract::{ChallengerKeys, ClaimKeys, ContractInstance, DepthKeys, InstanceSpec, ProgramRegistry, CODE_BITS};
+use lngap_contract::claim::ClaimSpec;
+use lngap_contract::instance::{stall_spec_at, STALL_KEY_SETS};
+use lngap_contract::{ChallengerKeys, ClaimKeys, ContractInstance, DepthKeys, GraphShape, InstanceSpec, ProgramRegistry, CODE_BITS, DEPTH_BITS};
 use lngap_lamport::keystore::KeyStore;
 use serde::{Deserialize, Serialize};
 
@@ -27,13 +29,17 @@ pub enum Change {
     /// agreement (e.g. the party on turn has missed its deadline, or a bond
     /// is released). The responder's policy decides.
     Cancel { id: u32 },
+    /// Fold a contract with an agreed distribution of its value (a game
+    /// whose result lives elsewhere than the contract's state). The
+    /// responder's policy must accept it explicitly.
+    Fold { id: u32, dist: [Amount; 2] },
 }
 
 impl Change {
     pub fn contract_id(&self) -> Option<u32> {
         match self {
             Change::Pay { .. } => None,
-            Change::Open { id, .. } | Change::Move { id, .. } | Change::Resolve { id } | Change::Cancel { id } => Some(*id),
+            Change::Open { id, .. } | Change::Move { id, .. } | Change::Resolve { id } | Change::Cancel { id } | Change::Fold { id, .. } => Some(*id),
         }
     }
 }
@@ -108,8 +114,9 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
                 spec.balances[r.idx()] -= stakes[r.idx()];
             }
             let state = p.initial_bits();
-            let m = p.max_depth_from_bits(&state)?;
-            let has_claim = (1..=m).any(|d| p.claim(&state, d).is_some());
+            let stall = p.graph_shape() == GraphShape::Stall;
+            let m = if stall { STALL_KEY_SETS as u32 } else { p.max_depth_from_bits(&state)? };
+            let has_claim = stall || (1..=m).any(|d| p.claim(&state, d).is_some());
             spec.contracts.push(InstanceSpec {
                 id: *id,
                 program: program.clone(),
@@ -145,6 +152,13 @@ pub fn apply_change(current: &ChannelState, change: &Change, programs: &ProgramR
             spec.balances[0] += d[0];
             spec.balances[1] += d[1];
         }
+        Change::Fold { id, dist } => {
+            let pos = spec.contracts.iter().position(|c| c.id == *id).ok_or_else(|| anyhow!("no contract {id}"))?;
+            let c = spec.contracts.remove(pos);
+            ensure!(dist[0] + dist[1] == c.value, "fold of contract {id} distributes {} + {} but it holds {}", dist[0], dist[1], c.value);
+            spec.balances[0] += dist[0];
+            spec.balances[1] += dist[1];
+        }
     }
     Ok(spec)
 }
@@ -157,12 +171,79 @@ pub struct MyKeys {
     pub challenger: Vec<(u32, u32, ChallengerKeys)>,
 }
 
+/// The prover's Winternitz keys for `spec` at key index `d` of contract `id`.
+pub fn gen_claim_keys(ks: &mut KeyStore, spec: &ClaimSpec, id: u32, seq: u64, d: u32) -> Result<ClaimKeys> {
+    let nb = spec.wots_bytes();
+    Ok(ClaimKeys {
+        end: ks.generate_wots(&end_label(id, seq, d), nb)?,
+        rounds: (1..=spec.rounds()).map(|r| (0..spec.k - 1).map(|t| ks.generate_wots(&round_label(id, seq, d, r, t), nb)).collect::<Result<Vec<_>>>()).collect::<Result<Vec<_>>>()?,
+        inner: if spec.inner {
+            Some(InnerKeys {
+                re_cur: ks.generate_wots(&inner::re_cur_label(id, seq, d), nb)?,
+                re_next: ks.generate_wots(&inner::re_next_label(id, seq, d), nb)?,
+                block: (0..spec.hash.block_words()).map(|j| ks.generate_wots(&inner::block_label(id, seq, d, j as u32), 4)).collect::<Result<Vec<_>>>()?,
+                sched: if spec.has_schedule() {
+                    ((spec.hash.block_words() as u32)..spec.inner_rounds()).map(|i| ks.generate_wots(&inner::sched_label(id, seq, d, i), 4)).collect::<Result<Vec<_>>>()?
+                } else {
+                    vec![]
+                },
+                states: (1..=spec.inner_search().rounds())
+                    .map(|r| (0..spec.inner_k() - 1).map(|t| ks.generate_wots(&inner::inner_state_label(id, seq, d, r, t), (spec.d_words() * 4) as u32)).collect::<Result<Vec<_>>>())
+                    .collect::<Result<Vec<_>>>()?,
+            })
+        } else {
+            None
+        },
+    })
+}
+
+/// The challenger's index keys for `spec` at key index `d`.
+pub fn gen_challenger_keys(ks: &mut KeyStore, spec: &ClaimSpec, id: u32, seq: u64, d: u32) -> Result<ChallengerKeys> {
+    Ok(ChallengerKeys {
+        indices: (1..=spec.rounds()).map(|r| ks.generate(&index_label(id, seq, d, r), spec.index_bits())).collect::<Result<Vec<_>>>()?,
+        inner_indices: if spec.inner {
+            (1..=spec.inner_search().rounds()).map(|r| ks.generate(&inner::inner_index_label(id, seq, d, r), spec.inner_search().index_bits())).collect::<Result<Vec<_>>>()?
+        } else {
+            vec![]
+        },
+    })
+}
+
 /// Fill in `me`'s keys for every depth and empty slot. Returns what was
 /// filled (to send to the counterparty).
 pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs: &ProgramRegistry) -> Result<MyKeys> {
     let mut filled = MyKeys::default();
     for c in &mut spec.contracts {
         let p = programs.resolve(&c.program)?;
+        if p.graph_shape() == GraphShape::Stall {
+            // one stall and one lie key set per role; the other role holds
+            // the challenger keys of each
+            for i in 0..STALL_KEY_SETS {
+                let d = i as u32 + 1;
+                let owner = Role::BOTH[i % 2];
+                let cspec = stall_spec_at(&*p, i).ok_or_else(|| anyhow!("stall graph without a claim at index {d}"))?;
+                if owner == me && c.keys[i].is_none() {
+                    let k = DepthKeys {
+                        prover: me,
+                        mv: ks.generate(&key_label(c.id, c.keys_seq, d, "move"), p.n_move_bits())?,
+                        state: ks.generate(&key_label(c.id, c.keys_seq, d, "state"), p.n_state_bits())?,
+                        code: ks.generate(&key_label(c.id, c.keys_seq, d, "code"), CODE_BITS)?,
+                        claim: Some(gen_claim_keys(ks, &cspec, c.id, c.keys_seq, d)?),
+                        prior: Some(ks.generate(&key_label(c.id, c.keys_seq, d, "prior"), p.n_state_bits())?),
+                        state_n4: vec![],
+                        depth: Some(ks.generate(&key_label(c.id, c.keys_seq, d, "depth"), DEPTH_BITS)?),
+                    };
+                    filled.prover.push((c.id, d, k.clone()));
+                    c.keys[i] = Some(k);
+                }
+                if owner != me && c.challenger_keys[i].is_none() {
+                    let ck = gen_challenger_keys(ks, &cspec, c.id, c.keys_seq, d)?;
+                    filled.challenger.push((c.id, d, ck.clone()));
+                    c.challenger_keys[i] = Some(ck);
+                }
+            }
+            continue;
+        }
         let has_claim = (1..=c.keys.len() as u32).any(|d| p.claim(&c.state, d).is_some());
         let mut prover = p.turn_bits(&c.state)?;
         for i in 0..c.keys.len() {
@@ -171,50 +252,28 @@ pub fn fill_my_keys(spec: &mut StateSpec, me: Role, ks: &mut KeyStore, programs:
             let claim = p.claim(&c.state, d);
             if pr == me && c.keys[i].is_none() {
                 let claim_keys = match &claim {
-                    Some(spec) => {
-                        let nb = spec.wots_bytes();
-                        Some(ClaimKeys {
-                            end: ks.generate_wots(&end_label(c.id, c.keys_seq, d), nb)?,
-                            rounds: (1..=spec.rounds())
-                                .map(|r| (0..spec.k - 1).map(|t| ks.generate_wots(&round_label(c.id, c.keys_seq, d, r, t), nb)).collect::<Result<Vec<_>>>())
-                                .collect::<Result<Vec<_>>>()?,
-                            inner: if spec.inner {
-                                Some(InnerKeys {
-                                    re_cur: ks.generate_wots(&inner::re_cur_label(c.id, c.keys_seq, d), nb)?,
-                                    re_next: ks.generate_wots(&inner::re_next_label(c.id, c.keys_seq, d), nb)?,
-                                    block: (0..16).map(|j| ks.generate_wots(&inner::block_label(c.id, c.keys_seq, d, j), 4)).collect::<Result<Vec<_>>>()?,
-                                    sched: (16..inner::ROUNDS).map(|i| ks.generate_wots(&inner::sched_label(c.id, c.keys_seq, d, i), 4)).collect::<Result<Vec<_>>>()?,
-                                    states: (1..=inner::SEARCH.rounds())
-                                        .map(|r| (0..inner::INNER_K - 1).map(|t| ks.generate_wots(&inner::inner_state_label(c.id, c.keys_seq, d, r, t), 32)).collect::<Result<Vec<_>>>())
-                                        .collect::<Result<Vec<_>>>()?,
-                                })
-                            } else {
-                                None
-                            },
-                        })
-                    }
+                    Some(spec) => Some(gen_claim_keys(ks, spec, c.id, c.keys_seq, d)?),
                     None => None,
                 };
+                let star = p.graph_shape() == GraphShape::Star;
+                let state_label = key_label(c.id, c.keys_seq, d, "state");
+                let state = ks.generate(&state_label, p.n_state_bits())?;
                 let k = DepthKeys {
                     prover: me,
                     mv: ks.generate(&key_label(c.id, c.keys_seq, d, "move"), p.n_move_bits())?,
-                    state: ks.generate(&key_label(c.id, c.keys_seq, d, "state"), p.n_state_bits())?,
+                    state,
                     code: ks.generate(&key_label(c.id, c.keys_seq, d, "code"), CODE_BITS)?,
                     claim: claim_keys,
+                    prior: if star && d >= 2 { Some(ks.generate(&key_label(c.id, c.keys_seq, d, "prior"), p.n_state_bits())?) } else { None },
+                    state_n4: if star { ks.commit_with(&state_label, |p| lngap_n4bit::hash_claim(p))? } else { vec![] },
+                    depth: None,
                 };
                 filled.prover.push((c.id, d, k.clone()));
                 c.keys[i] = Some(k);
             }
             if has_claim && pr != me && c.challenger_keys[i].is_none() {
                 let ck = match &claim {
-                    Some(spec) => ChallengerKeys {
-                        indices: (1..=spec.rounds()).map(|r| ks.generate(&index_label(c.id, c.keys_seq, d, r), spec.index_bits())).collect::<Result<Vec<_>>>()?,
-                        inner_indices: if spec.inner {
-                            (1..=inner::SEARCH.rounds()).map(|r| ks.generate(&inner::inner_index_label(c.id, c.keys_seq, d, r), inner::SEARCH.index_bits())).collect::<Result<Vec<_>>>()?
-                        } else {
-                            vec![]
-                        },
-                    },
+                    Some(spec) => gen_challenger_keys(ks, spec, c.id, c.keys_seq, d)?,
                     None => ChallengerKeys { indices: vec![], inner_indices: vec![] },
                 };
                 filled.challenger.push((c.id, d, ck.clone()));

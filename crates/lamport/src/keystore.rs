@@ -46,6 +46,10 @@ impl KeyStore {
     pub fn public(&self, label: &str) -> Result<PublicKey> {
         Ok(self.keys.get(label).ok_or_else(|| anyhow!("no key {label}"))?.sk.public())
     }
+    /// Commitments to `label`'s preimages under another hash (see [`SecretKey::commit_with`]).
+    pub fn commit_with<T>(&self, label: &str, f: impl Fn(&crate::Preimage) -> T) -> Result<Vec<[T; 2]>> {
+        Ok(self.keys.get(label).ok_or_else(|| anyhow!("no key {label}"))?.sk.commit_with(f))
+    }
 
     /// Reveal `bits` under `label`. A second reveal of the same bits is fine
     /// (idempotent re-broadcast); a reveal of different bits is refused.

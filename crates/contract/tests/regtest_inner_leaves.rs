@@ -102,7 +102,7 @@ fn spec() -> ClaimSpec {
         .with_copies(vec![Copy { src: nn + 72, dst: 64, n: 56 }]);
     let c2 = Step::compress("hdr2", Init::D, block_mixed).with_preds(vec![Pred::EqConst { off: nn + 16, nibbles: state_nibbles(&[0x207f_ffff]) }]).with_copies(vec![Copy { src: nn, dst: 120, n: 8 }]);
     let target_check = Step::check("target", vec![Pred::LeTarget { target }, Pred::EqNibbles { a: 64, b: 128, n: 8 }]);
-    ClaimSpec { n_words: N, start, steps: vec![c1, c2, target_check, Step::nop()], k: 2, inner: true }
+    ClaimSpec { n_words: N, start, steps: vec![c1, c2, target_check, Step::nop()], k: 2, inner: true, ..Default::default() }
 }
 
 #[test]
@@ -122,15 +122,16 @@ fn inner_and_check_leaves_on_regtest() {
     let hdr2 = vec![0x2222_2222u32, 0x3333_3333, 0x207f_ffff, 0x4444_4444];
     let data: Vec<Vec<u32>> = vec![hdr1.clone(), hdr2.clone()];
     let states = spec.states(&data);
-    let s1 = spec.apply(&spec.steps[0], &states[0], &hdr1);
+    let s1 = spec.apply(0, &spec.steps[0], &states[0], &hdr1);
     assert!(s1.1, "hdr1 predicates hold");
-    assert!(spec.apply(&spec.steps[1], &states[1], &hdr2).1, "hdr2 predicates hold");
+    assert!(spec.apply(1, &spec.steps[1], &states[1], &hdr2).1, "hdr2 predicates hold");
     let re_cur_l = inner::re_cur_label(ID, SEQ, D);
     let re_next_l = inner::re_next_label(ID, SEQ, D);
 
     // ----- schedule leaves (path- and kind-independent) -----
-    let (_init0, block0) = ClaimSpec::compress_inputs(&spec.steps[0], &states[0], &hdr1);
-    let w = schedule(&block0);
+    let (_init0, block0) = ClaimSpec::compress_inputs(&spec.steps[0], &states[0], &hdr1, spec.hash);
+    let block0_arr: [u8; 64] = block0.as_slice().try_into().unwrap();
+    let w = schedule(&block0_arr);
     for i in [20u32, 63] {
         let (_, leaf) = sched_leaf(&ctx, prover, &keys, i);
         let wit = |claimed: u32| {
@@ -174,11 +175,11 @@ fn inner_and_check_leaves_on_regtest() {
     // ----- a compression's keep / predicate / copy checks (step 0) -----
     {
         let step = &spec.steps[0];
-        let (_, block) = ClaimSpec::compress_inputs(step, &states[0], &hdr1);
+        let (_, block) = ClaimSpec::compress_inputs(step, &states[0], &hdr1, spec.hash);
         let block_words: Vec<u32> = (0..16).map(|j| u32::from_be_bytes(block[4 * j..4 * j + 4].try_into().unwrap())).collect();
         let block_sigs = |words: &[u32]| -> Vec<Vec<u8>> { words.iter().enumerate().rev().flat_map(|(j, w)| sign_word(j as u32, *w).consumption_order()).collect() };
         // keep: a register other than D and the copy destination (A) changed
-        let (name, leaf) = ckeep_leaf(&ctx, prover, &keys, N, step);
+        let (name, leaf) = ckeep_leaf(&ctx, prover, &keys, &spec, step);
         let wit = |next: &[u32]| {
             let mut v = sign_state(&re_cur_l, &states[0]).consumption_order();
             v.extend(sign_state(&re_next_l, next).consumption_order());
@@ -191,7 +192,7 @@ fn inner_and_check_leaves_on_regtest() {
         fine[9] ^= 4; // inside the copy destination: not this leaf's business
         assert!(rig.rt.test_accept(&rig.spend("l", &leaf, wit(&fine))).is_err());
         // predicate: the link (block words 1..9 == D)
-        let (name, leaf) = cpred_leaf(&ctx, prover, &keys, N, step);
+        let (name, leaf) = cpred_leaf(&ctx, prover, &keys, &spec, step);
         let wit = |words: &[u32]| {
             let mut v = block_sigs(words);
             v.extend(sign_state(&re_cur_l, &states[0]).consumption_order());
@@ -201,7 +202,7 @@ fn inner_and_check_leaves_on_regtest() {
         lie[5] ^= 0x100;
         rig.check(&name, &leaf, wit(&block_words), wit(&lie));
         // copy: A must equal block words 9..16
-        let (name, leaf) = ccopy_leaf(&ctx, prover, &keys, N, step);
+        let (name, leaf) = ccopy_leaf(&ctx, prover, &keys, &spec, step);
         let wit = |next: &[u32]| {
             let mut v = block_sigs(&block_words);
             v.extend(sign_state(&re_next_l, next).consumption_order());
@@ -216,14 +217,16 @@ fn inner_and_check_leaves_on_regtest() {
     for (step, rounds) in [(0usize, vec![0u32, 1, 63]), (1, vec![0, 30, 63])] {
         let cur = &states[step];
         let next = &states[step + 1];
-        let (init, block) = ClaimSpec::compress_inputs(&spec.steps[step], cur, &data[step]);
+        let (init_v, block_v) = ClaimSpec::compress_inputs(&spec.steps[step], cur, &data[step], spec.hash);
+        let init: [u32; 8] = init_v.as_slice().try_into().unwrap();
+        let block: [u8; 64] = block_v.as_slice().try_into().unwrap();
         let init_kind = match &spec.steps[step] { Step::Compress { init, .. } => *init, _ => unreachable!() };
         let w = schedule(&block);
         let s = round_states(&init, &w, None);
         assert_eq!(&s[64][..], &next[..8], "inner chain ends at the step's D");
         for r in rounds {
-            let (name, leaf) = round_leaf(&ctx, prover, &keys, N, init_kind, r);
-            let (in_src, out_src, _) = round_sources(init_kind, &[r / 8, r % 8]);
+            let (name, leaf) = round_leaf(&ctx, prover, &keys, &spec, init_kind, r);
+            let (in_src, out_src, _) = round_sources(init_kind, &[r / 8, r % 8], spec.inner_search());
             let sig_inner = |src: &InnerSource, st: &[u32; 8]| -> Option<WotsSig> {
                 match src {
                     InnerSource::Init(Init::Iv) => None,
@@ -257,7 +260,7 @@ fn inner_and_check_leaves_on_regtest() {
         let mut cur = states[2].clone();
         cur[7] &= 0xffff_ff7f;
         cur[16] = cur[8];
-        assert!(spec.apply(step, &cur, &[]).1, "target and A[0] == A[8] hold on the crafted state");
+        assert!(spec.apply(2, step, &cur, &[]).1, "target and A[0] == A[8] hold on the crafted state");
         let wit = |c: &[u32], next: &[u32]| {
             let mut v = sign_state(&re_cur_l, c).consumption_order();
             v.extend(sign_state(&re_next_l, next).consumption_order());
@@ -270,14 +273,14 @@ fn inner_and_check_leaves_on_regtest() {
         // lie 2: the target predicate fails (D's most significant byte ≥ 0x80) with a consistent next
         let mut hi = cur.clone();
         hi[7] |= 0x80;
-        assert!(!spec.apply(step, &hi, &[]).1);
+        assert!(!spec.apply(2, step, &hi, &[]).1);
         let tx = rig.spend("l", &leaf, wit(&hi, &hi));
         let vs = rig.rt.test_accept(&tx).unwrap_or_else(|e| panic!("failed target predicate must be disprovable: {e}"));
         eprintln!("SIZE {name} (bad target): vsize {vs}");
         // lie 3: the equality predicate fails
         let mut ne = cur.clone();
         ne[16] ^= 0x1000_0000;
-        assert!(!spec.apply(step, &ne, &[]).1);
+        assert!(!spec.apply(2, step, &ne, &[]).1);
         rig.rt.test_accept(&rig.spend("l", &leaf, wit(&ne, &ne))).unwrap_or_else(|e| panic!("failed equality predicate must be disprovable: {e}"));
         // and a nop step
         let (nname, nleaf) = simple_leaf(&ctx, prover, &keys, N, &spec.steps[3]);

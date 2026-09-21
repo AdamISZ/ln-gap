@@ -251,21 +251,30 @@ impl ChannelParty {
         let seq = state.seq;
         let mut commits = Vec::new();
         let mut graph = BTreeMap::new();
+        let (mut t_build, mut t_sign) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
         for r in Role::BOTH {
             let ctx = self.commit_ctx(seq, r)?;
             let c = build_commitment(&state, &ctx, self.funding.clone())?;
             for o in &c.outputs {
                 if let OutputKind::Contract(id) = o.kind {
                     let contract = state.contract(id).expect("contract exists");
-                    for mut ptx in contract.graph(&ctx, c.outpoint(o), &c.txout(o))? {
+                    let t0 = std::time::Instant::now();
+                    let txs = contract.graph(&ctx, c.outpoint(o), &c.txout(o))?;
+                    t_build += t0.elapsed();
+                    let t0 = std::time::Instant::now();
+                    for mut ptx in txs {
                         ptx.sign_as(self.me, &self.keys.payment)?;
                         let key = GraphKey { version: r, contract_id: id, label: ptx.label.clone() };
                         ensure!(!graph.contains_key(&key), "duplicate graph label {key}");
                         graph.insert(key, ptx);
                     }
+                    t_sign += t0.elapsed();
                 }
             }
             commits.push(c);
+        }
+        if !graph.is_empty() {
+            info!(party = %self.me, seq, txs = graph.len(), build_ms = t_build.as_millis(), sign_ms = t_sign.as_millis(), "built and signed the pre-signed graphs of both versions");
         }
         let commits: [Commitment; 2] = commits.try_into().expect("two versions");
         Ok(StateRecord {
@@ -294,6 +303,15 @@ impl ChannelParty {
     }
 
     fn accept_commit_sigs(&mut self, seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, Signature)>) -> Result<()> {
+        let t0 = std::time::Instant::now();
+        let n = graph_sigs.len();
+        let r = self.accept_commit_sigs_inner(seq, commit_sig, graph_sigs);
+        if n > 0 {
+            info!(party = %self.me, seq, sigs = n, verify_ms = t0.elapsed().as_millis(), "verified the counterparty's graph signatures");
+        }
+        r
+    }
+    fn accept_commit_sigs_inner(&mut self, seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, Signature)>) -> Result<()> {
         let them = self.me.other();
         let leaf = self.funding_tree.leaf("funding")?.clone();
         let funding_prevout = self.funding.1.clone();

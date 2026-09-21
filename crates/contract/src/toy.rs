@@ -194,7 +194,7 @@ impl HashChain {
         let start = crate::claim::IV.to_vec();
         let block: [u8; 64] = core::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(3));
         let words: [Src; 16] = core::array::from_fn(|j| Src::Const(u32::from_be_bytes(block[4 * j..4 * j + 4].try_into().unwrap())));
-        HashChain { spec: crate::claim::ClaimSpec { n_words: 8, start, steps: vec![Step::compress("compress", Init::D, words); 16], k: 4, inner: false } }
+        HashChain { spec: crate::claim::ClaimSpec { n_words: 8, start, steps: vec![Step::compress("compress", Init::D, words); 16], k: 4, inner: false, ..Default::default() } }
     }
     /// The constant block.
     pub fn block(&self) -> [u8; 64] {

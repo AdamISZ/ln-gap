@@ -138,6 +138,11 @@ pub fn state_bytes(state: &[u32; 8]) -> [u8; 32] {
     out
 }
 
+/// A midstate as a byte vector (big-endian words) — generalized for non-8-word states.
+pub fn state_bytes_vec(state: &[u32]) -> Vec<u8> {
+    state.iter().flat_map(|w| w.to_be_bytes()).collect()
+}
+
 /// Witness elements for one compression, consumption order.
 pub fn compress_witness(state: &[u32; 8], block: &[u8; 64]) -> Vec<Vec<u8>> {
     let mut v = message_witness_u4(&state_bytes(state));

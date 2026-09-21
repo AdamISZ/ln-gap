@@ -94,6 +94,57 @@ pub enum Pred {
     /// `D` (words 0..8, as the 32 hash bytes) read as a 256-bit little-endian
     /// number is at most `target` (little-endian bytes).
     LeTarget { target: [u8; 32] },
+    /// Nibbles `[off, off + target.len())` read as a big-endian number are
+    /// at most `target` (nibbles, most significant first). The n4bit PoW
+    /// check: `D` is the whole 40-nibble state and targets compare big-endian.
+    LeTargetBe { off: usize, target: Vec<u8> },
+    /// Nibbles `[off, off + if0.len())` equal `if1` if bit `bit` (0 = least
+    /// significant) of nibble `nib` is set, else `if0`: a constant selected
+    /// by a register bit, e.g. a Lamport bit's two commitments chosen by the
+    /// message bit an entry states.
+    EqConstBit { nib: usize, bit: u8, off: usize, if0: Vec<u8>, if1: Vec<u8> },
+    /// Nibbles `[off, off + nibbles.len())` differ from the constant in at
+    /// least one nibble (non-inclusion: "this slot's entry is not yours").
+    NeConst { off: usize, nibbles: Vec<u8> },
+    /// Nibbles `[a, a + n)` differ from `[b, b + n)` in at least one nibble.
+    NeNibbles { a: usize, b: usize, n: usize },
+    /// Nibbles `[off, off + n)` read as a big-endian number lie in
+    /// `lo..hi` (exclusive). At most 7 nibbles (script numbers).
+    InRange { off: usize, n: usize, lo: u32, hi: u32 },
+    /// Nibbles `[off, off + n)` read as a big-endian number compare with
+    /// `value` by `cmp`; if so, `then` must all hold, else the predicate
+    /// holds trivially. The gate that makes a claim's length fixed: a step's
+    /// checks switch on a register (the depth) against the step's own index.
+    If { off: usize, n: usize, cmp: Cmp, value: u32, then: Vec<Pred> },
+}
+
+/// A comparison of a register number against a constant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Cmp {
+    Eq,
+    Ge,
+}
+
+impl Pred {
+    /// A gate on the register number at `[off, off + n)`.
+    pub fn gate(off: usize, n: usize, cmp: Cmp, value: u32, then: Vec<Pred>) -> Pred {
+        Pred::If { off, n, cmp, value, then }
+    }
+    /// How many booleans this predicate's script leaves on the altstack.
+    pub fn n_results(&self) -> usize {
+        match self {
+            Pred::EqConst { nibbles, .. } => nibbles.len(),
+            Pred::EqNibbles { n, .. } => *n,
+            Pred::LeTarget { .. } | Pred::LeTargetBe { .. } | Pred::NeConst { .. } | Pred::NeNibbles { .. } | Pred::InRange { .. } => 1,
+            Pred::EqConstBit { if0, .. } => if0.len(),
+            Pred::If { then, .. } => then.iter().map(Pred::n_results).sum(),
+        }
+    }
+}
+
+/// The big-endian number of `n` nibbles at `off`.
+pub fn nibbles_number(space: &[u8], off: usize, n: usize) -> u32 {
+    space[off..off + n].iter().fold(0u32, |acc, x| (acc << 4) | u32::from(*x))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,15 +152,15 @@ pub enum Step {
     /// `D = compress(init, block)`; `preds` must hold over (registers,
     /// block); `copies` move block nibbles into registers other than `D`;
     /// everything else is unchanged.
-    Compress { name: String, init: Init, block: [Src; 16], preds: Vec<Pred>, copies: Vec<Copy> },
+    Compress { name: String, init: Init, block: Vec<Src>, preds: Vec<Pred>, copies: Vec<Copy> },
     /// Predicates must hold on the input state; `copies` are applied
     /// (register to register); everything else is unchanged.
     Simple { name: String, preds: Vec<Pred>, copies: Vec<Copy> },
 }
 
 impl Step {
-    pub fn compress(name: &str, init: Init, block: [Src; 16]) -> Step {
-        Step::Compress { name: name.into(), init, block, preds: vec![], copies: vec![] }
+    pub fn compress(name: &str, init: Init, block: impl IntoIterator<Item = Src>) -> Step {
+        Step::Compress { name: name.into(), init, block: block.into_iter().collect(), preds: vec![], copies: vec![] }
     }
     pub fn with_preds(mut self, p: Vec<Pred>) -> Step {
         match &mut self {
@@ -169,6 +220,67 @@ impl Step {
     }
 }
 
+/// Which hash function a claim verifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HashKind {
+    /// SHA-256: 64 rounds, 8-word state, 16-word block, message schedule.
+    Sha256,
+    /// n4bit sponge: 20 rounds, 5-word (40-nibble) state, 3-word rate block,
+    /// no message schedule, no feed-forward.
+    N4Bit,
+}
+
+impl Default for HashKind {
+    fn default() -> Self {
+        HashKind::Sha256
+    }
+}
+
+impl HashKind {
+    /// D register size in words (the hash function's working state).
+    pub fn d_words(self) -> usize {
+        match self {
+            HashKind::Sha256 => 8,
+            HashKind::N4Bit => 5,
+        }
+    }
+    /// Block size in 32-bit-equivalent words.
+    pub fn block_words(self) -> usize {
+        match self {
+            HashKind::Sha256 => 16,
+            HashKind::N4Bit => 2, // 16 nibbles per step (20-nibble rate, 4 zero-filled)
+        }
+    }
+    /// Rounds per compression.
+    pub fn n_rounds(self) -> u32 {
+        match self {
+            HashKind::Sha256 => 64,
+            HashKind::N4Bit => 20,
+        }
+    }
+    /// Inner bisection branching factor.
+    pub fn inner_k(self) -> u32 {
+        match self {
+            HashKind::Sha256 => 8,
+            HashKind::N4Bit => 2, // 20 rounds padded to 32, 5 inner rounds
+        }
+    }
+    /// Whether the hash has a message schedule (SHA-256 does, n4bit doesn't).
+    pub fn has_schedule(self) -> bool {
+        match self {
+            HashKind::Sha256 => true,
+            HashKind::N4Bit => false,
+        }
+    }
+    /// Whether the hash has a feed-forward addition (SHA-256's MD step).
+    pub fn has_feed_forward(self) -> bool {
+        match self {
+            HashKind::Sha256 => true,
+            HashKind::N4Bit => false,
+        }
+    }
+}
+
 /// The program a claim asserts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimSpec {
@@ -183,6 +295,28 @@ pub struct ClaimSpec {
     /// `n_words == 8` and compression-only steps with constant blocks).
     #[serde(default)]
     pub inner: bool,
+    /// Which hash function the compressions use.
+    #[serde(default)]
+    pub hash: HashKind,
+    /// Skip inner round bisection: after re-committing input/output/block,
+    /// a single flat terminal leaf recomputes all rounds. Only valid when
+    /// the round leaf is small enough to fit in one transaction (n4bit).
+    #[serde(default)]
+    pub flat_inner: bool,
+}
+
+impl Default for ClaimSpec {
+    fn default() -> Self {
+        ClaimSpec {
+            n_words: 0,
+            start: vec![],
+            steps: vec![],
+            k: 2,
+            inner: false,
+            hash: HashKind::Sha256,
+            flat_inner: false,
+        }
+    }
 }
 
 /// Prover data: one `Vec<u32>` per compression step that has `Data` sources, in step order.
@@ -262,6 +396,9 @@ impl Pred {
             Pred::EqConst { off, nibbles } => n[*off..*off + nibbles.len()] == nibbles[..],
             Pred::EqNibbles { a, b, n: len } => n[*a..*a + *len] == n[*b..*b + *len],
             Pred::LeTarget { target } => {
+                // NOTE: hardcoded to n[..64] (32 bytes = SHA-256's 8-word D register).
+                // n4bit specs with LeTarget would need 40 nibbles (5-word D);
+                // parameterize if needed.
                 let d = words_bytes(&nibbles_state(&n[..64]));
                 // little-endian: compare from byte 31 down
                 for i in (0..32).rev() {
@@ -271,6 +408,33 @@ impl Pred {
                 }
                 true
             }
+            Pred::LeTargetBe { off, target } => {
+                for (k, t) in target.iter().enumerate() {
+                    let nib = n[*off + k];
+                    if nib != *t {
+                        return nib < *t;
+                    }
+                }
+                true
+            }
+            Pred::EqConstBit { nib, bit, off, if0, if1 } => {
+                let c = if (n[*nib] >> bit) & 1 == 1 { if1 } else { if0 };
+                n[*off..*off + c.len()] == c[..]
+            }
+            Pred::NeConst { off, nibbles } => n[*off..*off + nibbles.len()] != nibbles[..],
+            Pred::NeNibbles { a, b, n: len } => n[*a..*a + *len] != n[*b..*b + *len],
+            Pred::InRange { off, n: len, lo, hi } => {
+                let v = nibbles_number(n, *off, *len);
+                *lo <= v && v < *hi
+            }
+            Pred::If { off, n: len, cmp, value, then } => {
+                let v = nibbles_number(n, *off, *len);
+                let on = match cmp {
+                    Cmp::Eq => v == *value,
+                    Cmp::Ge => v >= *value,
+                };
+                !on || then.iter().all(|p| p.holds(n))
+            }
         }
     }
     pub fn name(&self) -> String {
@@ -278,6 +442,12 @@ impl Pred {
             Pred::EqConst { off, nibbles } => format!("eq_const@{off}x{}", nibbles.len()),
             Pred::EqNibbles { a, b, n } => format!("eq@{a}={b}x{n}"),
             Pred::LeTarget { .. } => "le_target".into(),
+            Pred::LeTargetBe { off, target } => format!("le_be@{off}x{}", target.len()),
+            Pred::EqConstBit { nib, bit, off, if0, .. } => format!("eq_bit@{nib}.{bit}->{off}x{}", if0.len()),
+            Pred::NeConst { off, nibbles } => format!("ne_const@{off}x{}", nibbles.len()),
+            Pred::NeNibbles { a, b, n } => format!("ne@{a}!={b}x{n}"),
+            Pred::InRange { off, n, lo, hi } => format!("range@{off}x{n}[{lo},{hi})"),
+            Pred::If { off, n, cmp, value, then } => format!("if@{off}x{n}{}{value}[{}]", match cmp { Cmp::Eq => "==", Cmp::Ge => ">=" }, then.iter().map(Pred::name).collect::<Vec<_>>().join(",")),
         }
     }
 }
@@ -297,6 +467,48 @@ impl ClaimSpec {
     pub fn rounds(&self) -> u32 {
         self.search().rounds()
     }
+    /// D register size in words (hash-function's working state).
+    pub fn d_words(&self) -> usize {
+        self.hash.d_words()
+    }
+    /// D register size in nibbles.
+    pub fn d_nibbles(&self) -> usize {
+        8 * self.d_words()
+    }
+    /// Block size in nibbles.
+    pub fn block_nibbles(&self) -> usize {
+        8 * self.hash.block_words()
+    }
+    /// Inner bisection rounds (within one compression step).
+    pub fn inner_rounds(&self) -> u32 {
+        self.hash.n_rounds()
+    }
+    /// Inner bisection branching factor.
+    pub fn inner_k(&self) -> u32 {
+        self.hash.inner_k()
+    }
+    /// Inner search structure.
+    pub fn inner_search(&self) -> Search {
+        if self.flat_inner {
+            return Search { n: 1, k: 1 };
+        }
+        let n = self.inner_rounds();
+        let k = self.inner_k();
+        // Pad n to the next power of k so the bisection is well-defined.
+        let mut padded = 1;
+        while padded < n {
+            padded *= k;
+        }
+        Search { n: padded, k }
+    }
+    /// Whether the hash has a message schedule.
+    pub fn has_schedule(&self) -> bool {
+        self.hash.has_schedule()
+    }
+    /// Whether the hash has a feed-forward addition.
+    pub fn has_feed_forward(&self) -> bool {
+        self.hash.has_feed_forward()
+    }
     pub fn index_bits(&self) -> usize {
         self.search().index_bits()
     }
@@ -311,13 +523,18 @@ impl ClaimSpec {
         self.steps.iter().enumerate().filter(|(_, s)| s.has_data()).map(|(i, _)| i).collect()
     }
     /// The words of a compression's init and block for an input state and data.
-    pub fn compress_inputs(step: &Step, state: &[u32], data: &[u32]) -> ([u32; 8], [u8; 64]) {
+    pub fn compress_inputs(step: &Step, state: &[u32], data: &[u32], hash: HashKind) -> (Vec<u32>, Vec<u8>) {
         let Step::Compress { init, block, .. } = step else { panic!("not a compression") };
-        let init_w: [u32; 8] = match init {
-            Init::Iv => IV,
-            Init::D => state[..8].try_into().unwrap(),
+        let dw = hash.d_words();
+        let bw = hash.block_words();
+        let init_w: Vec<u32> = match init {
+            Init::Iv => match hash {
+                HashKind::Sha256 => IV.to_vec(),
+                HashKind::N4Bit => vec![0u32; dw],
+            },
+            Init::D => state[..dw].to_vec(),
         };
-        let mut b = [0u8; 64];
+        let mut b = vec![0u8; 4 * bw];
         for (j, src) in block.iter().enumerate() {
             let w = match src {
                 Src::Const(c) => *c,
@@ -328,17 +545,55 @@ impl ClaimSpec {
         }
         (init_w, b)
     }
+    /// The n4bit round counter of compression step `step_index`: `ROUNDS`
+    /// times its block index within its message, a message starting at the
+    /// nearest preceding compression with `Init::Iv` (or at step 0). This
+    /// is what makes every message hash to the same digest wherever it sits
+    /// in the claim, i.e. what `lngap_n4bit::hash_claim` computes.
+    pub fn round_counter(&self, step_index: usize) -> usize {
+        let mut start = 0;
+        for i in (0..=step_index.min(self.steps.len().saturating_sub(1))).rev() {
+            if matches!(self.steps[i], Step::Compress { init: Init::Iv, .. }) {
+                start = i;
+                break;
+            }
+        }
+        let blocks = self.steps[start..step_index].iter().filter(|s| matches!(s, Step::Compress { .. })).count();
+        blocks * self.hash.n_rounds() as usize
+    }
     /// Apply one step (`data` for a compression with data sources). Returns
     /// the output state and whether the step's predicates held.
-    pub fn apply(&self, step: &Step, state: &[u32], data: &[u32]) -> (Vec<u32>, bool) {
+    /// `step_index` is the step's position in the spec (used for the n4bit
+    /// round counter, see [`ClaimSpec::round_counter`]; ignored for SHA-256).
+    pub fn apply(&self, step_index: usize, step: &Step, state: &[u32], data: &[u32]) -> (Vec<u32>, bool) {
         let mut n = state_nibbles(state);
-        let (out_d, space): (Option<[u32; 8]>, Vec<u8>) = match step {
+        let (out_d, space): (Option<Vec<u32>>, Vec<u8>) = match step {
             Step::Compress { .. } => {
-                let (mut s, b) = Self::compress_inputs(step, state, data);
+                let (init_w, b) = Self::compress_inputs(step, state, data, self.hash);
                 let mut space = n.clone();
                 space.extend(byte_nibbles(&b));
-                sha2::compress256(&mut s, &[b.into()]);
-                (Some(s), space)
+                let d = match self.hash {
+                    HashKind::Sha256 => {
+                        let mut s: [u32; 8] = init_w.as_slice().try_into().unwrap();
+                        let block: [u8; 64] = b.as_slice().try_into().unwrap();
+                        sha2::compress256(&mut s, &[block.into()]);
+                        s.to_vec()
+                    }
+                    HashKind::N4Bit => {
+                        let sn = state_nibbles(&init_w);
+                        let mut st: [u8; lngap_n4bit::STATE_NIBBLES] = sn.as_slice().try_into().unwrap();
+                        let bn = byte_nibbles(&b);
+                        // Zero-pad block nibbles to RATE_NIBBLES (block may be
+                        // shorter: 2 words = 16 nibbles, rate = 20 nibbles).
+                        let mut block = [0u8; lngap_n4bit::RATE_NIBBLES];
+                        let n = bn.len().min(lngap_n4bit::RATE_NIBBLES);
+                        block[..n].copy_from_slice(&bn[..n]);
+                        let round_counter = self.round_counter(step_index);
+                        lngap_n4bit::sponge_absorb(&mut st, &block, round_counter);
+                        nibbles_state(&st)
+                    }
+                };
+                (Some(d), space)
             }
             Step::Simple { .. } => (None, n.clone()),
         };
@@ -348,13 +603,13 @@ impl ClaimSpec {
         }
         let mut out = nibbles_state(&n);
         if let Some(d) = out_d {
-            out[..8].copy_from_slice(&d);
+            out[..d.len()].copy_from_slice(&d);
         }
         (out, ok)
     }
     /// Is `next` a correct output of `step` on `cur` with `data`?
-    pub fn step_ok(&self, step: &Step, cur: &[u32], next: &[u32], data: &[u32]) -> bool {
-        let (expect, ok) = self.apply(step, cur, data);
+    pub fn step_ok(&self, step_index: usize, step: &Step, cur: &[u32], next: &[u32], data: &[u32]) -> bool {
+        let (expect, ok) = self.apply(step_index, step, cur, data);
         ok && expect == next
     }
     /// The data slice for step `i` (empty for steps without data).
@@ -368,7 +623,7 @@ impl ClaimSpec {
     pub fn states(&self, data: &ClaimData) -> Vec<Vec<u32>> {
         let mut v = vec![self.start.clone()];
         for (i, step) in self.steps.iter().enumerate() {
-            let (s, _) = self.apply(step, v.last().unwrap(), self.data_for(data, i));
+            let (s, _) = self.apply(i, step, v.last().unwrap(), self.data_for(data, i));
             v.push(s);
         }
         v
@@ -383,7 +638,7 @@ impl ClaimSpec {
         let mut s = start.to_vec();
         let mut all_ok = true;
         for i in lo..hi {
-            let (next, ok) = self.apply(&self.steps[i], &s, self.data_for(data, i));
+            let (next, ok) = self.apply(i, &self.steps[i], &s, self.data_for(data, i));
             all_ok &= ok;
             s = next;
         }
@@ -603,6 +858,7 @@ pub fn q_round_witness(index: &Reveal) -> Vec<Vec<u8>> {
 }
 
 /// One stage of a pre-signed chain: the leaf spent, the tree of the new output, a description.
+#[derive(Clone, Debug)]
 pub struct Stage {
     pub leaf: String,
     pub next: TapTree,
@@ -631,6 +887,24 @@ pub(crate) fn chain_stages(out: &mut Vec<PresignedTx>, ctx: &CommitCtx, mut op: 
 /// `dispute` leaf). Labels: `dispute`, `p_round_r`, `q_round_r`, then the
 /// inner chain (`p_re_cur`, `p_re_next`, `p_sched`, `p_inner_r`, `q_inner_r`)
 /// and the check chain (`q_round_R_check`, `c_re_cur`, `c_re_next`).
+/// The terminal stages of a dispute chain (the inner chain for compression
+/// steps, the check chain for simple steps): they depend on the keys and
+/// the spec, not on the outpoint or the commitment version, so a graph
+/// builder computes them once per claim and reuses them.
+pub type TerminalStages = (Vec<Stage>, Vec<Stage>);
+
+pub fn terminal_stages(ctx: &CommitCtx, prover: Role, keys: &ClaimKeys, ck: &ChallengerKeys, spec: &ClaimSpec) -> Result<TerminalStages> {
+    ensure!(spec.inner, "terminal stages are the inner and check chains");
+    let t0 = std::time::Instant::now();
+    let (inner, _) = crate::inner::compress_chain(ctx, prover, keys, ck, spec)?;
+    let t_inner = t0.elapsed();
+    let t0 = std::time::Instant::now();
+    let (check, _) = crate::simple::check_chain(ctx, prover, keys, spec)?;
+    tracing::debug!(steps = spec.steps.len(), words = spec.n_words, inner_ms = t_inner.as_millis(), check_ms = t0.elapsed().as_millis(), "built a dispute chain's terminal trees");
+    Ok((inner, check))
+}
+
+/// `terminal` supplies precomputed terminal stages (see [`terminal_stages`]).
 #[allow(clippy::too_many_arguments)]
 pub fn dispute_graph(
     ctx: &CommitCtx,
@@ -641,6 +915,7 @@ pub fn dispute_graph(
     parent_tree: &TapTree,
     parent_op: OutPoint,
     parent_prevout: &TxOut,
+    terminal: Option<&TerminalStages>,
 ) -> Result<Vec<PresignedTx>> {
     let fee = ctx.params.presign_fee;
     let rounds = spec.rounds();
@@ -681,10 +956,12 @@ pub fn dispute_graph(
     }
     // the last index: into the inner chain (compression steps), the check chain (simple steps), or the flat terminal
     if spec.inner {
-        let (stages, _) = crate::inner::compress_chain(ctx, prover, keys, ck, spec)?;
-        chain_stages(&mut out, ctx, op, prevout.clone(), tree.clone(), stages)?;
-        let (stages, _) = crate::simple::check_chain(ctx, prover, keys, spec)?;
-        chain_stages(&mut out, ctx, op, prevout, tree, stages)?;
+        let (inner, check) = match terminal {
+            Some(t) => t.clone(),
+            None => terminal_stages(ctx, prover, keys, ck, spec)?,
+        };
+        chain_stages(&mut out, ctx, op, prevout.clone(), tree.clone(), inner)?;
+        chain_stages(&mut out, ctx, op, prevout, tree, check)?;
     } else {
         let stages = vec![Stage { leaf: format!("q_round_{rounds}"), next: crate::flat::terminal_tree(ctx, prover, keys, spec)?, what: format!("{} picks a segment in round {rounds}", prover.other()) }];
         chain_stages(&mut out, ctx, op, prevout, tree, stages)?;

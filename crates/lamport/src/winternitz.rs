@@ -135,10 +135,19 @@ impl WotsSig {
     pub fn message(&self) -> Vec<u8> {
         self.digits[..self.params.message_digits as usize].chunks(2).map(|p| (p[0] << 4) | p[1]).collect()
     }
+    /// Rebuild the signature over `msg` from its reveal hashes alone (the
+    /// digit values are the message's own — the D43 entry-sig check).
+    pub fn from_hashes(params: WotsParams, msg: &[u8], hashes: Vec<Hash160>) -> Result<WotsSig> {
+        let mut digits = message_digits(msg);
+        ensure!(digits.len() as u32 == params.message_digits, "message has {} digits, key has {}", digits.len(), params.message_digits);
+        ensure!(hashes.len() as u32 == params.total_digits(), "expected {} reveal hashes, got {}", params.total_digits(), hashes.len());
+        digits.extend(checksum_digits(&params, &digits));
+        Ok(WotsSig { params, hashes, digits })
+    }
+
     /// Rebuild from witness elements in consumption order.
     pub fn from_consumption_order(params: WotsParams, items: &[Vec<u8>]) -> Result<WotsSig> {
         let n = params.total_digits() as usize;
-        ensure!(items.len() == 2 * n, "expected {} witness elements, got {}", 2 * n, items.len());
         let mut digits = vec![0u8; n];
         let mut hashes = vec![[0u8; 20]; n];
         for i in 0..n {
@@ -181,6 +190,76 @@ fn scriptnum(d: u8) -> Vec<u8> {
 /// `d_{n-1}` on top. Checksum verified in-script.
 pub trait WotsExt: Sized {
     fn wots_verify(self, pk: &WotsPublic) -> Self;
+    /// The tied variant: like [`wots_verify`](Self::wots_verify), but the
+    /// MESSAGE digits are not witness-supplied — digit `i`'s value is
+    /// PICKed off the register file already on the stack (`pos[i]` is its
+    /// file digit index, 0 = the file's deepest element), so the signature
+    /// binds whatever the file holds (the tie is by construction, the
+    /// D42 readout discipline). The witness carries only the reveal hashes
+    /// for the message digits; the checksum digits keep their declared
+    /// values (checked against the computed checksum in the finale, as
+    /// usual). The reveal block rides right below the file in the witness
+    /// (consumed last-digit first) and is ROLLed off one by one — the
+    /// same block choreography as the D41 Lamport fragment.
+    ///
+    /// Runs with the `file`-element register file on the stack and leaves
+    /// it intact (the per-digit PICK copies are consumed by the checksum
+    /// finale, then dropped).
+    fn wots_verify_tied(self, pk: &WotsPublic, file: usize, pos: &[usize]) -> Self;
+}
+
+/// One digit's chain verification, consuming `[hash, digit]` (digit on
+/// top) and leaving nothing; one copy of the (clamped) digit value goes to
+/// the altstack for the checksum finale.
+fn wots_step(mut b: Builder, pk_digit: &Hash160) -> Builder {
+    b = b
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_SIZE)
+        .push_int(20)
+        .push_opcode(OP_EQUALVERIFY)
+        .push_opcode(OP_SWAP)
+        .push_int(i64::from(MAX_DIGIT))
+        .push_opcode(OP_MIN)
+        .push_opcode(OP_DUP)
+        .push_opcode(OP_TOALTSTACK)
+        .push_int(i64::from(MAX_DIGIT.div_ceil(2)))
+        .push_opcode(OP_2DUP)
+        .push_opcode(OP_LESSTHAN)
+        .push_opcode(OP_IF)
+        .push_opcode(OP_DROP)
+        .push_opcode(OP_TOALTSTACK);
+    for _ in 0..MAX_DIGIT.div_ceil(2) {
+        b = b.push_opcode(OP_HASH160);
+    }
+    b = b.push_opcode(OP_ELSE).push_opcode(OP_SUB).push_opcode(OP_TOALTSTACK).push_opcode(OP_ENDIF);
+    for _ in 0..MAX_DIGIT / 2 {
+        b = b.push_opcode(OP_DUP).push_opcode(OP_HASH160);
+    }
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_PICK).push_bytes(pk_digit).push_opcode(OP_EQUALVERIFY);
+    for _ in 0..(MAX_DIGIT + 1) / 4 {
+        b = b.push_opcode(OP_2DROP);
+    }
+    b
+}
+
+/// The checksum finale: recompute the checksum from the altstack-parked
+/// message digits and EQUALVERIFY it against the declared checksum digits
+/// (also altstack-parked). Leaves the message digits on the stack
+/// (`d_0` deepest).
+fn wots_checksum_finale(mut b: Builder, ps: &WotsParams) -> Builder {
+    // checksum: alt stack top is d_0
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_DUP).push_opcode(OP_NEGATE);
+    for _ in 1..ps.message_digits {
+        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_TUCK).push_opcode(OP_SUB);
+    }
+    b = b.push_int(i64::from(MAX_DIGIT * ps.message_digits)).push_opcode(OP_ADD).push_opcode(OP_FROMALTSTACK);
+    for _ in 0..ps.checksum_digits - 1 {
+        for _ in 0..LOG2_BASE {
+            b = b.push_opcode(OP_DUP).push_opcode(OP_ADD);
+        }
+        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_ADD);
+    }
+    b.push_opcode(OP_EQUALVERIFY)
 }
 
 impl WotsExt for Builder {
@@ -190,47 +269,41 @@ impl WotsExt for Builder {
         // digits, last first: for each, check the hash chain via a pick list
         for k in 0..total {
             let i = total - 1 - k; // digit index being verified
-            self = self
-                .push_opcode(OP_SWAP)
-                .push_opcode(OP_SIZE)
-                .push_int(20)
-                .push_opcode(OP_EQUALVERIFY)
-                .push_opcode(OP_SWAP)
-                .push_int(i64::from(MAX_DIGIT))
-                .push_opcode(OP_MIN)
-                .push_opcode(OP_DUP)
-                .push_opcode(OP_TOALTSTACK)
-                .push_int(i64::from(MAX_DIGIT.div_ceil(2)))
-                .push_opcode(OP_2DUP)
-                .push_opcode(OP_LESSTHAN)
-                .push_opcode(OP_IF)
-                .push_opcode(OP_DROP)
-                .push_opcode(OP_TOALTSTACK);
-            for _ in 0..MAX_DIGIT.div_ceil(2) {
-                self = self.push_opcode(OP_HASH160);
-            }
-            self = self.push_opcode(OP_ELSE).push_opcode(OP_SUB).push_opcode(OP_TOALTSTACK).push_opcode(OP_ENDIF);
-            for _ in 0..MAX_DIGIT / 2 {
-                self = self.push_opcode(OP_DUP).push_opcode(OP_HASH160);
-            }
-            self = self.push_opcode(OP_FROMALTSTACK).push_opcode(OP_PICK).push_bytes(&pk.digits[i]).push_opcode(OP_EQUALVERIFY);
-            for _ in 0..(MAX_DIGIT + 1) / 4 {
-                self = self.push_opcode(OP_2DROP);
-            }
+            self = wots_step(self, &pk.digits[i]);
         }
-        // checksum: alt stack top is d_0
-        self = self.push_opcode(OP_FROMALTSTACK).push_opcode(OP_DUP).push_opcode(OP_NEGATE);
-        for _ in 1..ps.message_digits {
-            self = self.push_opcode(OP_FROMALTSTACK).push_opcode(OP_TUCK).push_opcode(OP_SUB);
-        }
-        self = self.push_int(i64::from(MAX_DIGIT * ps.message_digits)).push_opcode(OP_ADD).push_opcode(OP_FROMALTSTACK);
-        for _ in 0..ps.checksum_digits - 1 {
-            for _ in 0..LOG2_BASE {
-                self = self.push_opcode(OP_DUP).push_opcode(OP_ADD);
+        wots_checksum_finale(self, ps)
+    }
+
+    fn wots_verify_tied(mut self, pk: &WotsPublic, file: usize, pos: &[usize]) -> Self {
+        let ps = &pk.params;
+        let total = ps.total_digits() as usize;
+        let msg = ps.message_digits as usize;
+        assert_eq!(pos.len(), msg, "one file position per message digit");
+        for k in 0..total {
+            let i = total - 1 - k; // digit index being verified
+            if i < msg {
+                // the reveal rides right below the file; the digit value is
+                // PICKed off the file (depth `file - pos[i]` with the reveal
+                // on top: the file's digit-0 element is `file` deep then)
+                self = self.push_int(file as i64).push_opcode(OP_ROLL);
+                self = self.push_int((file - pos[i]) as i64).push_opcode(OP_PICK);
+            } else {
+                // a checksum digit's (hash, declared value) pair rides the
+                // block top: the declared value at depth `file`, the hash
+                // at `file + 1` — pull the hash first (the removal shifts
+                // the value to `file + 1`), then the value above it
+                self = self.push_int((file + 1) as i64).push_opcode(OP_ROLL);
+                self = self.push_int((file + 1) as i64).push_opcode(OP_ROLL);
             }
-            self = self.push_opcode(OP_FROMALTSTACK).push_opcode(OP_ADD);
+            self = wots_step(self, &pk.digits[i]);
         }
-        self.push_opcode(OP_EQUALVERIFY)
+        self = wots_checksum_finale(self, ps);
+        // the finale leaves the file-sourced message digits on the stack;
+        // drop them (the register file below stays intact)
+        for _ in 0..msg {
+            self = self.push_opcode(OP_DROP);
+        }
+        self
     }
 }
 

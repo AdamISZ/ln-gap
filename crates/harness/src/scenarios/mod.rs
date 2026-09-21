@@ -3,6 +3,12 @@
 //! returns a report for `docs/SCENARIOS.md`.
 
 pub mod names;
+pub mod fc_names;
+pub mod fc_game;
+pub mod fc_stall;
+pub mod fc_chess;
+pub mod pos_chess;
+pub mod pos_stall;
 pub mod tictactoe;
 
 use anyhow::Result;
@@ -56,5 +62,11 @@ pub fn assert_cross_cutting(h: &Harness) {
 pub fn all() -> Vec<Scenario> {
     let mut v = tictactoe::scenarios();
     v.extend(names::scenarios());
+    v.extend(fc_names::scenarios());
+    v.extend(fc_game::scenarios());
+    v.extend(fc_stall::scenarios());
+    v.extend(fc_chess::scenarios());
+    v.extend(pos_chess::scenarios());
+    v.extend(pos_stall::scenarios());
     v
 }

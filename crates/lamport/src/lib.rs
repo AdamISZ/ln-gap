@@ -95,6 +95,11 @@ impl SecretKey {
     pub fn public(&self) -> PublicKey {
         PublicKey { bits: self.bits.iter().map(BitSecret::commit).collect() }
     }
+    /// Commitments to the same preimages under another hash, `[f(p0), f(p1)]`
+    /// per bit (e.g. a claim-native hash a bisection can recompute).
+    pub fn commit_with<T>(&self, f: impl Fn(&Preimage) -> T) -> Vec<[T; 2]> {
+        self.bits.iter().map(|b| [f(&b.p0), f(&b.p1)]).collect()
+    }
     pub fn reveal_bits(&self, bits: &[bool]) -> Result<Reveal> {
         ensure!(bits.len() == self.bits.len(), "reveal_bits: {} bits for a {}-bit key", bits.len(), self.bits.len());
         Ok(Reveal { preimages: self.bits.iter().zip(bits).map(|(s, &b)| s.preimage(b)).collect() })

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/btc", "crates/lamport", "crates/script32", "crates/channel", "crates/contract", "crates/party", "crates/harness", "crates/apps/*"]
+members = ["crates/n4bit", "crates/btc", "crates/lamport", "crates/script32", "crates/ec-wots", "crates/channel", "crates/contract", "crates/party", "crates/harness", "crates/apps/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -22,3 +22,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.8"
 hex = "0.4"
 tempfile = "3"
+
+# Dependencies (secp256k1, the hash crates) optimised even in debug builds:
+# the harness is hash- and signature-bound, and secp256k1's C code takes
+# the profile's opt level. Our own crates stay at debug for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 2

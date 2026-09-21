@@ -344,6 +344,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-chess"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "lngap-btc",
+ "lngap-script32",
+]
+
+[[package]]
+name = "lngap-chess-fc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-chess",
+ "lngap-contract",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-names",
+ "lngap-script32",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lngap-contract"
 version = "0.1.0"
 dependencies = [
@@ -353,10 +381,41 @@ dependencies = [
  "lngap-btc",
  "lngap-channel",
  "lngap-lamport",
+ "lngap-n4bit",
  "lngap-script32",
  "serde",
  "sha2",
  "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "lngap-ec-wots"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-script32",
+ "rand",
+ "secp256k1",
+]
+
+[[package]]
+name = "lngap-factchain"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-script32",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -370,12 +429,20 @@ dependencies = [
  "hex",
  "lngap-btc",
  "lngap-channel",
+ "lngap-chess",
+ "lngap-chess-fc",
  "lngap-contract",
+ "lngap-ec-wots",
+ "lngap-factchain",
  "lngap-lamport",
+ "lngap-n4bit",
  "lngap-names",
+ "lngap-names-fc",
  "lngap-party",
+ "lngap-pos",
  "lngap-spv",
  "lngap-tictactoe",
+ "lngap-tictactoe-fc",
  "serde_json",
  "tracing",
  "tracing-subscriber",
@@ -392,6 +459,17 @@ dependencies = [
  "rand",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "lngap-n4bit"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "hex",
+ "lngap-btc",
+ "lngap-lamport",
+ "lngap-script32",
 ]
 
 [[package]]
@@ -413,6 +491,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-names-fc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-names",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "lngap-party"
 version = "0.1.0"
 dependencies = [
@@ -423,10 +519,31 @@ dependencies = [
  "lngap-channel",
  "lngap-contract",
  "lngap-lamport",
+ "lngap-n4bit",
  "lngap-script32",
  "serde",
  "sha2",
  "tracing",
+]
+
+[[package]]
+name = "lngap-pos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-chess",
+ "lngap-chess-fc",
+ "lngap-contract",
+ "lngap-ec-wots",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-script32",
+ "lngap-tictactoe",
 ]
 
 [[package]]
@@ -465,6 +582,24 @@ dependencies = [
  "lngap-channel",
  "lngap-contract",
  "lngap-lamport",
+]
+
+[[package]]
+name = "lngap-tictactoe-fc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-n4bit",
+ "lngap-names",
+ "lngap-tictactoe",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

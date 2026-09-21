@@ -1,0 +1,24 @@
+[package]
+name = "lngap-pos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-factchain = { path = "../factchain" }
+lngap-tictactoe = { path = "../tictactoe" }
+lngap-chess = { path = "../chess" }
+lngap-chess-fc = { path = "../chess-fc" }
+lngap-ec-wots = { path = "../../ec-wots" }
+lngap-n4bit = { path = "../../n4bit" }
+lngap-lamport = { path = "../../lamport" }
+lngap-contract = { path = "../../contract" }
+lngap-channel = { path = "../../channel" }
+anyhow.workspace = true
+lngap-btc = { path = "../../btc" }
+bitcoin.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-script32 = { path = "../../script32" }
