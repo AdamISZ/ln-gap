@@ -192,6 +192,7 @@ fn decode_witness(w: &bitcoin::Witness) {
     println!("  witness args (consumption order, i.e. top of stack first):");
     let mut bits: Vec<(usize, bool)> = Vec::new();
     let mut prev_small: Option<i64> = None;
+    let mut resolved: Vec<(usize, usize, i64)> = Vec::new(); // (consumption idx, digit, value) for wots-resolved args
     for (pos, it) in items[..n_args].iter().enumerate().rev() {
         let idx = n_args - 1 - pos;
         if it.len() == 64 {
@@ -208,6 +209,7 @@ fn decode_witness(w: &bitcoin::Witness) {
                     None => String::new(),
                 };
                 println!("    [{idx}] wots reveal {}.. -> block #{b} digit {digit} = {v}{check}", hex::encode(&it[..4]));
+                resolved.push((idx, digit, v));
             } else {
                 println!("    [{idx}] 20 bytes {}.. (opens no hash in this leaf)", hex::encode(&it[..4]));
             }
@@ -222,6 +224,37 @@ fn decode_witness(w: &bitcoin::Witness) {
         } else {
             println!("    [{idx}] {} bytes {}", it.len(), hex::encode(it));
             prev_small = None;
+        }
+    }
+    // when the leaf has a digitwise differ (the equiv leaf, D43), answer
+    // the interesting question directly: WHERE do the two signature wires
+    // differ. Segment the resolved args into wires (maximal runs of
+    // consecutive consumption-order positions) and align by digit index.
+    if let Some(Gadget::Differ { m }) = parsed.gadgets.iter().find(|g| matches!(g, Gadget::Differ { .. })) {
+        if let Some((msg, ck)) = parsed.blocks.iter().find(|(bm, _, _)| bm == m).map(|(bm, ck, _)| (*bm, *ck)) {
+            let total = msg + ck;
+            // segment into wires: a wire's digit indices descend strictly
+            // (87, 86, .., 0 per wire, top of stack first), so a
+            // non-descending step starts the next wire
+            let mut wires: Vec<std::collections::BTreeMap<usize, i64>> = Vec::new();
+            let mut last_digit: Option<usize> = None;
+            for &(_, digit, v) in &resolved {
+                if last_digit.is_none_or(|l| digit >= l) {
+                    wires.push(std::collections::BTreeMap::new());
+                }
+                wires.last_mut().unwrap().insert(digit, v);
+                last_digit = Some(digit);
+            }
+            let wires: Vec<&std::collections::BTreeMap<usize, i64>> = wires.iter().filter(|w| w.len() == total).collect();
+            if wires.len() == 2 {
+                let (w1, w2) = (wires[0], wires[1]);
+                let diffs: Vec<usize> = (0..msg).filter(|d| w1.get(d).is_some_and(|x| w2.get(d).is_some_and(|y| *y != *x))).collect();
+                println!("  the differ's comparison — wire 1 (consumed first: the fork entry's signature) vs wire 2 (the canonical entry's), message digits only (the {ck} checksum digits ride the wires un-compared):");
+                for d in &diffs {
+                    println!("    digit {d}: {} vs {}", w1[d], w2[d]);
+                }
+                println!("    {} message digits differ — the leaf's OP_VERIFY is satisfied by these; the other {} agree (the two entries' shared prefix)", diffs.len(), msg - diffs.len());
+            }
         }
     }
     if !bits.is_empty() {
