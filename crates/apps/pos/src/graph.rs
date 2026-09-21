@@ -39,9 +39,19 @@ use lngap_lamport::gadgets::LamportExt;
 use lngap_lamport::winternitz::WotsPublic;
 use lngap_lamport::BitCommit;
 
-use crate::instance::PosDepthKeys;
+use crate::chess;
+use crate::instance::{Game, PosDepthKeys};
 use crate::refute;
 use crate::ttt::{self, Layout};
+
+/// The authorship fragment of the instance's game (D41; the chess mapping
+/// is chess.rs's).
+fn authorship(b: Builder, game: Game, file: usize, head_off: usize, key: &lngap_lamport::PublicKey) -> Builder {
+    match game {
+        Game::Ttt => ttt::authorship_fragment(b, file, head_off, key),
+        Game::Chess => chess::authorship_fragment(b, file, head_off, key),
+    }
+}
 
 /// The absence-claim leaf for one depth on the contract output.
 pub fn absent_leaf(ctx: &CommitCtx, name: &str, claimant: Role, claim_from: u32) -> Leaf {
@@ -58,16 +68,27 @@ pub fn absent_leaf(ctx: &CommitCtx, name: &str, claimant: Role, claim_from: u32)
 /// The mover's refutation leaf on the claim output: the mover's payment
 /// signature first (the pre-signed skeleton pins the output to the refuted
 /// tree), then the readout-and-park. The D41 authorship fragment rides the
-/// gate slot: per parked head, the witness's 21 preimages of THAT head's
-/// mover's state key must open the head's claimed state bit by bit — a
-/// garbage-signed attested entry admits no refutation.
-pub fn refute_leaf(ctx: &CommitCtx, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Leaf {
+/// gate slot: per parked head, the witness's preimages of THAT head's
+/// mover's state key must open the head's claimed state bit by bit (21 per
+/// head for tic-tac-toe, 336 for chess) — a garbage-signed attested entry
+/// admits no refutation.
+pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Leaf {
     let body = match table_prev {
         Some(tp) => refute::refute_leaf_pair_gated(tp, table, &keys.refute, |b| {
-            let b = ttt::authorship_fragment(b, l.file, l.new, &keys.state);
-            ttt::authorship_fragment(b, l.file, 0, &keys_prev.expect("a pair has a prior").state)
+            // the D41 authorship gate: tic-tac-toe checks BOTH parked heads
+            // (21 bits each, cheap); chess checks the NEW head alone — the
+            // judged move's — because 2 x 336 preimage blocks do not fit
+            // the 1,000-element stack under the readout (D42). The prior
+            // head's authenticity is inductive: an unauthored head at d-1
+            // is unrefutable at d-1's own claim, so a game never continues
+            // past one.
+            let b = authorship(b, game, l.file, l.new, &keys.state);
+            match game {
+                Game::Ttt => authorship(b, game, l.file, 0, &keys_prev.expect("a pair has a prior").state),
+                Game::Chess => b,
+            }
         }),
-        None => refute::refute_leaf(table, &keys.refute, |b| ttt::authorship_fragment(b, l.file, 0, &keys.state)),
+        None => refute::refute_leaf(table, &keys.refute, |b| authorship(b, game, l.file, 0, &keys.state)),
     };
     let mut b = Builder::new().checksigverify(&ctx.key(l.mover).payment);
     for ins in body.instructions() {
@@ -159,6 +180,7 @@ pub fn equiv_leaf(ctx: &CommitCtx, name: &str, bit: &BitCommit, exhibitor: Role)
 /// the claimant's code reveal.
 pub fn claim_tree(
     ctx: &CommitCtx,
+    game: Game,
     l: &Layout,
     table_prev: Option<&EpochTable>,
     table: &EpochTable,
@@ -166,7 +188,7 @@ pub fn claim_tree(
     keys_prev: Option<&PosDepthKeys>,
     outcomes: &[Outcome],
 ) -> Result<TapTree> {
-    let mut leaves = vec![refute_leaf(ctx, l, table_prev, table, keys, keys_prev)];
+    let mut leaves = vec![refute_leaf(ctx, game, l, table_prev, table, keys, keys_prev)];
     for o in outcomes {
         leaves.push(split_leaf(ctx, o, ctx.params.delta, &keys.claimant_code));
     }
@@ -174,12 +196,16 @@ pub fn claim_tree(
 }
 
 /// The tree of the refutation output P_d: the claimant's disprove family
-/// over the parked tuple (after `delta`), then the mover's self-checking
-/// splits after `delta + delta'`.
-pub fn refuted_tree(ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Result<TapTree> {
+/// over the parked tuple (after `delta`) — the game's own predicate set —
+/// then the mover's self-checking splits after `delta + delta'`.
+pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Result<TapTree> {
     let challenger = ctx.key(l.mover.other()).payment;
+    let family = match game {
+        Game::Ttt => ttt::disprove_leaves(l, &keys.refute),
+        Game::Chess => chess::disprove_leaves(l, &keys.refute),
+    };
     let mut leaves = vec![];
-    for pl in ttt::disprove_leaves(l, &keys.refute) {
+    for pl in family {
         let mut b = Builder::new().csv(ctx.params.delta).checksigverify(&challenger);
         for ins in pl.script.instructions() {
             b = match ins.expect("valid script") {
@@ -191,7 +217,11 @@ pub fn refuted_tree(ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: 
     }
     let w = ctx.params.delta + ctx.params.delta_prime;
     for o in outcomes {
-        leaves.push(ttt::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute));
+        let leaf = match game {
+            Game::Ttt => ttt::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
+            Game::Chess => chess::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
+        };
+        leaves.push(leaf);
     }
     TapTree::new(leaves)
 }

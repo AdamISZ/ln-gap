@@ -140,13 +140,13 @@ impl Game {
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("pos6/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("pos6/user-ks"));
         let mut hub_ks = KeyStore::new(Seed::from_label("pos6/hub-ks"));
-        let offer_u = instance::gen_pos_keys(&mut user_ks, Role::User, CONTRACT_ID, 1, MAX_DEPTH).unwrap();
-        let offer_h = instance::gen_pos_keys(&mut hub_ks, Role::Hub, CONTRACT_ID, 1, MAX_DEPTH).unwrap();
+        let offer_u = instance::gen_pos_keys(&mut user_ks, Role::User, CONTRACT_ID, 1, MAX_DEPTH, instance::Game::Ttt).unwrap();
+        let offer_h = instance::gen_pos_keys(&mut hub_ks, Role::Hub, CONTRACT_ID, 1, MAX_DEPTH, instance::Game::Ttt).unwrap();
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH).unwrap();
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH).unwrap();
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, btc_open, 1, keys_u).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, btc_open, 1, keys_h).unwrap();
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h).unwrap();
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let g = Game { user, hub, user_ks, hub_ks, params, pubs, inst: inst_u };

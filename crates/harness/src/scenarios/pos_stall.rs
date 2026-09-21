@@ -121,8 +121,8 @@ impl PosGame {
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("ps/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("ps/user-ks"));
         let mut hub_ks = KeyStore::new(Seed::from_label("ps/hub-ks"));
-        let offer_u = instance::gen_pos_keys(&mut user_ks, Role::User, CONTRACT_ID, 1, MAX_DEPTH)?;
-        let offer_h = instance::gen_pos_keys(&mut hub_ks, Role::Hub, CONTRACT_ID, 1, MAX_DEPTH)?;
+        let offer_u = instance::gen_pos_keys(&mut user_ks, Role::User, CONTRACT_ID, 1, MAX_DEPTH, instance::Game::Ttt)?;
+        let offer_h = instance::gen_pos_keys(&mut hub_ks, Role::Hub, CONTRACT_ID, 1, MAX_DEPTH, instance::Game::Ttt)?;
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH)?;
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH)?;
         ensure!(keys_u == keys_h, "the merged key sets must agree");
@@ -130,7 +130,7 @@ impl PosGame {
         // block per Bitcoin block while the game is being played
         let btc_open = rt.height()? + 1;
         let deadline = btc_open + 400;
-        let inst = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, btc_open, GRACE, keys_u)?;
+        let inst = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, GRACE, keys_u)?;
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let mut venue_commits = HashMap::new();
@@ -422,7 +422,7 @@ impl PosGame {
         };
         let sigs_new = sign_at(&self.sealed[&d]);
         let sigs_prev = sign_at(&self.sealed[&(d - 1)]);
-        let w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &prev_r, &new_r);
+        let w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r, &prev_r]);
         Ok((w, pair_sig))
     }
 

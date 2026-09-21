@@ -365,7 +365,7 @@ fn exhibit_leaf_runs_only_when_terminal() {
             let bd = ttt::authorship_fragment(bd, l.file, 0, &sk_prev.public());
             ttt::terminal_gate_fragment(bd, l.file, l.new)
         });
-        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&p_head, &sigs, &n_head, &sigs, &sig, &reveal_prev, &reveal_new));
+        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&sigs, &sigs, &sig, &[&reveal_new, &reveal_prev]));
         assert_eq!(res.is_ok(), terminal, "the exhibit leaf must admit exactly the terminal state");
     }
 }

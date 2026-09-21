@@ -160,13 +160,13 @@ impl Game {
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("pos4b/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("pos4b/user-ks"));
         let mut hub_ks = KeyStore::new(Seed::from_label("pos4b/hub-ks"));
-        let offer_u = instance::gen_pos_keys(&mut user_ks, Role::User, CONTRACT_ID, 1, MAX_DEPTH).unwrap();
-        let offer_h = instance::gen_pos_keys(&mut hub_ks, Role::Hub, CONTRACT_ID, 1, MAX_DEPTH).unwrap();
+        let offer_u = instance::gen_pos_keys(&mut user_ks, Role::User, CONTRACT_ID, 1, MAX_DEPTH, instance::Game::Ttt).unwrap();
+        let offer_h = instance::gen_pos_keys(&mut hub_ks, Role::Hub, CONTRACT_ID, 1, MAX_DEPTH, instance::Game::Ttt).unwrap();
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH).unwrap();
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH).unwrap();
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, btc_open, 1, keys_u).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, btc_open, 1, keys_h).unwrap();
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h).unwrap();
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let g = Game {
@@ -293,7 +293,7 @@ impl Path {
             let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &prev_reveal, &new_reveal)
+            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_reveal, &prev_reveal])
         } else {
             let sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());
@@ -302,7 +302,7 @@ impl Path {
             let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness(&new_head, &sigs, &sig, &new_reveal)
+            refute::refute_witness(&sigs, &sig, &new_reveal)
         };
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), &tx, &a_prev, &p.leaf.script);
         let mut w = w;
@@ -340,7 +340,7 @@ impl Path {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, a_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &junk_r, &junk_r);
+        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&junk_r, &junk_r]);
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
         w.push(mover_sig);
         let mut tx = p.tx.clone();
@@ -374,7 +374,7 @@ impl Path {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, c_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&prev_head, &sigs_prev, &new_head, &sigs_new, &pair_sig, &prev_reveal, &new_reveal);
+        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_reveal, &prev_reveal]);
         let sig_u = sign_tx(&g.user.payment, tx, c_prev, &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, tx, c_prev, &p.leaf.script);
         w.push(sig_h);
@@ -727,5 +727,64 @@ fn wired_pos_graph() {
         let w = path.timeout_witness(&mut g, 2, 0);
         let tx = run(&rt, skel(&path.graph, "absent_2/split_UserWins"), w);
         println!("REGTEST 6/PS9: garbage-signed entry held no refutation; timeout split: {} vB", tx.vsize());
+    }
+
+    // ============ path H: a mismatched re-commitment fails the tied readout
+    {
+        // the pair reveal signs a TAMPERED new head (one padding nibble
+        // off, so the CLAIMED state is unchanged and the D41 authorship
+        // passes): the readout's possession sigs cover the REAL attested
+        // heads, so the tampered digit selects an anticipation point whose
+        // secret nobody holds — with the D42 tied readout the tie IS the
+        // point selection. (This is the sim_refute mismatched-recommitment
+        // negative, testable only with real sigs — the sim stubs CHECKSIG.)
+        let mut g = Game::open(
+            rt.height().unwrap() + 1,
+            rt.height().unwrap() + 400,
+            value,
+            &tables,
+        );
+        let mut path = Path::open(&rt, &g, &tables);
+        rt.mine(1).unwrap();
+        seal_move(&mut path, &mut g, 1, 4);
+        rt.mine(1).unwrap();
+        seal_move(&mut path, &mut g, 2, 0);
+        rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        path.claim(&rt, &g, D);
+        let p = skel(&path.graph, "absent_2/refute");
+        let a_prev = p.prevouts[0].clone();
+        let new_head = path.venue.head(D);
+        let prev_head = path.venue.head(D - 1);
+        let mut tampered = new_head;
+        tampered[30] ^= 1; // ttt's padding region: the claimed state is unchanged
+        let mut msg = prev_head.to_vec();
+        msg.extend_from_slice(&tampered);
+        let pair_sig = g
+            .keys_of(instance::mover_at(D))
+            .0
+            .sign_wots(&instance::refute_label(CONTRACT_ID, 1, D), &msg)
+            .unwrap();
+        let prev_reveal = auth_reveal(&mut g, D - 1, &prev_head);
+        let new_reveal = auth_reveal(&mut g, D, &new_head);
+        let mut tx = p.tx.clone();
+        let new_block = &path.venue.sealed[&D];
+        let prev_block = &path.venue.sealed[&(D - 1)];
+        let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
+            .map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
+            .collect();
+        let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
+            .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
+            .collect();
+        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_reveal, &prev_reveal]);
+        w.push(sign_tx(g.payment_of(instance::mover_at(D)), &tx, &a_prev, &p.leaf.script));
+        tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
+        // mine_with (generateblock), not test_accept: the fee placeholder is
+        // below the relay floor for a ~30 kvB tx and must not mask the
+        // script-level rejection
+        assert!(
+            rt.mine_with_check(&tx).is_err(),
+            "the tampered re-commitment must fail the tied readout"
+        );
+        println!("REGTEST 4b: mismatched re-commitment rejected by the tied readout");
     }
 }

@@ -101,7 +101,7 @@ impl Layout {
 
 /// A gathered input: a file digit or a constant.
 #[derive(Clone, Copy)]
-enum Src {
+pub(crate) enum Src {
     Dig(usize),
     Konst(i64),
 }
@@ -263,16 +263,17 @@ fn bit0(b: Builder) -> Builder {
 /// Gathers inputs onto the altstack (nothing above the file during the
 /// gather, so pick depths are `file - 1 - j`), restores them in declaration
 /// order, then the hand-written compute tail runs on the gathered block.
-struct Lb {
+/// `pub(crate)` for the chess family (chess.rs reuses the gadget).
+pub(crate) struct Lb {
     b: Builder,
     gathered: usize,
 }
 
 impl Lb {
-    fn new(key: &WotsPublic) -> Lb {
+    pub(crate) fn new(key: &WotsPublic) -> Lb {
         Lb { b: Builder::new().wots_verify(key), gathered: 0 }
     }
-    fn src(mut self, file: usize, s: Src) -> Lb {
+    pub(crate) fn src(mut self, file: usize, s: Src) -> Lb {
         self.b = match s {
             Src::Dig(j) => {
                 let depth = file - 1 - j;
@@ -285,7 +286,7 @@ impl Lb {
         self
     }
     /// The gathered block onto the main stack, first-gathered deepest.
-    fn restore(mut self) -> Builder {
+    pub(crate) fn restore(mut self) -> Builder {
         for _ in 0..self.gathered {
             self.b = self.b.push_opcode(OP_FROMALTSTACK);
         }
@@ -297,8 +298,8 @@ impl Lb {
 }
 
 /// `OP_VERIFY` the predicate, drop `leftover` gathered items plus the whole
-/// register file, push OP_1 (cleanstack).
-fn finish(mut b: Builder, leftover: usize, file: usize) -> ScriptBuf {
+/// register file, push OP_1 (cleanstack). `pub(crate)` for chess.rs.
+pub(crate) fn finish(mut b: Builder, leftover: usize, file: usize) -> ScriptBuf {
     b = b.push_opcode(OP_VERIFY);
     let mut n = leftover;
     if n % 2 == 1 {
@@ -313,7 +314,7 @@ fn finish(mut b: Builder, leftover: usize, file: usize) -> ScriptBuf {
 
 /// word0's 8 nibbles (game_id 2 BE bytes, depth, mover), most significant
 /// first, as the head's digits 0..8 hold them.
-fn word0_nibbles(game_id: u16, depth: u32, mover: Role) -> [i64; 8] {
+pub(crate) fn word0_nibbles(game_id: u16, depth: u32, mover: Role) -> [i64; 8] {
     let w = word0(game_id, depth, mover);
     (0..8)
         .map(|i| ((w >> (4 * (7 - i))) & 15) as i64)
@@ -327,8 +328,9 @@ fn word0_nibbles(game_id: u16, depth: u32, mover: Role) -> [i64; 8] {
 /// empty slot's zero head fails the game id; a wrong-depth or wrong-mover
 /// entry fails its byte. (The venue's signature checks are the sig
 /// exhibit's domain, deferred — this leaf binds only the head's own
-/// claiming fields.)
-fn wrong_slot(l: &Layout, key: &WotsPublic) -> PosLeaf {
+/// claiming fields.) `pub(crate)`: game-independent (word0's layout is the
+/// venue's, not tic-tac-toe's) — the chess family leads with it too.
+pub(crate) fn wrong_slot(l: &Layout, key: &WotsPublic) -> PosLeaf {
     let mut lb = Lb::new(key);
     let mut expects: Vec<i64> = Vec::new();
     if l.prior.is_some() {
@@ -585,7 +587,8 @@ fn status_mismatch(l: &Layout, key: &WotsPublic) -> PosLeaf {
 // ----- the authorship fragment (D41) -----
 
 /// [nib] -> [bit `b` of the nibble] (b = 0 the low bit).
-fn nib_bit(b: Builder, bit: usize) -> Builder {
+/// `pub(crate)` for the chess authorship fragment (chess.rs).
+pub(crate) fn nib_bit(b: Builder, bit: usize) -> Builder {
     match bit {
         0 => split2(split4(b).push_opcode(OP_NIP)).push_opcode(OP_NIP), // lo2, lo
         1 => split2(split4(b).push_opcode(OP_NIP)).push_opcode(OP_DROP), // lo2, hi

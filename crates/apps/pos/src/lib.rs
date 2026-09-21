@@ -27,6 +27,7 @@ use lngap_factchain::{entry_head, entry_root, Header, HEADER_BYTES, HEAD_BYTES};
 use lngap_n4bit::{Digest, DIGEST_BYTES};
 
 pub mod bond;
+pub mod chess;
 pub mod graph;
 pub mod refute;
 pub mod instance;

@@ -61,9 +61,44 @@ use crate::graph;
 use crate::ttt::Layout;
 
 /// Tic-tac-toe's mover at depth `d` from the empty board: user at odd
-/// depths.
+/// depths. (Chess's too: white = user moves at odd depths, the same parity.)
 pub fn mover_at(d: u32) -> Role {
     if d % 2 == 1 { Role::User } else { Role::Hub }
+}
+
+/// The game a [`PosInstance`] plays. Selects the disprove family and the
+/// authorship bit-mapping (graph.rs's dispatch), the per-depth state key
+/// size, and whether the terminal-exhibit family exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Game {
+    Ttt,
+    Chess,
+}
+
+impl Game {
+    /// Bits in the per-depth mover state key: tic-tac-toe's 21 state bits;
+    /// chess's signed state||move (D39's chess port note: same leaf, more
+    /// bits).
+    pub fn state_bits(self) -> usize {
+        match self {
+            Game::Ttt => STATE_BITS,
+            Game::Chess => lngap_chess_fc::SIGNED_BITS,
+        }
+    }
+    /// The first depth a terminal exhibit exists at, if the game has the
+    /// family at all. Chess has NONE (D42): chess terminality is not a
+    /// state field, and none is needed — mate at `t` makes the absence
+    /// claim at `t + 1` unanswerable (a mated side has no legal move to
+    /// refute with), it races ahead of any dead-depth claim at `t + 2`,
+    /// the game is assumed to end before `w_max`, and interior draws do
+    /// not exist under the PoC's stalemate-loses-by-stall reading — D37's
+    /// dual-exhibit note is moot.
+    pub fn min_exhibit_depth(self) -> Option<u32> {
+        match self {
+            Game::Ttt => Some(MIN_EXHIBIT_DEPTH),
+            Game::Chess => None,
+        }
+    }
 }
 
 /// The first depth tic-tac-toe can be terminal at (the earliest win is
@@ -100,15 +135,16 @@ pub struct PosKeyOffer {
 }
 
 /// Generate `me`'s half of every depth's key set: the refute, code and
-/// state keys where I move, the claimant code key where I don't.
-pub fn gen_pos_keys(ks: &mut KeyStore, me: Role, id: u32, seq: u64, max_depth: u32) -> Result<Vec<(u32, PosKeyOffer)>> {
+/// state keys where I move, the claimant code key where I don't. The state
+/// key's size is the game's (`Game::state_bits`).
+pub fn gen_pos_keys(ks: &mut KeyStore, me: Role, id: u32, seq: u64, max_depth: u32, game: Game) -> Result<Vec<(u32, PosKeyOffer)>> {
     let mut out = Vec::new();
     for d in 1..=max_depth {
         let mut offer = PosKeyOffer::default();
         if mover_at(d) == me {
             offer.refute = Some(ks.generate_wots(&refute_label(id, seq, d), if d >= 2 { 96 } else { 48 })?);
             offer.mover_code = Some(ks.generate(&code_label(id, seq, d), CODE_BITS)?);
-            offer.state = Some(ks.generate(&state_label(id, seq, d), STATE_BITS)?);
+            offer.state = Some(ks.generate(&state_label(id, seq, d), game.state_bits())?);
         } else {
             offer.claimant_code = Some(ks.generate(&ccode_label(id, seq, d), CODE_BITS)?);
         }
@@ -162,6 +198,9 @@ pub struct PosInstance {
     pub value: Amount,
     pub deadline: u32,
     pub game_id: u16,
+    /// The game whose disprove family and authorship mapping the graph
+    /// runs (graph.rs's dispatch).
+    pub game: Game,
     /// The Bitcoin height the venue's slot count starts from: slot `d`
     /// seals at `btc_open + d` (one venue block per Bitcoin block).
     pub btc_open: u32,
@@ -173,7 +212,7 @@ pub struct PosInstance {
 }
 
 impl PosInstance {
-    pub fn new(id: u32, value: Amount, deadline: u32, game_id: u16, btc_open: u32, grace: u32, keys: Vec<PosDepthKeys>) -> Result<PosInstance> {
+    pub fn new(id: u32, value: Amount, deadline: u32, game_id: u16, game: Game, btc_open: u32, grace: u32, keys: Vec<PosDepthKeys>) -> Result<PosInstance> {
         ensure!(!keys.is_empty(), "no depths");
         for (i, k) in keys.iter().enumerate() {
             let d = i as u32 + 1;
@@ -181,10 +220,13 @@ impl PosInstance {
             let want = if d >= 2 { 192 } else { 96 };
             ensure!(k.refute.params.message_digits == want, "depth {d}: refute key size");
             ensure!(k.mover_code.n_bits() == CODE_BITS && k.claimant_code.n_bits() == CODE_BITS, "depth {d}: code key size");
-            ensure!(k.state.n_bits() == STATE_BITS, "depth {d}: state key size");
+            ensure!(k.state.n_bits() == game.state_bits(), "depth {d}: state key size");
         }
+        // the outcome list is the two games' shared one (UserWins 0 /
+        // HubWins 1 / Draw 2); chess's Draw split can never fire on this
+        // graph (chess.rs's resolution fragment).
         let outcomes = Contract::outcomes(&TicTacToe);
-        Ok(PosInstance { id, value, deadline, game_id, btc_open, grace, keys, outcomes })
+        Ok(PosInstance { id, value, deadline, game_id, game, btc_open, grace, keys, outcomes })
     }
 
     pub fn max_depth(&self) -> u32 {
@@ -205,27 +247,28 @@ impl PosInstance {
     }
 
     /// The contract output's tree: `revoke`, `settle`, `absent_1..=M`,
-    /// `exhibit_5..=M` (D37 — the terminal-claim hole's fix; the venue's
-    /// epoch tables are embedded in the exhibit leaves' readouts), and
-    /// `equiv_{d}_{i}` for every depth and state bit (D39 — the
-    /// player-equivocation exhibit).
+    /// `exhibit_5..=M` for tic-tac-toe (D37 — the terminal-claim hole's
+    /// fix; chess has no exhibit family, D42), and `equiv_{d}_{i}` for
+    /// every depth and state bit (D39 — the player-equivocation exhibit).
     pub fn tree(&self, ctx: &CommitCtx, tables: &[EpochTable]) -> Result<TapTree> {
         let mut leaves = vec![ctx.revoke_leaf(), lngap_contract::leaves::settle_leaf(ctx, self.deadline)];
         for d in 1..=self.max_depth() {
             leaves.push(graph::absent_leaf(ctx, &format!("absent_{d}"), mover_at(d).other(), self.claim_from(d)));
         }
-        for d in MIN_EXHIBIT_DEPTH..=self.max_depth() {
-            let l = self.layout(d);
-            leaves.push(graph::exhibit_leaf(
-                ctx,
-                &format!("exhibit_{d}"),
-                &l,
-                &tables[(d - 1) as usize],
-                &tables[d as usize],
-                self.depth_keys(d),
-                self.depth_keys(d - 1),
-                self.claim_from(d),
-            ));
+        if let Some(from) = self.game.min_exhibit_depth() {
+            for d in from..=self.max_depth() {
+                let l = self.layout(d);
+                leaves.push(graph::exhibit_leaf(
+                    ctx,
+                    &format!("exhibit_{d}"),
+                    &l,
+                    &tables[(d - 1) as usize],
+                    &tables[d as usize],
+                    self.depth_keys(d),
+                    self.depth_keys(d - 1),
+                    self.claim_from(d),
+                ));
+            }
         }
         for d in 1..=self.max_depth() {
             let pk = &self.depth_keys(d).state;
@@ -242,12 +285,12 @@ impl PosInstance {
     pub fn claim_tree(&self, ctx: &CommitCtx, d: u32, tables: &[EpochTable]) -> Result<TapTree> {
         let l = self.layout(d);
         let (prev, table) = if d >= 2 { (Some(&tables[(d - 1) as usize]), &tables[d as usize]) } else { (None, &tables[1]) };
-        graph::claim_tree(ctx, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes)
+        graph::claim_tree(ctx, self.game, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes)
     }
 
     /// The refutation output's tree at depth `d`.
     pub fn refuted_tree(&self, ctx: &CommitCtx, d: u32) -> Result<TapTree> {
-        graph::refuted_tree(ctx, &self.layout(d), self.depth_keys(d), &self.outcomes)
+        graph::refuted_tree(ctx, self.game, &self.layout(d), self.depth_keys(d), &self.outcomes)
     }
 
     /// Payout outputs for `payout` of `v` to the parties' payout scripts.
@@ -301,8 +344,10 @@ impl PosInstance {
         // the terminal exhibits (D37): `exhibit_d` spends the contract
         // output to the refuted tree of depth `d` (the disprove family
         // guards the exhibited move's legality; the splits pay R(parked
-        // terminal) — the winner's unilateral terminal claim).
-        for d in MIN_EXHIBIT_DEPTH..=self.max_depth() {
+        // terminal) — the winner's unilateral terminal claim). Ttt only:
+        // chess has no exhibit family (D42).
+        if let Some(from) = self.game.min_exhibit_depth() {
+            for d in from..=self.max_depth() {
             let e_tree = self.refuted_tree(ctx, d)?;
             let name = format!("exhibit_{d}");
             let tx = build_spend(outpoint, &tree0.leaf(&name)?.timelock, vec![TxOut { value: self.value - fee, script_pubkey: e_tree.script_pubkey() }]);
@@ -314,6 +359,7 @@ impl PosInstance {
                 let tx = build_spend(e_op, &e_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, e_prev.value - fee));
                 out.push(PresignedTx::new(format!("{name}/{leaf}"), tx, vec![e_prev.clone()], &e_tree, &leaf, format!("exhibit split at depth {d}: {}", o.name))?);
             }
+            }
         }
         // the player-equivocation leaves (D39, plan step 6): the exhibit of
         // BOTH preimages of one bit of the depth-`d` mover's state key —
@@ -321,10 +367,11 @@ impl PosInstance {
         // exhibitor (the non-mover) the pot. The proof is self-authenticating
         // (no venue data, no timelock); the skeleton is the graph's standard
         // 2-of-2 pre-sign with the payout pinned to the victim, so any holder
-        // of the two preimages (a watchtower, say) can broadcast it.
+        // of the two preimages (a watchtower, say) can broadcast it. The
+        // family's size is the game's (336 signed bits for chess).
         for d in 1..=self.max_depth() {
             let exhibitor = mover_at(d).other();
-            for i in 0..STATE_BITS {
+            for i in 0..self.game.state_bits() {
                 let name = format!("equiv_{d}_{i}");
                 let tx = build_spend(
                     outpoint,

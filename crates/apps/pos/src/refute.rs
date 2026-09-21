@@ -19,12 +19,13 @@
 //! only as pinned-key signatures.)
 //!
 //! Witness (consumption order): the WOTS reveal of the head (the
-//! re-commitment), then per head chunk the possession signature and value.
+//! re-commitment), then per head chunk the possession signature (the value
+//! is the re-committed digit — the tied readout takes it off the altstack).
 
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
 use bitcoin::ScriptBuf;
-use lngap_ec_wots::{chunk_value, readout_value_fragment, snum, EpochTable};
+use lngap_ec_wots::{readout_tied_fragment, snum, EpochTable};
 use lngap_factchain::HEAD_BYTES;
 use lngap_lamport::winternitz::{WotsExt, WotsParams, WotsPublic, WotsSecret, WotsSig};
 
@@ -71,10 +72,10 @@ pub fn refute_leaf(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Build
     for _ in 0..HEAD_CHUNKS {
         b = b.push_opcode(OP_TOALTSTACK);
     }
-    // the readout, each attested nibble tied to its re-committed digit
+    // the readout, each attested nibble tied to its re-committed digit (the
+    // digit IS the readout's value — one witness element per chunk)
     for j in HEAD_CHUNK_START..HEAD_CHUNK_START + HEAD_CHUNKS {
-        b = readout_value_fragment(b, &table.points[j]);
-        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_EQUALVERIFY);
+        b = readout_tied_fragment(b, &table.points[j]);
     }
     b.push_int(1).into_script()
 }
@@ -84,24 +85,19 @@ pub fn refute_leaf(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Build
 /// (= header chunk `HEAD_CHUNK_START + j`); `sig` re-commits the head.
 /// `preimages` is the mover's state-key reveal over the head's claimed
 /// state (the D41 authorship block, consumed bit-ascending off the block
-/// top: `preimages[0]` LAST in wire order).
-pub fn refute_witness(
-    head: &[u8; HEAD_BYTES],
-    head_sigs: &[Vec<u8>],
-    sig: &WotsSig,
-    preimages: &lngap_lamport::Reveal,
-) -> Vec<Vec<u8>> {
+/// top: `preimages[0]` LAST in wire order). The block's length is the
+/// game's signed-bits count (21 tic-tac-toe, 336 chess).
+pub fn refute_witness(head_sigs: &[Vec<u8>], sig: &WotsSig, preimages: &lngap_lamport::Reveal) -> Vec<Vec<u8>> {
     assert_eq!(head_sigs.len(), HEAD_CHUNKS);
-    assert_eq!(preimages.preimages.len(), lngap_factchain::slot::STATE_BITS);
-    let mut w = Vec::with_capacity(2 * HEAD_CHUNKS + 2 * sig.params.total_digits() as usize);
-    // chunk items, descending: head chunk 0's pair ends up consumed first
+    let n_auth = preimages.preimages.len();
+    let mut w = Vec::with_capacity(HEAD_CHUNKS + n_auth + 2 * sig.params.total_digits() as usize);
+    // chunk sigs, descending: head chunk 0's sig ends up consumed first
     for j in (0..HEAD_CHUNKS).rev() {
         w.push(head_sigs[j].clone());
-        w.push(snum(chunk_value(head, j)));
     }
-    // the authorship block: bit-20's preimage first, bit-0's last (the
-    // fragment consumes bit 0 off the block top)
-    for i in (0..lngap_factchain::slot::STATE_BITS).rev() {
+    // the authorship block: the last bit's preimage first, bit-0's last
+    // (the fragment consumes bit 0 off the block top)
+    for i in (0..n_auth).rev() {
         w.push(preimages.preimages[i].to_vec());
     }
     w.extend(wots_wire(sig));
@@ -149,51 +145,49 @@ pub fn refute_leaf_pair_gated(
     for _ in 0..2 * HEAD_CHUNKS {
         b = b.push_opcode(OP_TOALTSTACK);
     }
-    // the prior head's chunks tie to digits 0..HEAD_CHUNKS
+    // the prior head's chunks tie to digits 0..HEAD_CHUNKS (the digit IS the
+    // readout's value — one witness element per chunk)
     for j in HEAD_CHUNK_START..HEAD_CHUNK_START + HEAD_CHUNKS {
-        b = readout_value_fragment(b, &table_prev.points[j]);
-        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_EQUALVERIFY);
+        b = readout_tied_fragment(b, &table_prev.points[j]);
     }
     // then the new head's tie to digits HEAD_CHUNKS..
     for j in HEAD_CHUNK_START..HEAD_CHUNK_START + HEAD_CHUNKS {
-        b = readout_value_fragment(b, &table.points[j]);
-        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_EQUALVERIFY);
+        b = readout_tied_fragment(b, &table.points[j]);
     }
     b.push_int(1).into_script()
 }
 
-/// The two-head refutation witness, wire order: the NEW head's chunk items
-/// (descending), then the PRIOR head's (descending — its chunk 0 is consumed
-/// first after the reveal), then the pair reveal. `sigs_prev`/`sigs` must
-/// sign the spend's sighash under the two slots' tables' head-chunk points.
-/// Between the chunk items and the reveal: the authorship blocks (D41) —
-/// the PRIOR head's preimages block first, then the NEW head's (each
-/// bit-20 first, bit-0 last), so the fragment checks the NEW head first.
+/// The two-head refutation witness, wire order: the NEW head's chunk sigs
+/// (descending), then the PRIOR head's (descending — its chunk 0's sig is
+/// consumed first after the reveal), then the pair reveal. `sigs_prev`/`sigs`
+/// must sign the spend's sighash under the two slots' tables' head-chunk
+/// points. Between the chunk sigs and the reveal: the authorship blocks
+/// (D41) — `auth` in CONSUMPTION order: the block the gate checks FIRST
+/// (`auth[0]`, the new head's) lands on the region top (each block's bit-0
+/// last); tic-tac-toe passes both heads' blocks (`[new, prev]`), chess the
+/// judged head's alone (D42: the pair refute's stack budget). Each block's
+/// length is the game's signed-bits count (21 ttt, 336 chess).
 pub fn refute_witness_pair(
-    head_prev: &[u8; HEAD_BYTES],
     sigs_prev: &[Vec<u8>],
-    head: &[u8; HEAD_BYTES],
     sigs: &[Vec<u8>],
     sig: &WotsSig,
-    preimages_prev: &lngap_lamport::Reveal,
-    preimages: &lngap_lamport::Reveal,
+    auth: &[&lngap_lamport::Reveal],
 ) -> Vec<Vec<u8>> {
     assert_eq!(sigs_prev.len(), HEAD_CHUNKS);
     assert_eq!(sigs.len(), HEAD_CHUNKS);
-    let mut w = Vec::with_capacity(4 * HEAD_CHUNKS + 2 * sig.params.total_digits() as usize);
+    assert!(!auth.is_empty() && auth.len() <= 2, "one block per parked head");
+    let n_auth: usize = auth.iter().map(|r| r.preimages.len()).sum();
+    let mut w = Vec::with_capacity(2 * HEAD_CHUNKS + n_auth + 2 * sig.params.total_digits() as usize);
     for j in (0..HEAD_CHUNKS).rev() {
         w.push(sigs[j].clone());
-        w.push(snum(chunk_value(head, j)));
     }
     for j in (0..HEAD_CHUNKS).rev() {
         w.push(sigs_prev[j].clone());
-        w.push(snum(chunk_value(head_prev, j)));
     }
-    for i in (0..lngap_factchain::slot::STATE_BITS).rev() {
-        w.push(preimages_prev.preimages[i].to_vec());
-    }
-    for i in (0..lngap_factchain::slot::STATE_BITS).rev() {
-        w.push(preimages.preimages[i].to_vec());
+    for block in auth.iter().rev() {
+        for i in (0..block.preimages.len()).rev() {
+            w.push(block.preimages[i].to_vec());
+        }
     }
     w.extend(wots_wire(sig));
     w

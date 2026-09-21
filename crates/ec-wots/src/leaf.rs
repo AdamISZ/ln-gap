@@ -59,6 +59,48 @@ pub fn readout_value_fragment(mut b: Builder, points: &[XOnlyPublicKey; 16]) -> 
     b
 }
 
+/// The TIED form of [`readout_value_fragment`]: the value comes off the
+/// ALTSTACK (the re-committed digit the composing leaf parked there), not
+/// the witness — one witness element per chunk instead of two. Entering:
+/// `[.., sig_j]` on the main stack, the chunk's value on the altstack top;
+/// after the fragment the chunk is fully consumed (`[]` — there is no free
+/// value: the value IS the parked digit, so the old form's closing
+/// `OP_EQUALVERIFY` against the re-commitment is definitionally satisfied).
+///
+/// The soundness is unchanged: a digit that is not the attested value
+/// selects an anticipation point whose secret the claimant does not hold,
+/// and the leaf aborts at the CHECKSIGVERIFY. The tie to the parked message
+/// is strengthened if anything — the attested value and the parked digit
+/// are the same element, not two witnesses compared after the fact.
+///
+/// Per chunk: `FROMALTSTACK`, the 16 points, `OP_16 OP_PICK` (copy the
+/// digit), `15 - v`, `OP_PICK` (select S_v), `OP_18 OP_ROLL` (the sig: the
+/// stack carries no claimed value, so the same depth as the standalone
+/// form), `OP_SWAP OP_CHECKSIGVERIFY`, then 8 x OP_2DROP (the points) and
+/// OP_DROP (the digit — the standalone form leaves it for the caller's
+/// EQUALVERIFY; here it IS the parked digit, nothing to compare).
+pub fn readout_tied_fragment(mut b: Builder, points: &[XOnlyPublicKey; 16]) -> Builder {
+    b = b.push_opcode(OP_FROMALTSTACK); // the chunk's value = the parked digit
+    for pt in points {
+        b = b.push_slice(pt.serialize());
+    }
+    b = b
+        .push_int(16)
+        .push_opcode(OP_PICK) // copy the digit
+        .push_int(15)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_SUB) // 15 - v
+        .push_opcode(OP_PICK) // select S_v
+        .push_int(18)
+        .push_opcode(OP_ROLL) // bring sig_j to the top
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_CHECKSIGVERIFY);
+    for _ in 0..8 {
+        b = b.push_opcode(OP_2DROP); // the sixteen points
+    }
+    b.push_opcode(OP_DROP) // the digit (it IS the parked digit — the tie is by construction)
+}
+
 /// A leaf reading out the chunk positions `chunks` of `table`: the attested
 /// values land on the stack in range order, the last chunk's value on top.
 /// Does NOT end with OP_1 — compose with whatever consumes the values.

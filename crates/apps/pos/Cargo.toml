@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 lngap-factchain = { path = "../factchain" }
 lngap-tictactoe = { path = "../tictactoe" }
+lngap-chess = { path = "../chess" }
+lngap-chess-fc = { path = "../chess-fc" }
 lngap-ec-wots = { path = "../../ec-wots" }
 lngap-n4bit = { path = "../../n4bit" }
 lngap-lamport = { path = "../../lamport" }

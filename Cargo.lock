@@ -535,6 +535,8 @@ dependencies = [
  "hex",
  "lngap-btc",
  "lngap-channel",
+ "lngap-chess",
+ "lngap-chess-fc",
  "lngap-contract",
  "lngap-ec-wots",
  "lngap-factchain",

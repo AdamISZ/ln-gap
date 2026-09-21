@@ -115,7 +115,7 @@ fn refute_and_disprove_on_regtest() {
     let head_sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
         .map(|j| sign_chunk(&block.attestation.secrets[HEAD_CHUNK_START + j], &rtx, &funded.prev, &ref_leaf))
         .collect();
-    let args = refute_witness(&head, &head_sigs, &commit_sig, &state_reveal(FIXTURE_STATE));
+    let args = refute_witness(&head_sigs, &commit_sig, &state_reveal(FIXTURE_STATE));
     let arg_bytes: usize = args.iter().map(|a| a.len()).sum();
     rtx.input[0].witness = tapscript_witness(&args, &ref_leaf, &funded.tree.control_block("r").unwrap());
     let h = rt
@@ -200,7 +200,7 @@ fn refute_and_disprove_on_regtest() {
         .map(|j| sign_chunk(&block_j.attestation.secrets[HEAD_CHUNK_START + j], &rtx_j, &funded_j.prev, &ref_leaf_j))
         .collect();
     let junk = lngap_lamport::Reveal { preimages: vec![[0x11; 20]; 21] };
-    let args_j = refute_witness(&head_j, &head_sigs_j, &sig_j, &junk);
+    let args_j = refute_witness(&head_sigs_j, &sig_j, &junk);
     rtx_j.input[0].witness = tapscript_witness(&args_j, &ref_leaf_j, &funded_j.tree.control_block("r").unwrap());
     assert!(
         rt.test_accept(&rtx_j).is_err(),
@@ -226,7 +226,7 @@ fn refute_and_disprove_on_regtest() {
         .collect();
     // the fragment reads the FILE's claimed state (the mismatched head's:
     // zero); the tie then fails the re-commitment against the attestation
-    let args2 = refute_witness(&head2, &head_sigs2, &bad_sig, &state_reveal(0));
+    let args2 = refute_witness(&head_sigs2, &bad_sig, &state_reveal(0));
     let mut rtx2 = rtx2;
     rtx2.input[0].witness = tapscript_witness(&args2, &ref_leaf2, &funded2.tree.control_block("r").unwrap());
     assert!(
