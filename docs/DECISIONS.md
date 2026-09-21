@@ -1202,6 +1202,85 @@ family is tic-tac-toe-only per the above; if a future game has an
 interior-draw settlement rule that is NOT loss-by-stall, it needs the
 D37 note's dual exhibit revisited.
 
+## D43. WOTS-form authorship: the entry signature, the tied state-key verify, the per-depth equivocation leaf
+
+Date: 2026-09-21. Context: POS_DISPUTE_SIZES.md (written same day) —
+the two D42 size warnings (the chess pair refute at ~923 stack elements,
+92% of the 1,000-element consensus limit; 43.8 kvB readout paths) plus
+the 2,753-skeleton chess graph, 2,688 of it the per-bit equivocation
+family. This is that note's Lever 1, landed the day it was recommended.
+PS/PC suites, pos_graph / pos_chess_graph / pos_equiv all re-pass on
+regtest under it.
+
+**The venue entry's `sigs` region IS the state key's WOTS signature.**
+The per-depth state key becomes a Winternitz key over the entry's
+authorship message (tic-tac-toe: the 3 state bytes, 6 + 2 digits; chess:
+the 40 state bytes then the move low-first, 84 + 3 digits), generated
+under the unchanged `state_label` discipline via the keystore's new
+`generate_wots(label, game.state_bytes())` / `sign_wots` / `wots_public`
+— the one-time discipline moves there: a second signature of a
+DIFFERENT message is refused, the same message re-signs idempotently
+(the venue's own re-seal is safe). The entry carries the signature's
+hashes: 160 B per ttt entry (was 420), 1,740 B per chess entry (was
+6,720). The entry wire format is sig-count-agnostic now (content, then
+the 20-byte elements) so the PoW graphs' Lamport form is untouched.
+`refute::check_entry_sig` is the anyone-runs-it native check (WOTS
+verify of the entry's sigs against the authorship message).
+
+**The authorship fragment is the tied WOTS verify.** `wots_verify_tied`
+(winternitz.rs): the message digits are PICKed off the parked register
+file — the parked head's digits ARE the signed region, so the digit
+values never ride the witness; only the reveal hashes do, below the
+file (the D42 readout's tie, applied to authorship). This is where the
+D42 stack squeeze actually came from: the 336 authorship preimages were
+336 witness elements AND ~30 KB of script; the tied form carries 87
+hashes and the file supplies the digits. ttt keeps both-heads
+authorship; chess KEEPS the D42 new-head-only narrowing (the migration
+makes both-heads affordable again, ~180 elements — the narrowing's
+inductivity argument stands on its own, so restoring it is a choice,
+not a necessity, and was not exercised).
+
+**The equivocation family collapses to one leaf per depth** (graph.rs
+`equiv_leaf`; the plan's step 6 rebuilt). A WOTS signature's reveal is
+forced given the message, so two distinct valid signatures under one
+depth's state key are the double-sign proof on their face: the witness
+carries both full signatures (`wots_wire` of the first, then the
+second) plus the standard 2-of-2; the leaf verifies both and requires
+the two parked message vectors to differ digitwise. Idempotent
+re-broadcast of the SAME entry re-presents the same signature and never
+fires the differ. Skeletons: 282 -> 102 per ttt game, 2,753 -> 73 per
+chess game; the contract tree's ~2,690 leaves collapse likewise, so
+every contract-output spend's control block shrinks (~12 -> ~7 hashes).
+Presigning is ~28x lighter. The rare path pays for it: the exhibit
+grows 233/241 -> 589/597 vB on regtest (two full signatures ride the
+witness) — still far under every dispute path.
+
+**The stacked-verify choreography bug, recorded for the next leaf
+author.** Two plain `wots_verify` calls in a row cannot see both
+witness blocks: the first verify parks its recovered message digits on
+the stack TOP, burying the second signature's wire block beneath them.
+`equiv_leaf` parks the first vector to the ALTSTACK between the two
+verifies and restores it after (the differ then reads [first vector
+below, second on top]: b_j at depth m-1-j, a_j at 2m-1-j). Found by the
+migration's first honest-case regtest spend (OP_EQUALVERIFY failure
+while both signatures verified natively — the witness was reachable,
+the second verify's inputs were not). The sims never covered this leaf
+(no sim_equiv for the player leaf; the coverage is pos_equiv.rs's two
+mined directions plus the same-signature / corrupted-signature /
+wrong-depth negatives).
+
+Measured (regtest, post-migration). ttt (pos_graph): pair refute
+34,760 vB (was 35,535), depth-1 refute 17,488, terminal exhibit 34,834.
+Chess (pos_chess_graph): pair refute 36,545 vB (was 43,801), depth-1
+19,471, disprove chess_ray 4,947, chess_kingattacked 5,038. The PC
+suite: PC5 41,627 vB in 3 (was 48,940); PC7's double-play 4,611 vB in 1
+(the 2 x 87-digit chess exhibit at the suite's 60k-sat fee; was 265);
+PC9 41,771 in 3. The ttt equiv exhibit is 589 vB (597 in the csv
+branch, pos_equiv.rs). Levers 2-4 of the note remain open and
+unaffected: the venue-receipt regime decision (the ~4.6x refute cut at
+a venue-model price), the digest seal (gated on TODO #1, and the only
+move that lifts the 40-B state cap), the optimistic venue-tie fallback.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

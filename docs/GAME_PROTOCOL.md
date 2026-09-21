@@ -168,9 +168,10 @@ dispute, and nothing on the stall path.
    published move and the counterparty could only prove it holds two
    conflicting reveals off-chain. VENUE.md §5 lists it as the condition
    under which the venue may be advisory at all. CLOSED on the
-   pos-factchain branch (D39): `equiv_{d}_{i}` leaves on the contract
-   output pay the exhibitor the pot on the exhibit of both preimages of
-   one bit of the mover's per-depth state key.
+   pos-factchain branch (D39, per-depth since D43): the `equiv_d` leaf on
+   the contract output pays the exhibitor the pot on the exhibit of both
+   full signatures under the mover's per-depth state key (two distinct
+   valid WOTS signatures of different states ARE the double-sign proof).
 5. **`settle` after the deadline pays `R(empty board)`** (the hub, since
    the user forfeits on turn) whatever happened on the venue. A player
    who never claims before the deadline loses; G5's passive user shows it.
