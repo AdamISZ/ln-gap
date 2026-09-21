@@ -1064,7 +1064,143 @@ the suite: a garbage-signed attested entry admits no refutation (the
 junk-preimage witness is rejected on-chain) and the absence claim
 resolves (414 vB). Chess note for the port: the same fragment over
 SIGNED_BITS = 336 covers move||state (chess's move is signed); ~6.7 KB
-of witness per head — heavier, fine.
+of witness per head — heavier, fine. [Amended 2026-09-20 by D42: "heavier,
+fine" was wrong about WHERE it bites — the preimages are fine by weight
+but not by COUNT: 2 x 336 preimage blocks overflow the 1,000-element
+script stack under the pair readout. See D42.]
+
+## D42. The chess port: the tied readout, the stack budget, and no exhibit family
+
+Date: 2026-09-20. Context: plan step 7's PC gap (the chess PoS graph did
+not exist — the 12-predicate chess disprove family was never ported to
+the parked-pair readout); D41's chess note; D37's interior-draw dual
+exhibit flag; D39's chess equivocation note.
+
+**The disprove family is the PoW one, riding a different register file.**
+`leaf_over_registers` was already parameterized by layout
+(`Registers{n_nibbles, e_off, e2_off}`): the PoW claim's end state was
+{240, 80, 160}; the PoS parked pair `head(d-1) || head(d)` is
+{192, 112, 16} — the two heads' 40-byte states sit at head nibbles
+16..96 — so the twelve kinds (all but MoveNumber, which the venue state
+does not carry) port UNCHANGED, each preceded by the pair key's
+`wots_verify`. Depth 1 parks a single attested head and the leaves push
+the 96 constant nibbles of the initial head (game, 0, hub; null move;
+the start position) between the verify and the body — the reversed
+layout {192, 16, 112}: the constant-prior discipline of the old graph,
+kept uniform by making the "prior" physically present as constants.
+`wrong_slot` (ttt's, word0's layout is the venue's) leads the family.
+Sim: every leaf against its native mirror (the certificate search over
+the decoded tuple) over legal and illegal lines (tests/sim_chess.rs);
+regtest: tests/pos_chess_graph.rs.
+
+**The stack budget is the binding constraint for big states, found by
+measurement.** The first chess pair refutation failed on regtest with
+"Stack size limit exceeded": the witness carried 384 chunk items (sig +
+value per chunk), ~394 pair-WOTS elements, 2 x 336 authorship preimages,
+1 mover sig — ~1,451 elements against consensus's 1,000. (ttt fit at 863:
+2 x 21 authorship is why it fit.) The vsize was fine (53,417 vB, under
+the 100 kvB standardness ceiling): the constraint is the element COUNT.
+
+The fix de-duplicates the readout: the per-chunk attested value IS the
+re-committed digit the pair key's wots_verify already parks on the
+altstack, so the witness stops carrying it — one element per chunk (the
+possession sig), not two. `readout_tied_fragment` (ec-wots/src/leaf.rs)
+takes the value off the altstack; the old form's closing EQUALVERIFY
+disappears (the attested value and the parked digit are the same element,
+not two witnesses compared after the fact — the tie is by construction,
+and the soundness is unchanged: a digit that is not the attested value
+selects an anticipation point whose secret nobody holds). The witness
+shapes change (`refute_witness`, `refute_witness_pair` take the chunk
+SIGS only; the pair's authorship blocks are a slice in consumption
+order). −192 elements on every readout path, both games; the ttt pair
+refutation measures 35,535 vB (from 35,623) and the whole ttt suite
+re-passes under the new readout (pos_graph.rs), INCLUDING a new
+regtest negative (path H) for the mismatched-recommitment case the
+sim_refute suite covered with the old form — the sim's CHECKSIG stub
+cannot see the point selection, so that negative is testable only with
+real sigs (the sim tests now say so; the out-of-range-value negative is
+unconstructible in the tied form and was removed).
+
+**Chess authorship is new-head-only in the pair refute.** Even after the
+de-dup, 2 x 336-bit blocks don't fit (192 chunk sigs + ~394 WOTS + 336 +
+1 = ~923 elements fits; 1,259 does not). The refute/exhibit gate checks
+the NEW head's 336-bit state key (the judged move's author) and not the
+prior head's. Why this is not a weakening: the prior head's authenticity
+is inductive — an unauthored head at d-1 supports no refutation at d-1's
+own absence claim (its garbage signature opens no key), so a game never
+continues past one; and in the venue-substitution residual D41 accepted
+(the venue drops the real d-1 entry and seals junk), both forms lose the
+honest mover at d identically — the both-heads form's extra coverage was
+belt-and-suspenders over the accepted residual. Tic-tac-toe keeps
+both-heads (its 2 x 21 fit regardless). The depth-1 refute is single-head
+for both games as before. The venue entry format is UNCHANGED (the entry
+signs the full 336 signed bits; only the refute's gate narrowed).
+
+**Chess has no terminal-exhibit family** — this resolves D37's flagged
+interior-draw dual-exhibit note with "not needed", on the record: chess
+terminality is not a state field (mate/stalemate is move-existence, not
+Script-computable), and none is needed. Mate at depth t leaves the mated
+side with no legal move: the absence claim at t+1 is unanswerable (any
+refutation is an illegal transition, disproved) and races ahead of any
+dead-depth false claim at t+2 by CLTV order. The last-depth corner is
+excluded by chess-fc's standing assumption that the game ends before
+w_max. Interior draws do not exist under the PoC's stalemate-loses-by-
+stall reading (chess-fc's deferral: a stalemated party has no move and
+loses by stall). The checked split's resolution is then trivially
+in-script: `code == 1 - side` off the parked new state's side nibble
+(state byte 32's low nibble = head digit 81) — open state: the side to
+move (the claimant) forfeits; mate: the mated side loses; stalemate the
+same under the PoC reading. The Draw split leaf is present but never
+satisfiable on this graph: draws remain cooperative-only (the fold).
+(For tic-tac-toe the D37 exhibit family stands as built.)
+
+**The two-element exhibit's witness order was wrong upstream and no one
+had fired one.** The contract crate's `DisproveSpec::witness_args_with`
+appends the exhibit AFTER the end-state signature in consumption order,
+so the reversed stack bottoms at the LAST exhibit element — the two
+2-element kinds (CastlingAttacked, KingAttacked) read their (crossed,
+by) / (king, by) swapped. The PoW path never fired one (the C-suite's
+one disprove was a Ray, one element). The port fires chess_kingattacked
+on regtest (PC9 / pos_chess_graph path E2): the PoS disprove witness
+carries the exhibit in Kind order, deepest-first (sim_chess.rs's note
+pins it). Not fixed upstream in this commit — recorded here; the PoW
+graph's two 2-element leaves are inert until either fixed or
+deliberately fuzzed.
+
+**Fee sizing is real now.** The chess pair refutation is 43,801 vB
+(dedup + new-head authorship, down from the broken 53,417), the depth-1
+refutation 26,666 vB, the disproves ~4.9-5.0 kvB (the pair WOTS reveal
+dominates them), the timeout split 193 vB, the equivocation exhibit 265
+vB. The 1k-sat placeholder presign fee sits under the 1 sat/vB relay
+floor for the readout paths (true of ttt's 35.5 kvB all along; the
+generateblock harness path tolerates it, the mempool path does not) —
+the chess instances and the PC suite run with a 60k-sat per-hop fee so
+the negatives are script-meaningful, not fee-masked. A real deployment
+sizes the pre-sign fee to the largest skeleton (the pair refute).
+
+Measured (the PC suite, real signed entries, regtest): PC2/PC3 the bare
+stall 438 vB in 2 txs; PC4 the fool's-mate terminal path 437 vB in 2;
+PC5 the spurious claim 48,940 vB in 3; PC6 the illegal move disproved
+(chess_ray) 48,993 vB in 3; PC7 the double-played slot 265 vB in 1;
+PC8 the garbage-signed entry 438 vB in 2; PC9 the mated side's illegal
+answer disproved (chess_kingattacked, the 2-element exhibit) 49,083 vB
+in 3. Graph: 2,753 pre-signed skeletons per chess game (settle + 8 x
+(claim, refute, 3+3 splits) + 8 x 336 equiv; no exhibit leaves) vs 282
+for tic-tac-toe; the contract tree's 2,690+ leaves deepen every
+contract-output spend's control block by ~4 x 32 B, accepted. Compared
+with the PS baselines the chess readout costs ~9.3 kvB more per
+refutation path than tic-tac-toe's — the 12-kind scripts (~14.6 kB
+each, the pair WOTS verify dominating) are spent only on the disprove
+branch, and the bare stall stays at ~10x under the PoW S6 path. PC1-PC9
+pass (tests/pos_chess.rs; the suite runs nine fresh regtests at
+--test-threads=2, ~28 s).
+
+Deferred, unchanged from D40's list except as closed here: the party
+policies (the suite's choreography is the specification they implement),
+the S-port. The PS9-equivalent for chess (PC8) runs. The D37 exhibit
+family is tic-tac-toe-only per the above; if a future game has an
+interior-draw settlement rule that is NOT loss-by-stall, it needs the
+D37 note's dual exhibit revisited.
 
 ## TODO
 

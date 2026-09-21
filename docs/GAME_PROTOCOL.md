@@ -193,4 +193,9 @@ dispute, and nothing on the stall path.
    the graph is then 6 claim sets and, for tic-tac-toe, 129
    transactions. Chess plays on the same graph (D30, C1-C9). Not yet:
    the venue entry's move is unsigned for tic-tac-toe (chess signs it),
-   the equivocation leaf, and disputes on the venue.
+   the equivocation leaf, and disputes on the venue. [The POS-venue
+   iteration of this graph — the absence-claim shape with the EC-OTS
+   readout replacing the PoW dispute leg — is built and played on the
+   pos-factchain branch: D32-D42, scenarios PS1-PS9 (tic-tac-toe) and
+   PC1-PC9 (chess); it includes the equivocation leaf (D39) and, for
+   chess, needs no terminal exhibit family (D42).]
