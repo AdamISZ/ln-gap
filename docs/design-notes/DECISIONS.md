@@ -861,7 +861,10 @@ Date: 2026-09-20. Context: pos-factchain plan step 5.
   first differing chunk — 343 vB, pays the watcher — and burns a second
   bond instance — 143 vB, the value to an OP_RETURN output (the bounty
   variant, paying the slasher, is one line different; "burn" is the
-  plan's word and the stricter statement). Reclaim: rejected before
+  plan's word and the stricter statement). [Corrected 2026-09-22 by D46:
+  neither path constrains the outputs — the OP_RETURN was the spender's
+  choice — and the cheater holds the evidence first; the paths are now
+  behind a `race_from` CLTV and the penalty is the fee race.] Reclaim: rejected before
   expiry, mines after — 187 vB. Negatives all rejected: same-value
   "evidence" (the v != v2 gate), a sig under the wrong value, a wrong
   burn preimage. Extraction unit tests in ec-wots (inverse roundtrip,
@@ -1445,6 +1448,120 @@ head. The tic-
 tac-toe family needs no analogue: its 3-byte state has no field the
 native side rejects that the leaves do not judge (`cell_out_of_range`
 covers the move byte; every nibble of the state word is read).
+
+## D46. The bond's evidence paths are a fee race, not a burn; prior art for the venue
+
+Date: 2026-09-22. Context: a read of Robin Linus's *Coins: A Billion
+Bitcoin Users* (January 2020, coins.github.io/coins.pdf) and its
+published successor *Stakechains* (Linus and Tse, CoDecFin 2022); D38
+(the validator bond); the incentive discussion of the same day
+(ATTESTATION_FEES.md, local). Agreed with the user.
+
+**Prior art.** The PoS venue's base layer is Coins/Stakechains: validators
+lock bitcoin in collateral outputs on Bitcoin, sign sidechain blocks with
+nonce-committed one-time signatures so that two conflicting signatures
+leak the key, checkpoints in Bitcoin prevent long-range attacks, the
+validator set is read off Bitcoin's UTXO set, and a majority-signed block
+is economically final. D32/D38 are that design with per-chunk one-time
+signatures (EC-OTS) instead of per-block ones. What is not in it, and is
+this project's own: the venue never settles value and has no asset (his
+section 4.2 "altcoin problem" is the reason the attestation-fee design
+exists); the attestations are Bitcoin-legible, so contracts consume the
+chain's content in Script (the readouts, the claim/refute/disprove
+graphs, the certificate predicates); and censorship, which Coins does not
+treat. His section 5.1 (commit to the next nonce by signing it with the
+previous signature) is a candidate answer to the registry-amortization
+question (plan 5.3). His section 2.3 is the burn analysis below, six
+years early.
+
+**The hole.** D38 described a `burn` path ("the value to an OP_RETURN
+output") and a `slash` path ("pays the watcher"). Neither constrains the
+spending transaction's outputs, because Script cannot without a covenant:
+`burn` is `hash160_verify(mirror)`, `slash` is two possession signatures
+over the spend's sighash, and both are spendable by anyone who holds the
+evidence to ANY output. The OP_RETURN in the test was the spender's
+choice. And the evidence is held first by the cheater — it produced the
+attested scalars, and under fixed-R it computes the leaked key — so as
+built the equivocating validator could spend its own bond back to itself
+before any watcher moved. The bond deterred nothing by itself. Nobody had
+written this down.
+
+**The options** are Linus's: a covenant (CTV or the like) makes a burn
+exact; a presigned burn transaction co-signed by a key whose holder then
+deletes it (a federation, or the FROST group's DKG ceremony producing a
+one-shot key) emulates one, with trust in the deletion; or the FEE RACE:
+since anyone can spend, competitors bump each other with RBF until the
+whole bond is miner fee, which is an economic burn. Any gate keyed to the
+validator's own key is useless, since after a fixed-R leak the cheater
+holds that key too; per-contract victim payees do not fit a taptree fixed
+at bond creation.
+
+**Chosen: the fee race, engineered.** Every evidence leaf (`burn`, every
+`slash_{slot}_{j}`) now carries `CLTV race_from`, a height fixed at bond
+setup (`BondSpec::race_from`, before `expiry` by a window wide enough for
+watchers and miners). This removes the cheater's head start: the
+attestations are public data on the venue for the whole delay, anyone can
+build the spend, and at the race height the winning spend is the one
+paying the most fee. A miner takes the entire bond as fee by including
+its own spend (one zero-value OP_RETURN output, everything to fee), so
+the cheater keeps the bond only by mining the first eligible block
+itself. The spends already opt into RBF (`Timelock` sequences are
+`ENABLE_RBF_NO_LOCKTIME`). Submitting a full-fee spend needs
+`maxfeerate=0` at the RPC; miners have no such limit.
+
+**The economics, honestly stated.** With hashpower share `p`, bond `B`,
+gain `G` and `V` the present value of the validator's future fee income,
+the attacker's expected value is `G − (1 − p)·B − V`; deterrence needs
+`(1 − p)·B + V > G`. At `p = 0.2` the bond is sized at 1.25× the gain, not
+1×. `p` is the attacker's OWN hashpower: a bribe to include a low-fee
+self-payment must beat the full-fee competitor, which already hands that
+miner 100% of `B`, so bribery is dominated, and a pool doing it does it
+in public (a low-fee spend in the block while a full-fee competitor sat
+in every mempool). Watchers earn nothing from the race; the reporting
+incentive Ethereum buys with its 1/512 whistleblower reward is replaced
+here by miners' own incentive, which is stronger but means the
+assumption is "some miner or full-fee broadcaster is watching the venue",
+reasonable with a race delay of days. The residual is `p` and there is no
+fix for it without a covenant. Ethereum, for the record: 1/32 initial
+penalty burned, 1/512 to the proposer, a correlation penalty up to 100%
+of the balance when many are slashed together, forced exit; all burns are
+balance decrements, which Bitcoin has no analogue of.
+
+**Why G is small for the games, by construction.** A venue equivocation
+on its own moves no money on the game graphs: the graph pays only on a
+PLAYER's signature (an unsigned substituted head supports no refutation,
+D41), and a player who signs both versions is convicted by the
+equivocation exhibit the moment the second signature is used on-chain
+(D39/D43), even under a partitioned equivocation. Compensation is the
+player's forfeit; the bond is deterrence for consensus integrity
+generally. `G` is real for a registry, where an equivocated slot can
+rewrite a name's owner and no player forfeit compensates anyone. For
+such apps the per-contract venue stake — the venue funds an output at
+contract open whose slash leaves are `evidence + 2-of-2 of the players`
+with a players-presigned skeleton, so the payee is fixed at open and the
+cheater's keys are useless — is the covenant-free alternative that
+compensates rather than burns, at the cost of venue capital and a signing
+round per contract. Recorded as an option, not built.
+
+**What the bond still does not cover** is unchanged: censorship and
+substitution are unprovable and never slashable under any burn
+mechanism; they rest on the positive incentive (the fee stream) and on
+forced inclusion / windows.
+
+**Measured (regtest, tests/pos_bond.rs).** An evidence spend before
+`race_from` is rejected; the slash after it mines (paying the watcher,
+344 vB). The burn as a race: the cheater's low-fee self-payment through
+the mirror leaf enters the mempool first, the watcher's zero-value
+OP_RETURN spend with the whole bond as fee (167 vB) replaces it (RBF),
+the next block carries the watcher's, the self-payment never confirms,
+the bond's 100,000 sat went to the miner. One practical detail for any
+burn broadcaster: with an EMPTY OP_RETURN the spend is 61 bytes and Core
+refuses it as `tx-size-small` (the 64-byte-transaction guard, enforced
+whatever the standardness flags); the OP_RETURN needs a few bytes of
+payload. Negatives (same value, wrong value, wrong preimage, early
+reclaim) unchanged; the reclaim after expiry pays the validator. D38's
+"burn … the value to an OP_RETURN output" is superseded by this entry's
+description of what the paths enforce.
 
 ## TODO
 
