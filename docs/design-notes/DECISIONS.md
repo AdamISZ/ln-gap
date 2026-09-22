@@ -1281,6 +1281,100 @@ unaffected: the venue-receipt regime decision (the ~4.6x refute cut at
 a venue-model price), the digest seal (gated on TODO #1, and the only
 move that lifts the 40-B state cap), the optimistic venue-tie fallback.
 
+## D44. The counter: a thin claim is answerable by the thin claim one depth back
+
+Date: 2026-09-22. Context: a review of the PoS chess graph (2026-09-21)
+found that the thin absence claim (D34) has no notion of DUENESS, and
+demonstrated the consequence on regtest. Design conversation with the
+user the same day; the fix landed 2026-09-22.
+
+**The hole.** `absent_d` is CLTV + 2-of-2 and asserts no venue content.
+Nothing in it says the claimant itself moved at `d - 1`, so a staller at
+`d - 1` can claim `absent_d` — "you did not move at `d`" — which is
+vacuously TRUE: the victim's turn never came. The victim cannot refute
+(no attested head of its own at `d` sits on a valid head at `d - 1`; an
+attempt over the empty slot's zero head parks a `wrong_slot` violation).
+The graph's only separation of the honest claim at `d - 1` from the
+vacuous one at `d` was one block of CLTV order, and the broadcaster's
+`to_self_delay` CSV on the honest claim (the victim is the one who
+force-closed) inverts it. Probe on the PC fixtures: the hub stalls at 2
+and claims `absent_3`; at height `btc_open + 5` BOTH the user's
+`absent_2` and the hub's `absent_3` were mempool-accepted (a race even
+at regtest's 6-block delay); the hub's mined, and after `delta` its
+timeout split paid it the pot. Not chess-specific: the graph is shared.
+The PoW stall claim was immune by construction (D26: "my valid move `d`
+in its slot; the counterparty's slot `d + 1` passed") — the thin claim
+dropped exactly that, and D36/D37 saw only its terminal-depth instance
+(the exhibit); D42 relied on "CLTV order" for the mate case.
+
+**The fix.** From depth 2 the claim output A_d carries one more leaf,
+`counter` (graph.rs `counter_leaf`): the mover's thin claim one depth
+BACK — "you did not move at `d - 1`" — which is exactly the negation of
+the claim's dueness. 2-of-2 pre-signed, no timelock (it must beat the
+claimant's timeout splits at CSV `delta`, like a refutation; no
+`to_self_delay`, that guards the contract output against a revoked
+commitment). The counter output's tree is the depth-`d - 1` CLAIM tree
+verbatim (`PosInstance::counter_tree`): the claimant's refutation by the
+`(d - 2, d - 1)` pair readout racing the counter-claimant's timeout
+splits; that refutation's output is the depth-`d - 1` refuted tree. The
+depth-`d - 1` refute, code and ccode keys are reused in a third mutually
+exclusive context (the contract output is spent once — the D37
+argument). Skeletons: per depth from 2, +8 (counter, refute, 3 + 3
+splits); ttt 102 -> 166, chess 73 -> 129. No new leaf bodies; no readout
+or disprove changes.
+
+**Why one level closes it.** A counter is answered by a positive fact or
+not at all: the claimant's only reply is the readout of its own attested,
+signed head at `d - 1`. A FALSE counter (the claim was due) is refuted by
+that readout and then judged by the ordinary disprove family, or paid by
+the checked split — R(head `d - 1`) is "side to move forfeits", the right
+result for a real stall at `d`. A TRUE counter means the claim was never
+due, which should lose regardless of what happened earlier: the only
+party a true counter hurts is a claimant who claimed a depth that was not
+due, and that party always had a due claim at a shallower depth. So the
+counter output's tree carries NO counter of its own; the honest strategy
+is "claim the depth right after your own last published move", and any
+claim ahead of it is countered for ~180 vB and cannot be defended. The
+counter is not a new instance of claim/refute: the refutation of a
+counter is the existing pair readout, so the chain of thin claims never
+exceeds two.
+
+**Alternatives rejected.** (a) The PoW shape — the claim carries the
+claimant's own move (the `(d - 2, d - 1)` pair readout) and the claim
+output grows the disprove family: no regress either, but every honest
+absence claim becomes a ~36 kvB readout and the bare stall loses D40's
+~10x. (b) Channel-level dueness — per-move channel updates presigning
+only the due claims: a refused update leaves the pot stuck until
+`settle`, which pays R(empty) under the T9 rule, so the refusal is the
+attack. The counter keeps the honest bare stall at two small
+transactions and every path trustless.
+
+**What it also settles.** The mate race of D42 (the mated side's
+dead-depth claim at `t + 2` racing the winner's `absent_{t+1}` on CLTV
+order) is gone: the winner counters "you did not move at `t + 1`", true
+and unrefutable. The D37 terminal exhibit stays for tic-tac-toe: the
+last-depth corner (`absent_{max+1}` does not exist) still needs it.
+Untouched: the D41 venue-substitution residual (dueness is a player-side
+property) and the malformed-state hole recorded in the same review (a
+signed chess entry with from-square 255 fails every kind leaf's board
+read and the checked split pays; a well-formedness leaf is the fix, not
+built here).
+
+**Measured (regtest, 2026-09-22).** The counter 178 vB. Chess
+(pos_chess_graph paths F1/F2): the staller's zero-head refutation of a
+true counter mines at 36,534 vB and `wrong_slot` kills it at 4,879 vB;
+declining, the victim's timeout split off the counter is 193 vB; a false
+counter to a due claim is refuted at 36,545 vB and the checked split
+pays at 4,894 vB. Suites: PC10 and PS10 (the claim-ahead countered) 550
+vB in 3 transactions; PC11 41,796 vB and PS11 40,058 vB in 4 (the false
+counter refuted); all of PC1-PC11 and PS1-PS11 re-pass, SCENARIOS.md
+regenerated over the full suite; pos_graph / pos_equiv / pos_bond /
+refute re-pass. Fee note: the
+deepest path is now four pre-signed hops (claim, counter, refute, split),
+so the pot must cover four presign fees — the pos_chess_graph fixture's
+pot went 200k -> 400k sat at its 60k-sat fee; the suites' pots already
+did.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

@@ -1,4 +1,4 @@
-//! The PoS absence-claim graph's scenario suite: PS1-PS8 (D40; plan step 7).
+//! The PoS absence-claim graph's scenario suite: PS1-PS11 (D40; plan step 7; D44).
 //! The scenarios live in `lngap_harness::scenarios::pos_stall`.
 
 use lngap_harness::scenarios::pos_stall::*;
@@ -21,3 +21,5 @@ scenario_test!(ps6b_fabricated_terminal_state_disproved_off_the_exhibit, PS6B);
 scenario_test!(ps7_double_played_slot_pays_the_victim, PS7);
 scenario_test!(ps8_baseless_terminal_exhibit_rejected_by_the_gate, PS8);
 scenario_test!(ps9_garbage_signed_attested_entry_is_not_a_move, PS9);
+scenario_test!(ps10_claim_one_depth_ahead_countered, PS10);
+scenario_test!(ps11_false_counter_refuted, PS11);

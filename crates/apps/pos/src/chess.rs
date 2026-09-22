@@ -29,8 +29,10 @@
 //!   not a field (mate/stalemate = move-existence, not Script-computable),
 //!   and it is not needed: mate at depth `t` leaves the mated side with no
 //!   legal move, so the absence claim at `t + 1` is unanswerable (any
-//!   refutation attempt is an illegal transition and is disproved) and
-//!   races ahead of any dead-depth false claim at `t + 2`. The last-depth
+//!   refutation attempt is an illegal transition and is disproved), and a
+//!   dead-depth false claim at `t + 2` by the mated side is countered
+//!   (D44: the winner's counter "you did not move at `t + 1`" is true and
+//!   unrefutable — no race on CLTV order). The last-depth
 //!   corner is excluded by chess-fc's standing assumption that the game
 //!   ends before `w_max`, and interior draws do not exist under the PoC's
 //!   stalemate-loses-by-stall reading (chess-fc's deferral) — so D37's

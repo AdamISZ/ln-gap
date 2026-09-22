@@ -26,6 +26,13 @@
 //!   with an illegal g4g5 (the king still attacked), the
 //!   `chess_kingattacked` disprove — a TWO-ELEMENT exhibit — takes the
 //!   pot;
+//! - F1: the staller claims one depth AHEAD (D44): the hub stalls at 2 and
+//!   claims `absent_3`; the user's counter ("you did not move at 2") is
+//!   answered by the hub's zero-head refutation, which `wrong_slot` kills;
+//!   and, the hub declining, by the user's timeout split off the counter;
+//! - F2: a FALSE counter to a due claim: the hub's e7e5 is on the venue,
+//!   the user stalls at 3 and counters the hub's due `absent_3` anyway;
+//!   the hub refutes on the counter output and its checked split pays;
 //! - G: a garbage-signed attested entry admits no refutation (the D41
 //!   authorship fragment rejects the junk signature).
 
@@ -310,12 +317,35 @@ impl Path {
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
     }
 
+    /// The mover's counter off the depth-`d` claim output (D44): the thin
+    /// claim "the claimant did not move at `d - 1`". 2-of-2 pre-signed,
+    /// no timelock. Returns the counter output's (outpoint, prevout); its
+    /// tree is the depth-`d - 1` claim tree, so the follow-ons use the
+    /// `absent_{d}/counter` base label at depth `d - 1`.
+    fn counter(&self, rt: &Regtest, g: &Game, d: u32) -> (OutPoint, TxOut) {
+        let p = skel(&self.graph, &format!("absent_{d}/counter"));
+        let mut tx = p.tx.clone();
+        let sig_u = sign_tx(&g.user.payment, &tx, &p.prevouts[0], &p.leaf.script);
+        let sig_h = sign_tx(&g.hub.payment, &tx, &p.prevouts[0], &p.leaf.script);
+        tx.input[0].witness = tapscript_witness(&[sig_h, sig_u], &p.leaf.script, &p.control_block);
+        rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the counter must mine: {e}"));
+        println!("REGTEST PC: counter off the depth-{d} claim: {} vB", tx.vsize());
+        (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
+    }
+
     /// The mover's refutation: the readout of slots `d-1` and `d` (slot `d`
     /// alone at depth 1) tied to the pair reveal, the D41 authorship
     /// blocks, plus the mover's signature on the pre-signed skeleton.
     /// Returns P's (outpoint, prevout).
     fn refute(&mut self, rt: &Regtest, g: &mut Game, d: u32) -> (OutPoint, TxOut) {
-        let p = skel(&self.graph, &format!("absent_{d}/refute"));
+        self.refute_under(rt, g, d, &format!("absent_{d}"))
+    }
+
+    /// As [`Path::refute`] under a claim-shaped output labelled `base`
+    /// (`absent_{d}`, or `absent_{d+1}/counter` — the counter output's tree
+    /// is the depth-`d` claim tree, D44).
+    fn refute_under(&mut self, rt: &Regtest, g: &mut Game, d: u32, base: &str) -> (OutPoint, TxOut) {
+        let p = skel(&self.graph, &format!("{base}/refute"));
         let mut tx = p.tx.clone();
         let a_prev = p.prevouts[0].clone();
         let new_head = self.venue.head(d);
@@ -432,9 +462,30 @@ impl Path {
         tx
     }
 
+    /// The claimant's `wrong_slot` disprove off a refuted output (no
+    /// exhibit; a ttt-shaped OP_VERIFY leaf): the parked prior head's word0
+    /// is not this game's — the empty slot's zero head, say.
+    fn disprove_wrong_slot(&self, g: &Game, d: u32, p_op: OutPoint, p_prev: &TxOut) -> Transaction {
+        let ctx = g.ctx();
+        let p_tree = g.inst.refuted_tree(&ctx, d).unwrap();
+        let l = p_tree.leaf("disprove_wrong_slot").unwrap();
+        let claimant = instance::mover_at(d).other();
+        let mut tx = lngap_btc::tx::build_spend(p_op, &l.timelock, vec![TxOut { value: p_prev.value - g.params.presign_fee, script_pubkey: g.keys_of_pub(claimant).payout_spk.clone() }]);
+        let dsig = sign_tx(g.payment_of(claimant), &tx, p_prev, &l.script);
+        let mut w = refute::wots_wire(self.pair_sig.as_ref().expect("the refutation went first"));
+        w.push(dsig);
+        tx.input[0].witness = tapscript_witness(&w, &l.script, &p_tree.control_block("disprove_wrong_slot").unwrap());
+        tx
+    }
+
     /// A timeout-split witness off the claim output (the claimant's code).
     fn timeout_witness(&self, g: &mut Game, d: u32, code: u8) -> Vec<Vec<u8>> {
-        let p = skel(&self.graph, &format!("absent_{d}/split_{}", self.outcome_name(code)));
+        self.timeout_witness_under(g, d, code, &format!("absent_{d}"))
+    }
+
+    /// As [`Path::timeout_witness`] under the claim-shaped output `base`.
+    fn timeout_witness_under(&self, g: &mut Game, d: u32, code: u8, base: &str) -> Vec<Vec<u8>> {
+        let p = skel(&self.graph, &format!("{base}/split_{}", self.outcome_name(code)));
         let reveal = g.keys_of(instance::mover_at(d).other()).0.reveal_uint(&instance::ccode_label(CONTRACT_ID, 1, d), u32::from(code)).unwrap();
         let sig_u = sign_tx(&g.user.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
@@ -460,7 +511,13 @@ impl Path {
     /// reveal (for the adversarial wrong-code negative: the honest
     /// keystore's one-time reveal discipline refuses to equivocate).
     fn checked_witness_with(&self, g: &Game, d: u32, code: u8, reveal: &lngap_lamport::Reveal) -> Vec<Vec<u8>> {
-        let p = skel(&self.graph, &format!("absent_{d}/refuted/split_{}", self.outcome_name(code)));
+        self.checked_witness_under(g, d, code, reveal, &format!("absent_{d}"))
+    }
+
+    /// As [`Path::checked_witness_with`] under the claim-shaped output
+    /// `base` (its refuted output's splits are `{base}/refuted/split_*`).
+    fn checked_witness_under(&self, g: &Game, d: u32, code: u8, reveal: &lngap_lamport::Reveal, base: &str) -> Vec<Vec<u8>> {
+        let p = skel(&self.graph, &format!("{base}/refuted/split_{}", self.outcome_name(code)));
         let sig_u = sign_tx(&g.user.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
         ttt::checked_split_witness(sig_u, sig_h, reveal, self.pair_sig.as_ref().expect("the refutation went first"))
@@ -511,7 +568,9 @@ fn dry(p: &PresignedTx, w: Vec<Vec<u8>>) -> Transaction {
 fn wired_pos_chess_graph() {
     let rt = Regtest::start().unwrap();
     let tables = epoch_tables();
-    let value = Amount::from_sat(200_000);
+    // the deepest path (claim -> counter -> refute -> split, D44) takes
+    // four 60k-sat pre-sign fees: the pot must cover them
+    let value = Amount::from_sat(400_000);
 
     // ====== path A: an illegal move (a bishop jumps a pawn) is killed ======
     {
@@ -519,8 +578,9 @@ fn wired_pos_chess_graph() {
         let mut path = Path::open(&rt, &g, &tables);
         assert_eq!(
             path.graph.len(),
-            1 + MAX_DEPTH as usize * 8 + MAX_DEPTH as usize,
-            "the wired chess graph: settle + {MAX_DEPTH} x (claim, refute, 3 + 3 splits) + {MAX_DEPTH} per-depth equivocation exhibits (D39, D43); NO exhibit family (D42)"
+            1 + MAX_DEPTH as usize * 8 + MAX_DEPTH as usize + (MAX_DEPTH as usize - 1) * 8,
+            "the wired chess graph: settle + {MAX_DEPTH} x (claim, refute, 3 + 3 splits) + {MAX_DEPTH} per-depth equivocation exhibits (D39, D43) + {} x (counter, refute, 3 + 3 splits) (D44); NO exhibit family (D42)",
+            MAX_DEPTH - 1
         );
         // slot 1: user's legal e2e4; slot 2: hub's c8e6 — a bishop jumping
         // the d7 pawn
@@ -658,6 +718,90 @@ fn wired_pos_chess_graph() {
         let dtx = path.disprove(&rt, &g, 5, p_op, &p_prev, Kind::KingAttacked);
         rt.mine_with(&[dtx.clone()]).unwrap_or_else(|e| panic!("the king-attacked disprove must mine: {e}"));
         println!("REGTEST PC: disprove chess_kingattacked: {} vB", dtx.vsize());
+    }
+
+    // ====== path F1: the claim one depth AHEAD is countered (D44) ======
+    {
+        // the hub stalls at slot 2, then claims `absent_3` ("the user did
+        // not move at 3" — vacuously true: the user's turn never came).
+        // Before D44 this raced the user's honest `absent_2` on CLTV order
+        // alone and the staller's timeout split could take the pot.
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut path = Path::open(&rt, &g, &tables);
+        rt.mine(1).unwrap();
+        path.seal(&mut g, 1, "e2e4", true);
+        rt.mine(1).unwrap();
+        path.venue.seal_empty(2);
+        rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        path.claim(&rt, &g, 3); // the staller's vacuous claim
+        // the user counters: "you did not move at 2"
+        let (c_op, c_prev) = path.counter(&rt, &g, 3);
+        // the staller's only defence is a refutation at depth 2 — the
+        // venue attested the EMPTY slot's zero head, and the hub can sign
+        // its region, so the readout itself passes...
+        path.pair_sig = None;
+        let (p_op, p_prev) = path.refute_under(&rt, &mut g, 2, "absent_3/counter");
+        rt.mine(u64::from(g.params.delta) + 1).unwrap();
+        // ...and the user's `wrong_slot` kills it (word0 of the zero head
+        // is not (game, 2, hub)): the user takes the pot
+        let dtx = path.disprove_wrong_slot(&g, 2, p_op, &p_prev);
+        rt.mine_with(&[dtx.clone()]).unwrap_or_else(|e| panic!("wrong_slot must fire on the zero head: {e}"));
+        println!("REGTEST PC: claim-ahead countered, zero-head refutation disproved by wrong_slot: {} vB", dtx.vsize());
+        let _ = (c_op, c_prev);
+    }
+    {
+        // the same attack, the staller declining the hopeless refutation:
+        // the user's timeout split off the counter output pays after delta
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut path = Path::open(&rt, &g, &tables);
+        rt.mine(1).unwrap();
+        path.seal(&mut g, 1, "e2e4", true);
+        rt.mine(1).unwrap();
+        path.venue.seal_empty(2);
+        rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        path.claim(&rt, &g, 3);
+        path.counter(&rt, &g, 3);
+        let before = rt.balance_of(&g.user.public().payout_spk).unwrap();
+        let w = path.timeout_witness_under(&mut g, 2, 0, "absent_3/counter");
+        let early = dry(skel(&path.graph, "absent_3/counter/split_UserWins"), w.clone());
+        assert!(rt.test_accept(&early).is_err(), "the counter's timeout split must wait out delta");
+        rt.mine(u64::from(g.params.delta) + 1).unwrap();
+        let split = run(&rt, skel(&path.graph, "absent_3/counter/split_UserWins"), w);
+        println!("REGTEST PC: claim-ahead countered, timeout split: {} vB", split.vsize());
+        assert_eq!(rt.balance_of(&g.user.public().payout_spk).unwrap() - before, value - g.params.presign_fee - g.params.presign_fee - g.params.presign_fee, "the pot less three hops' fees");
+    }
+
+    // ====== path F2: a FALSE counter to a due claim is refuted (D44) ======
+    {
+        // the hub's e7e5 is on the venue at slot 2; the user stalls at 3;
+        // the hub's `absent_3` is due. The user counters anyway ("you did
+        // not move at 2" — false): the hub refutes on the counter output
+        // with the (1, 2) pair readout, nothing disproves it, and the
+        // hub's self-checking split pays R(parked) = HubWins
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut path = Path::open(&rt, &g, &tables);
+        rt.mine(1).unwrap();
+        path.seal(&mut g, 1, "e2e4", true);
+        rt.mine(1).unwrap();
+        path.seal(&mut g, 2, "e7e5", true);
+        rt.mine(1).unwrap();
+        path.venue.seal_empty(3);
+        rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        path.claim(&rt, &g, 3);
+        path.counter(&rt, &g, 3);
+        let (p_op, p_prev) = path.refute_under(&rt, &mut g, 2, "absent_3/counter");
+        rt.mine(u64::from(g.params.delta) + 1).unwrap();
+        let bad = path.disprove(&rt, &g, 2, p_op, &p_prev, Kind::Ray);
+        assert!(rt.test_accept(&bad).is_err(), "no leaf fires on the legal e7e5");
+        let bad = path.disprove_wrong_slot(&g, 2, p_op, &p_prev);
+        assert!(rt.test_accept(&bad).is_err(), "wrong_slot does not fire on the real heads");
+        rt.mine(u64::from(g.params.delta_prime) + 1).unwrap();
+        let before = rt.balance_of(&g.hub.public().payout_spk).unwrap();
+        let reveal = g.keys_of(Role::Hub).0.reveal_uint(&instance::code_label(CONTRACT_ID, 1, 2), 1).unwrap();
+        let w = path.checked_witness_under(&g, 2, 1, &reveal, "absent_3/counter");
+        let split = run(&rt, skel(&path.graph, "absent_3/counter/refuted/split_HubWins"), w);
+        println!("REGTEST PC: false counter refuted; checked split: {} vB", split.vsize());
+        assert_eq!(rt.balance_of(&g.hub.public().payout_spk).unwrap() - before, value - g.params.presign_fee - g.params.presign_fee - g.params.presign_fee - g.params.presign_fee, "the pot less four hops' fees");
     }
 
     // ====== path G: a garbage-signed entry admits no refutation ======

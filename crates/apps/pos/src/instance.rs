@@ -29,7 +29,13 @@
 //! runtime transactions (their witness is the refutation's reveal, unknown
 //! at setup; the claimant signs at dispute time). Everything else is a
 //! pre-signed skeleton here — including the refutation, whose pinned output
-//! is the whole point (see graph.rs's module docs).
+//! is the whole point (see graph.rs's module docs), and from depth 2 the
+//! COUNTER off each claim output (D44): the mover's thin claim one depth
+//! back, whose output is the previous depth's claim tree verbatim (with its
+//! refutation and splits pre-signed under that depth's keys, in a third
+//! mutually exclusive context — the contract output is spent once). The
+//! counter is what makes a thin claim's dueness enforceable: a claim at a
+//! depth that was not due is countered and cannot be defended.
 //!
 //! Deferred from this wiring (the D34/D36 lists): the party policies
 //! (including actually signing venue entries with the state key) and the
@@ -88,10 +94,11 @@ impl Game {
     /// family at all. Chess has NONE (D42): chess terminality is not a
     /// state field, and none is needed — mate at `t` makes the absence
     /// claim at `t + 1` unanswerable (a mated side has no legal move to
-    /// refute with), it races ahead of any dead-depth claim at `t + 2`,
-    /// the game is assumed to end before `w_max`, and interior draws do
-    /// not exist under the PoC's stalemate-loses-by-stall reading — D37's
-    /// dual-exhibit note is moot.
+    /// refute with), a dead-depth claim at `t + 2` by the mated side is
+    /// countered (D44: "you did not move at `t + 1`" — true, and
+    /// unrefutable), the game is assumed to end before `w_max`, and
+    /// interior draws do not exist under the PoC's stalemate-loses-by-stall
+    /// reading — D37's dual-exhibit note is moot.
     pub fn min_exhibit_depth(self) -> Option<u32> {
         match self {
             Game::Ttt => Some(MIN_EXHIBIT_DEPTH),
@@ -277,13 +284,25 @@ impl PosInstance {
         TapTree::new(leaves)
     }
 
-    /// The claim output's tree at depth `d`. `tables` is the venue's epoch
-    /// table registry, indexed by slot (the refutation leaf embeds the head
-    /// chunks' points of slots `d - 1` and `d`).
+    /// The claim output's tree at depth `d`, with the counter leaf from
+    /// depth 2 (D44). `tables` is the venue's epoch table registry, indexed
+    /// by slot (the refutation leaf embeds the head chunks' points of slots
+    /// `d - 1` and `d`).
     pub fn claim_tree(&self, ctx: &CommitCtx, d: u32, tables: &[EpochTable]) -> Result<TapTree> {
+        self.claim_tree_with(ctx, d, tables, d >= 2)
+    }
+
+    /// The counter output's tree at depth `d` (D44): the depth-`d` claim
+    /// tree WITHOUT a counter of its own — one level closes the question
+    /// (graph.rs's module docs).
+    pub fn counter_tree(&self, ctx: &CommitCtx, d: u32, tables: &[EpochTable]) -> Result<TapTree> {
+        self.claim_tree_with(ctx, d, tables, false)
+    }
+
+    fn claim_tree_with(&self, ctx: &CommitCtx, d: u32, tables: &[EpochTable], counter: bool) -> Result<TapTree> {
         let l = self.layout(d);
         let (prev, table) = if d >= 2 { (Some(&tables[(d - 1) as usize]), &tables[d as usize]) } else { (None, &tables[1]) };
-        graph::claim_tree(ctx, self.game, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes)
+        graph::claim_tree(ctx, self.game, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes, counter)
     }
 
     /// The refutation output's tree at depth `d`.
@@ -302,13 +321,44 @@ impl PosInstance {
             .collect()
     }
 
+    /// The pre-signed children of a claim-shaped output at depth `d`
+    /// (labels under `base`): the refutation (its output pinned to the
+    /// depth-`d` refuted tree), the claimant's timeout splits, and the
+    /// mover's self-checking splits off the refuted output. Shared by the
+    /// absence claims (`absent_d`) and the counters (`absent_{d+1}/counter`,
+    /// D44), which are claim-shaped outputs at depth `d` under two
+    /// mutually exclusive spends of the contract output.
+    #[allow(clippy::too_many_arguments)]
+    fn claim_children(&self, ctx: &CommitCtx, d: u32, base: &str, a_op: OutPoint, a_prev: &TxOut, a_tree: &TapTree, out: &mut Vec<PresignedTx>) -> Result<()> {
+        let fee = ctx.params.presign_fee;
+        let p_tree = self.refuted_tree(ctx, d)?;
+        let rtx = build_spend(a_op, &Timelock::NONE, vec![TxOut { value: a_prev.value - fee, script_pubkey: p_tree.script_pubkey() }]);
+        let p_op = OutPoint { txid: rtx.compute_txid(), vout: 0 };
+        let p_prev = rtx.output[0].clone();
+        out.push(PresignedTx::new(format!("{base}/refute"), rtx, vec![a_prev.clone()], a_tree, "refute", format!("refutation at depth {d}"))?);
+        for o in &self.outcomes {
+            let leaf = format!("split_{}", o.name);
+            let tx = build_spend(a_op, &a_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, a_prev.value - fee));
+            out.push(PresignedTx::new(format!("{base}/{leaf}"), tx, vec![a_prev.clone()], a_tree, &leaf, format!("timeout split at depth {d}: {}", o.name))?);
+        }
+        for o in &self.outcomes {
+            let leaf = format!("split_{}", o.name);
+            let tx = build_spend(p_op, &p_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, p_prev.value - fee));
+            out.push(PresignedTx::new(format!("{base}/refuted/{leaf}"), tx, vec![p_prev.clone()], &p_tree, &leaf, format!("split of the refuted output at depth {d}: {}", o.name))?);
+        }
+        Ok(())
+    }
+
     /// The pre-signed skeletons hanging off the contract output: `settle`,
     /// and per depth the absence claim, the refutation, the timeout splits,
-    /// and the self-checking splits (labels `absent_d/…`); plus per
-    /// TERMINAL depth the exhibit and its self-checking splits (labels
-    /// `exhibit_d/…`, D37 — the exhibit output's tree IS the refuted tree:
-    /// the disprove family, then the splits paying R(parked terminal)).
-    /// The disprove spends are the counterparty's runtime transactions.
+    /// and the self-checking splits (labels `absent_d/…`); from depth 2 the
+    /// counter off the claim output and ITS refutation and splits (labels
+    /// `absent_d/counter/…`, D44 — the counter output's tree is the
+    /// depth-`d - 1` claim tree without a counter); plus per TERMINAL depth
+    /// the exhibit and its self-checking splits (labels `exhibit_d/…`, D37
+    /// — the exhibit output's tree IS the refuted tree: the disprove
+    /// family, then the splits paying R(parked terminal)). The disprove
+    /// spends are the counterparty's runtime transactions.
     pub fn graph(&self, ctx: &CommitCtx, outpoint: OutPoint, prevout: &TxOut, tables: &[EpochTable]) -> Result<Vec<PresignedTx>> {
         let fee = ctx.params.presign_fee;
         let mut out = Vec::new();
@@ -318,25 +368,23 @@ impl PosInstance {
         out.push(PresignedTx::new("settle", tx, vec![prevout.clone()], &tree0, "settle", format!("settle: R(s) = {}", r.name))?);
         for d in 1..=self.max_depth() {
             let a_tree = self.claim_tree(ctx, d, tables)?;
-            let p_tree = self.refuted_tree(ctx, d)?;
             let name = format!("absent_{d}");
             let tx = build_spend(outpoint, &tree0.leaf(&name)?.timelock, vec![TxOut { value: self.value - fee, script_pubkey: a_tree.script_pubkey() }]);
             let a_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
             let a_prev = tx.output[0].clone();
             out.push(PresignedTx::new(name.clone(), tx, vec![prevout.clone()], &tree0, &name, format!("absence claim at depth {d}"))?);
-            let rtx = build_spend(a_op, &Timelock::NONE, vec![TxOut { value: a_prev.value - fee, script_pubkey: p_tree.script_pubkey() }]);
-            let p_op = OutPoint { txid: rtx.compute_txid(), vout: 0 };
-            let p_prev = rtx.output[0].clone();
-            out.push(PresignedTx::new(format!("{name}/refute"), rtx, vec![a_prev.clone()], &a_tree, "refute", format!("refutation at depth {d}"))?);
-            for o in &self.outcomes {
-                let leaf = format!("split_{}", o.name);
-                let tx = build_spend(a_op, &a_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, a_prev.value - fee));
-                out.push(PresignedTx::new(format!("{name}/{leaf}"), tx, vec![a_prev.clone()], &a_tree, &leaf, format!("timeout split at depth {d}: {}", o.name))?);
-            }
-            for o in &self.outcomes {
-                let leaf = format!("split_{}", o.name);
-                let tx = build_spend(p_op, &p_tree.leaf(&leaf)?.timelock, self.dist_outputs(ctx, o.payout, p_prev.value - fee));
-                out.push(PresignedTx::new(format!("{name}/refuted/{leaf}"), tx, vec![p_prev.clone()], &p_tree, &leaf, format!("split of the refuted output at depth {d}: {}", o.name))?);
+            self.claim_children(ctx, d, &name, a_op, &a_prev, &a_tree, &mut out)?;
+            if d >= 2 {
+                // the counter (D44): the mover's thin claim one depth back,
+                // its output the depth-(d-1) claim tree (no counter of its
+                // own), with that depth's refutation and splits pre-signed
+                let c_tree = self.counter_tree(ctx, d - 1, tables)?;
+                let cname = format!("{name}/counter");
+                let ctx_tx = build_spend(a_op, &Timelock::NONE, vec![TxOut { value: a_prev.value - fee, script_pubkey: c_tree.script_pubkey() }]);
+                let c_op = OutPoint { txid: ctx_tx.compute_txid(), vout: 0 };
+                let c_prev = ctx_tx.output[0].clone();
+                out.push(PresignedTx::new(cname.clone(), ctx_tx, vec![a_prev.clone()], &a_tree, "counter", format!("counter off the depth-{d} claim: no move at depth {}", d - 1))?);
+                self.claim_children(ctx, d - 1, &cname, c_op, &c_prev, &c_tree, &mut out)?;
             }
         }
         // the terminal exhibits (D37): `exhibit_d` spends the contract

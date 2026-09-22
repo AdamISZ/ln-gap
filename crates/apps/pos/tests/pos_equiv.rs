@@ -220,8 +220,8 @@ fn player_equivocation_leaf() {
         let graph = g.inst.graph(&ctx, c_op, &c_prev, &tables).unwrap();
         assert_eq!(
             graph.len(),
-            102,
-            "settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43)"
+            166,
+            "settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43) + 8 x (counter, refute, 3 + 3 splits) (D44)"
         );
         let (venue, gen_digest) = Venue::new();
         let mut venue = venue;

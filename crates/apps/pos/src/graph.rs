@@ -25,6 +25,28 @@
 //! move, theft for an illegal one); and the splits on the refuted output
 //! check the code against the parked state, because a PoS refutation
 //! carries no code reveal for a `code_mismatch` leaf to judge.
+//!
+//! The counter (D44). The thin claim asserts no venue content, so nothing
+//! in it says the claim was DUE — that the claimant itself moved at
+//! `d - 1`. Without that, the staller at `d - 1` can claim `absent_d`
+//! ("you did not move at `d`" — vacuously true, the victim's turn never
+//! came) and the victim cannot refute; only CLTV order separated the two
+//! claims, and the broadcaster's `to_self_delay` on the honest one inverts
+//! it. So from depth 2 the claim output carries one more leaf, `counter`:
+//! the mover's thin claim one depth BACK, "you did not move at `d - 1`" —
+//! exactly the negation of dueness. Its output tree is the depth-`d - 1`
+//! claim tree verbatim (the claimant's refutation by the `(d - 2, d - 1)`
+//! pair readout, racing the counter-claimant's timeout splits), and that
+//! refutation's output is the depth-`d - 1` refuted tree. One level closes
+//! it: a counter is answered by a positive readout or not at all — a false
+//! counter is refuted by the claimant's own attested, signed head at
+//! `d - 1` (and then judged by the ordinary disprove family / paid by the
+//! checked split), and a true counter means the claim was never due, which
+//! should lose regardless of what happened earlier (the claimant always had
+//! a due claim at a shallower depth). The counter output's tree therefore
+//! carries NO counter of its own. The honest bare stall stays two small
+//! transactions; the claim-ahead costs the attacker the pot for a ~200 vB
+//! counter.
 
 use anyhow::Result;
 use bitcoin::opcodes::all::*;
@@ -208,9 +230,24 @@ pub fn equiv_leaf(ctx: &CommitCtx, name: &str, key: &WotsPublic, exhibitor: Role
     Leaf::new(name.to_string(), b.push_int(1).into_script(), tl)
 }
 
+/// The counter leaf on the claim output A_d (D44): the mover's thin claim
+/// one depth back — "the claimant did not move at `d - 1`", the negation
+/// of the claim's dueness. 2-of-2 and pre-signed (the counter output is
+/// pinned to the depth-`d - 1` claim tree), no timelock: it must land
+/// inside the claimant's timeout window (`delta`), like a refutation. No
+/// `to_self_delay`: that delay guards the CONTRACT output against a
+/// revoked commitment, and this spends a claim output.
+pub fn counter_leaf(ctx: &CommitCtx, name: &str) -> Leaf {
+    let b = ctx.two_of_two_verify(Builder::new());
+    Leaf::new(name.to_string(), b.push_int(1).into_script(), Timelock::NONE)
+}
+
 /// The tree of the claim output A_d: the mover's refutation plus the
 /// claimant's timeout splits after the dispute window (`delta`), gated by
-/// the claimant's code reveal.
+/// the claimant's code reveal — and, with `counter`, the mover's counter
+/// claim one depth back (D44; `counter` is set on the contract output's
+/// claims from depth 2 and NEVER on a counter output's own tree).
+#[allow(clippy::too_many_arguments)]
 pub fn claim_tree(
     ctx: &CommitCtx,
     game: Game,
@@ -220,8 +257,12 @@ pub fn claim_tree(
     keys: &PosDepthKeys,
     keys_prev: Option<&PosDepthKeys>,
     outcomes: &[Outcome],
+    counter: bool,
 ) -> Result<TapTree> {
     let mut leaves = vec![refute_leaf(ctx, game, l, table_prev, table, keys, keys_prev)];
+    if counter {
+        leaves.push(counter_leaf(ctx, "counter"));
+    }
     for o in outcomes {
         leaves.push(split_leaf(ctx, o, ctx.params.delta, &keys.claimant_code));
     }

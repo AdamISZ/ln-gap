@@ -61,8 +61,8 @@ const POT: u64 = 1_000_000;
 /// placeholder would sit under the relay floor (D42).
 const FEE: u64 = 60_000;
 /// The skeleton count at open: settle + 8x(claim, refute, 3+3 splits) + 8
-/// per-depth equiv leaves (D43).
-const GRAPH_LEN: usize = 73;
+/// per-depth equiv leaves (D43) + 7x(counter, refute, 3+3 splits) (D44).
+const GRAPH_LEN: usize = 129;
 /// The chess state key's reveal length (the tied-WOTS authorship: 84
 /// message + 3 checksum digits over the 42 signed bytes).
 const STATE_DIGITS: usize = 87;
@@ -205,7 +205,8 @@ impl ChessPosGame {
         g.graph = g.inst.graph(&ctx, c_op, &c_prev, &g.tables)?;
         ensure!(
             g.graph.len() == GRAPH_LEN,
-            "the wired chess graph: settle + {MAX_DEPTH}x(claim, refute, 3+3 splits) + {MAX_DEPTH} per-depth equiv (D43); NO exhibit family (D42)"
+            "the wired chess graph: settle + {MAX_DEPTH}x(claim, refute, 3+3 splits) + {MAX_DEPTH} per-depth equiv (D43) + {}x(counter, refute, 3+3 splits) (D44); NO exhibit family (D42)",
+            MAX_DEPTH - 1
         );
         g.say(format!(
             "game opened: contract {CONTRACT_ID}, pot {} sat; {} pre-signed transactions",
@@ -499,11 +500,29 @@ impl ChessPosGame {
         Ok(self.dry(&label, w))
     }
 
+    /// The mover's counter off the depth-`d` claim output (D44): the thin
+    /// claim "the claimant did not move at `d - 1`", pre-signed 2-of-2. Its
+    /// output's tree is the depth-`d - 1` claim tree, so the follow-ons run
+    /// at depth `d - 1` under the `absent_{d}/counter` base label.
+    fn counter(&mut self, d: u32) -> Result<(u32, OutPoint, TxOut)> {
+        let by = instance::mover_at(d);
+        let label = format!("absent_{d}/counter");
+        let [sig_h, sig_u] = self.sigs22(&label);
+        self.say(format!("{by} counters: the claim at {d} was not due — no move at slot {}", d - 1));
+        self.run(&label, vec![sig_h, sig_u], by)
+    }
+
     /// The mover's refutation at depth `d`: the readout parks the attested
     /// pair. Returns the pair reveal and the refuted output.
     fn refute(&mut self, d: u32) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
+        self.refute_under(d, &format!("absent_{d}"))
+    }
+
+    /// As [`ChessPosGame::refute`] under the claim-shaped output `base`
+    /// (`absent_{d}`, or `absent_{d+1}/counter` — D44).
+    fn refute_under(&mut self, d: u32, base: &str) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
         let mover = instance::mover_at(d);
-        let label = format!("absent_{d}/refute");
+        let label = format!("{base}/refute");
         let (mut w, pair_sig) = self.readout_witness(&label, d, false)?;
         let msig = {
             let p = self.skel(&label);
@@ -660,7 +679,7 @@ fn stall(sc: &'static Scenario, d: u32, opening: &[&str]) -> Result<Report> {
 pub const PC1: Scenario = Scenario {
     id: "PC1",
     title: "PoS graph, chess: cooperative game, nothing on Bitcoin",
-    expected: "fool's mate on the PoS venue, each entry's signature verified against the mover's per-depth key; no Bitcoin transaction; 73 pre-signed transactions at open (D43's per-depth equiv leaves)",
+    expected: "fool's mate on the PoS venue, each entry's signature verified against the mover's per-depth key; no Bitcoin transaction; 129 pre-signed transactions at open (D43's per-depth equiv leaves, D44's counters)",
     run: || {
         let mut g = ChessPosGame::open(sat(POT))?;
         for uci in ["f2f3", "e7e5", "g2g4", "d8h4"] {
@@ -811,8 +830,50 @@ pub const PC9: Scenario = Scenario {
     },
 };
 
+pub const PC10: Scenario = Scenario {
+    id: "PC10",
+    title: "PoS graph, chess: the staller claims one depth AHEAD — countered (D44)",
+    expected: "the hub stalls at move 2, then claims absence at 3 ('the user did not move at 3' — vacuously true, the user's turn never came); the user's counter ('you did not move at 2') has no defence — the hub declines the hopeless refutation (the empty slot's zero head would be killed by wrong_slot) — and the user's timeout split off the counter output pays: three transactions",
+    run: || {
+        let mut g = ChessPosGame::open(sat(POT))?;
+        g.play("e2e4")?;
+        g.idle_slot()?; // the hub's slot 2 seals empty
+        g.wait_to(g.mature_at(3))?;
+        g.claim_absent(3)?; // the staller's vacuous claim at 3
+        let (h, _, _) = g.counter(3)?;
+        g.say("the hub cannot defend the counter: nothing attested at slot 2 bears its signature (the zero head's word0 fails wrong_slot)".to_string());
+        g.wait_to(h + u32::from(g.params.delta) + 1)?;
+        g.split(2, "absent_3/counter", 0, None)?;
+        ensure!(roles(&g) == vec!["absent_3".to_string(), "absent_3/counter".to_string(), "absent_3/counter/split_UserWins".to_string()], "{:?}", roles(&g));
+        ensure!(g.balances() == [sat(POT - 3 * FEE), sat(0)], "{:?}", g.balances());
+        Ok(report(&g, &PC10))
+    },
+};
+
+pub const PC11: Scenario = Scenario {
+    id: "PC11",
+    title: "PoS graph, chess: a false counter to a due claim is refuted (D44)",
+    expected: "the hub's e7e5 is on the venue at slot 2; the user stalls at 3; the hub's absence claim at 3 is due; the user counters anyway ('you did not move at 2' — false); the hub refutes on the counter output with the (1, 2) pair readout, no disprove fires, and the hub's self-checking split pays R(parked) = HubWins (white to move forfeits): four transactions",
+    run: || {
+        let mut g = ChessPosGame::open(sat(POT))?;
+        g.play("e2e4")?;
+        g.play("e7e5")?; // the hub DID publish at slot 2
+        g.idle_slot()?; // the user stalls at 3
+        g.wait_to(g.mature_at(3))?;
+        g.claim_absent(3)?; // due
+        g.counter(3)?; // the user's false counter
+        let (psig, h, _, _) = g.refute_under(2, "absent_3/counter")?;
+        ensure!(g.disproves_firing(2).is_empty(), "the parked move is legal");
+        g.wait_to(h + u32::from(g.params.delta) + u32::from(g.params.delta_prime) + 1)?;
+        g.split(2, "absent_3/counter/refuted", 1, Some(&psig))?; // R: white to move forfeits -> HubWins
+        ensure!(roles(&g) == vec!["absent_3".to_string(), "absent_3/counter".to_string(), "absent_3/counter/refute".to_string(), "absent_3/counter/refuted/split_HubWins".to_string()], "{:?}", roles(&g));
+        ensure!(g.balances() == [sat(0), sat(POT - 4 * FEE)], "{:?}", g.balances());
+        Ok(report(&g, &PC11))
+    },
+};
+
 pub fn scenarios() -> Vec<Scenario> {
     vec![
-        PC1, PC2, PC3, PC4, PC5, PC6, PC7, PC8, PC9,
+        PC1, PC2, PC3, PC4, PC5, PC6, PC7, PC8, PC9, PC10, PC11,
     ]
 }
