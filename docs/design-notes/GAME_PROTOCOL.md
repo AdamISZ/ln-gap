@@ -197,7 +197,8 @@ dispute, and nothing on the stall path.
    the equivocation leaf, and disputes on the venue. [The POS-venue
    iteration of this graph — the absence-claim shape with the EC-OTS
    readout replacing the PoW dispute leg — is built and played on the
-   pos-factchain branch: D32-D44, scenarios PS1-PS11 (tic-tac-toe) and
-   PC1-PC11 (chess); it includes the equivocation leaf (D39, per-depth
+   pos-factchain branch: D32-D45, scenarios PS1-PS11 (tic-tac-toe) and
+   PC1-PC12 (chess); it includes the equivocation leaf (D39, per-depth
    since D43), the counter that makes a thin claim's dueness enforceable
-   (D44), and, for chess, needs no terminal exhibit family (D42).]
+   (D44), the chess well-formedness leaf (D45), and, for chess, needs no
+   terminal exhibit family (D42).]

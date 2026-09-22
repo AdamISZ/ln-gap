@@ -33,6 +33,8 @@
 //! - F2: a FALSE counter to a due claim: the hub's e7e5 is on the venue,
 //!   the user stalls at 3 and counters the hub's due `absent_3` anyway;
 //!   the hub refutes on the counter output and its checked split pays;
+//! - H: a MALFORMED signed entry (from-square 255) is disproved by
+//!   `chess_malformed` (D45) where every kind leaf errors;
 //! - G: a garbage-signed attested entry admits no refutation (the D41
 //!   authorship fragment rejects the junk signature).
 
@@ -462,19 +464,21 @@ impl Path {
         tx
     }
 
-    /// The claimant's `wrong_slot` disprove off a refuted output (no
-    /// exhibit; a ttt-shaped OP_VERIFY leaf): the parked prior head's word0
-    /// is not this game's — the empty slot's zero head, say.
-    fn disprove_wrong_slot(&self, g: &Game, d: u32, p_op: OutPoint, p_prev: &TxOut) -> Transaction {
+    /// The claimant's exhibit-less disprove `name` off a refuted output (a
+    /// ttt-shaped OP_VERIFY leaf: `wrong_slot`, or `chess_malformed` —
+    /// D45): the witness is the pair reveal alone. Built without decoding
+    /// the parked heads (they may be exactly the garbage being disproved).
+    fn disprove_bare(&self, g: &Game, d: u32, p_op: OutPoint, p_prev: &TxOut, name: &str) -> Transaction {
         let ctx = g.ctx();
         let p_tree = g.inst.refuted_tree(&ctx, d).unwrap();
-        let l = p_tree.leaf("disprove_wrong_slot").unwrap();
+        let name = format!("disprove_{name}");
+        let l = p_tree.leaf(&name).unwrap();
         let claimant = instance::mover_at(d).other();
         let mut tx = lngap_btc::tx::build_spend(p_op, &l.timelock, vec![TxOut { value: p_prev.value - g.params.presign_fee, script_pubkey: g.keys_of_pub(claimant).payout_spk.clone() }]);
         let dsig = sign_tx(g.payment_of(claimant), &tx, p_prev, &l.script);
         let mut w = refute::wots_wire(self.pair_sig.as_ref().expect("the refutation went first"));
         w.push(dsig);
-        tx.input[0].witness = tapscript_witness(&w, &l.script, &p_tree.control_block("disprove_wrong_slot").unwrap());
+        tx.input[0].witness = tapscript_witness(&w, &l.script, &p_tree.control_block(&name).unwrap());
         tx
     }
 
@@ -511,12 +515,12 @@ impl Path {
     /// reveal (for the adversarial wrong-code negative: the honest
     /// keystore's one-time reveal discipline refuses to equivocate).
     fn checked_witness_with(&self, g: &Game, d: u32, code: u8, reveal: &lngap_lamport::Reveal) -> Vec<Vec<u8>> {
-        self.checked_witness_under(g, d, code, reveal, &format!("absent_{d}"))
+        self.checked_witness_under(g, code, reveal, &format!("absent_{d}"))
     }
 
     /// As [`Path::checked_witness_with`] under the claim-shaped output
     /// `base` (its refuted output's splits are `{base}/refuted/split_*`).
-    fn checked_witness_under(&self, g: &Game, d: u32, code: u8, reveal: &lngap_lamport::Reveal, base: &str) -> Vec<Vec<u8>> {
+    fn checked_witness_under(&self, g: &Game, code: u8, reveal: &lngap_lamport::Reveal, base: &str) -> Vec<Vec<u8>> {
         let p = skel(&self.graph, &format!("{base}/refuted/split_{}", self.outcome_name(code)));
         let sig_u = sign_tx(&g.user.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
@@ -625,6 +629,10 @@ fn wired_pos_chess_graph() {
         for kind in chess::kinds() {
             let bad = path.disprove(&rt, &g, D, p_op, &p_prev, kind);
             assert!(rt.test_accept(&bad).is_err(), "{kind:?} must not fire on a legal move");
+        }
+        for name in ["wrong_slot", chess::MALFORMED] {
+            let bad = path.disprove_bare(&g, D, p_op, &p_prev, name);
+            assert!(rt.test_accept(&bad).is_err(), "{name} must not fire on a legal, well-formed head");
         }
         // the wrong code is rejected in-leaf
         let w = path.checked_witness_with(&g, D, 0, &adversarial_code_reveal(D, 0));
@@ -744,7 +752,7 @@ fn wired_pos_chess_graph() {
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         // ...and the user's `wrong_slot` kills it (word0 of the zero head
         // is not (game, 2, hub)): the user takes the pot
-        let dtx = path.disprove_wrong_slot(&g, 2, p_op, &p_prev);
+        let dtx = path.disprove_bare(&g, 2, p_op, &p_prev, "wrong_slot");
         rt.mine_with(&[dtx.clone()]).unwrap_or_else(|e| panic!("wrong_slot must fire on the zero head: {e}"));
         println!("REGTEST PC: claim-ahead countered, zero-head refutation disproved by wrong_slot: {} vB", dtx.vsize());
         let _ = (c_op, c_prev);
@@ -793,15 +801,58 @@ fn wired_pos_chess_graph() {
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         let bad = path.disprove(&rt, &g, 2, p_op, &p_prev, Kind::Ray);
         assert!(rt.test_accept(&bad).is_err(), "no leaf fires on the legal e7e5");
-        let bad = path.disprove_wrong_slot(&g, 2, p_op, &p_prev);
+        let bad = path.disprove_bare(&g, 2, p_op, &p_prev, "wrong_slot");
         assert!(rt.test_accept(&bad).is_err(), "wrong_slot does not fire on the real heads");
         rt.mine(u64::from(g.params.delta_prime) + 1).unwrap();
         let before = rt.balance_of(&g.hub.public().payout_spk).unwrap();
         let reveal = g.keys_of(Role::Hub).0.reveal_uint(&instance::code_label(CONTRACT_ID, 1, 2), 1).unwrap();
-        let w = path.checked_witness_under(&g, 2, 1, &reveal, "absent_3/counter");
+        let w = path.checked_witness_under(&g, 1, &reveal, "absent_3/counter");
         let split = run(&rt, skel(&path.graph, "absent_3/counter/refuted/split_HubWins"), w);
         println!("REGTEST PC: false counter refuted; checked split: {} vB", split.vsize());
         assert_eq!(rt.balance_of(&g.hub.public().payout_spk).unwrap() - before, value - g.params.presign_fee - g.params.presign_fee - g.params.presign_fee - g.params.presign_fee, "the pot less four hops' fees");
+    }
+
+    // ====== path H: a MALFORMED signed entry is disproved (D45) ======
+    {
+        // the hub seals a SIGNED entry at slot 2 whose state is e7e5's
+        // successor with the from-square byte set to 255: the client
+        // cannot decode it, and every kind leaf's board read errors on
+        // it — before D45 the parked state was un-disprovable and the
+        // hub's checked split took the pot
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut path = Path::open(&rt, &g, &tables);
+        rt.mine(1).unwrap();
+        path.seal(&mut g, 1, "e2e4", true);
+        rt.mine(1).unwrap();
+        let s2 = play(&path.state, "e7e5").unwrap();
+        let mut head = chess::head(GAME_ID, 2, Role::Hub, &s2);
+        head[8 + 36] = 255;
+        assert!(ChessState::from_e(head[8..48].try_into().unwrap()).is_err(), "the client cannot decode it");
+        assert!(chess::is_malformed(&head, 2));
+        let sig = g.hub_ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, 2), &chess::auth_message(&head)).unwrap();
+        let mut entry = head.to_vec();
+        for h in &sig.hashes {
+            entry.extend_from_slice(h);
+        }
+        path.venue.miner.submit(entry);
+        let (block, table) = path.venue.miner.seal_next(2).unwrap();
+        assert!(block.verify_seal(&table).is_ok());
+        assert_eq!(block.header.head(), head);
+        path.venue.sealed.insert(2, block);
+        rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        path.claim(&rt, &g, D);
+        let (p_op, p_prev) = path.refute(&rt, &mut g, D);
+        rt.mine(u64::from(g.params.delta) + 1).unwrap();
+        // the kinds cannot judge it (their board read errors)...
+        let bad = path.disprove_bare(&g, D, p_op, &p_prev, "chess_ray");
+        match rt.test_accept(&bad) {
+            Err(e) => println!("note: chess_ray on the malformed head: {e}"),
+            Ok(_) => panic!("chess_ray must not be spendable on the malformed head"),
+        }
+        // ...and chess_malformed takes the pot
+        let dtx = path.disprove_bare(&g, D, p_op, &p_prev, chess::MALFORMED);
+        rt.mine_with(&[dtx.clone()]).unwrap_or_else(|e| panic!("chess_malformed must fire on from = 255: {e}"));
+        println!("REGTEST PC: disprove chess_malformed (from-square 255): {} vB", dtx.vsize());
     }
 
     // ====== path G: a garbage-signed entry admits no refutation ======

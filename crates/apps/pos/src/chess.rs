@@ -44,11 +44,12 @@
 //!   loses the same way, consistent with the PoC reading. `code ==
 //!   1 - side`, so the Draw split can never fire on this graph — draws
 //!   remain cooperative-only.
-//! - word1 (the duplicated move) and the state depth byte are NOT checked
-//!   in-script: the family judges `(prior position, move, position')` with
-//!   the move read from the new head's state bytes 36..38; word1 is venue
-//!   indexing commentary. (chess-fc's entry decode still cross-checks it
-//!   for clients.)
+//! - The family judges `(prior position, move, position')` with the move
+//!   read from the new head's state bytes 36..38; word1 (the duplicated
+//!   move) and the state's depth byte are venue indexing, pinned by
+//!   `chess_malformed` (D45) to the state's move and the layout's depth so
+//!   that chess-fc's entry decode (which cross-checks both) never rejects
+//!   an entry the chain upholds.
 //!
 //! The D41 authorship fragment covers chess's signed region (the state
 //! bytes, then the move's two bytes — the D43 tied-WOTS form, 84 digits),
@@ -57,12 +58,23 @@
 //!
 //! The native mirrors decode the parked heads and re-run the certificate
 //! search (`find_kind`), the same oracle the chess-fc test suite uses; they
-//! are defined on WELL-FORMED encodings. A malformed-but-attested state
-//! (out-of-range nibble values) may evade every kind — inherited from
-//! D30's PoW leaves verbatim — but such a head is attributable (the
-//! authorship gate binds it to its mover) and its refuted output is stuck
-//! (no disprove fires, the `1 - side` split cannot fire): the mover who
-//! parks it self-griefs the pot.
+//! are defined on WELL-FORMED encodings. The family therefore ends with
+//! `chess_malformed` (D45), the well-formedness leaf over the NEW head: it
+//! fires on exactly the fields the native decoder rejects but no kind
+//! judges — a from/to square byte >= 64 (which makes every kind's board
+//! read ERROR, so no kind could fire: before D45 a signed entry with
+//! from = 255 parked a state no disprove could touch while the `1 - side`
+//! split still paid the mover), the castling byte's high nibble, state
+//! byte 38's low nibble, the state's depth byte (pinned to the layout's
+//! depth), a promotion code outside {0, N, B, R, Q}, and word1 (the move
+//! duplicate the entry decode cross-checks — pinned nibble-wise to the
+//! state's from/to/promotion). Board nibbles, the side, the en-passant
+//! square and the castling low nibble are judged by `Board`, `Side`,
+//! `EpField` and `CastlingField` already, and none of those errors on
+//! garbage there. So every head the client's decoder rejects is
+//! disprovable, and the judge's notion of a valid entry is a superset of
+//! the client's — the client never has to claim absence over an entry
+//! the chain would uphold.
 
 use std::sync::Arc;
 
@@ -79,7 +91,7 @@ use lngap_factchain::HEAD_BYTES;
 use lngap_lamport::winternitz::{WotsExt, WotsPublic};
 use lngap_lamport::PublicKey;
 
-use crate::ttt::{self, Layout, PosLeaf};
+use crate::ttt::{self, Layout, Lb, PosLeaf, Src};
 
 /// Head digits per parked head.
 const HD: usize = HEAD_BYTES * 2; // 96
@@ -141,14 +153,101 @@ fn state_of_head(h: &[u8; HEAD_BYTES]) -> anyhow::Result<ChessState> {
 }
 
 /// The disprove family for the refuted output at this layout: `wrong_slot`
-/// (ttt's) then the twelve kinds over the register file, each with its
-/// native mirror.
+/// (ttt's), the twelve kinds over the register file, then
+/// `chess_malformed` (D45), each with its native mirror.
 pub fn disprove_leaves(l: &Layout, key: &WotsPublic) -> Vec<PosLeaf> {
     let mut v = vec![ttt::wrong_slot(l, key)];
     for kind in kinds() {
         v.push(kind_leaf(l, key, kind));
     }
+    v.push(malformed(l, key));
     v
+}
+
+/// The leaf name of the well-formedness leaf.
+pub const MALFORMED: &str = "chess_malformed";
+
+/// Is the head malformed in a way no kind leaf judges (D45)? The native
+/// mirror of [`malformed`]'s script, field for field: from/to square bytes
+/// (state bytes 36, 37) >= 64; the castling byte's (33) high nibble; state
+/// byte 38's low nibble; the depth byte (39) != `depth`; a promotion code
+/// (byte 38's high nibble) of 1 or >= 6; word1 (head bytes 4..8) != the
+/// move's `to_u16() << 16` rebuilt from the state's from/to/promotion.
+pub fn is_malformed(h: &[u8; HEAD_BYTES], depth: u32) -> bool {
+    let s = &h[8..48];
+    let (from, to, promo) = (s[36], s[37], s[38] >> 4);
+    // word1 nibble-wise, as the script compares it (the sums may exceed a
+    // nibble when a square byte is out of range — then they simply differ)
+    let d = |j: usize| u32::from(if j & 1 == 0 { h[j / 2] >> 4 } else { h[j / 2] & 15 });
+    let w1_ok = d(8) == u32::from(promo)
+        && d(9) == u32::from(to >> 2)
+        && d(10) == u32::from((to & 3) << 2) + u32::from(from >> 4)
+        && d(11) == u32::from(from & 15)
+        && (12..16).all(|j| d(j) == 0);
+    from >= 64 || to >= 64 || s[33] >> 4 != 0 || s[38] & 15 != 0 || u32::from(s[39]) != depth || promo == 1 || promo >= 6 || !w1_ok
+}
+
+/// `chess_malformed`: fires iff [`is_malformed`] holds for the parked NEW
+/// head. Pure nibble arithmetic on the register file — it never errors, so
+/// a head that makes the kinds' board reads fail still has a live
+/// disprove. Gathers (deepest first): the depth byte's two digits, the
+/// castling high nibble, byte 38's low nibble, the promotion nibble and
+/// word1's digit 8, then from (hi, lo), to (hi, lo) and word1's digits
+/// 9..11, then word1's digits 12..15; folds a BOOLOR accumulator from the
+/// top down.
+fn malformed(l: &Layout, key: &WotsPublic) -> PosLeaf {
+    // head digit j of the new head at file digit n + j; state nibble k = head digit 16 + k
+    let n = l.new;
+    let sd = |k: usize| Src::Dig(n + SD + k);
+    let hd = |j: usize| Src::Dig(n + j);
+    let f = l.file;
+    let mut lb = Lb::new(key);
+    lb = lb.src(f, sd(78)).src(f, sd(79)); // depth hi, lo
+    lb = lb.src(f, sd(66)).src(f, sd(77)); // castling hi, byte 38 lo
+    lb = lb.src(f, sd(76)).src(f, hd(8)); // promo, word1 digit 8
+    lb = lb.src(f, sd(72)).src(f, sd(73)).src(f, sd(74)).src(f, sd(75)); // from hi, lo, to hi, lo
+    lb = lb.src(f, hd(9)).src(f, hd(10)).src(f, hd(11)); // word1 digits 9..11
+    lb = lb.src(f, hd(12)).src(f, hd(13)).src(f, hd(14)).src(f, hd(15)); // word1 digits 12..15 (zero)
+    let mut b = lb.restore();
+    // [.., d12, d13, d14, d15]: the zero digits
+    b = b.push_opcode(OP_0NOTEQUAL);
+    for _ in 0..3 {
+        b = b.push_opcode(OP_SWAP).push_opcode(OP_0NOTEQUAL).push_opcode(OP_BOOLOR);
+    }
+    // [.., fh, fl, th, tl, d9, d10, d11, acc]: the squares' range and word1's move digits
+    b = b.push_int(7).push_opcode(OP_PICK).push_int(4).push_opcode(OP_GREATERTHANOREQUAL).push_opcode(OP_BOOLOR); // from >= 64
+    b = b.push_int(5).push_opcode(OP_PICK).push_int(4).push_opcode(OP_GREATERTHANOREQUAL).push_opcode(OP_BOOLOR); // to >= 64
+    b = b.push_opcode(OP_TOALTSTACK); // [fh, fl, th, tl, d9, d10, d11]
+    b = b.push_int(5).push_opcode(OP_PICK).push_opcode(OP_NUMNOTEQUAL); // d11 != fl -> [fh, fl, th, tl, d9, d10, b]
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_BOOLOR).push_opcode(OP_TOALTSTACK); // [fh, fl, th, tl, d9, d10]
+    b = b.push_int(2).push_opcode(OP_PICK); // [.., d9, d10, tl]
+    b = ttt::split4(b); // [.., d9, d10, a, bb]  (tl = 4a + bb)
+    b = b.push_opcode(OP_NIP).push_opcode(OP_DUP).push_opcode(OP_ADD).push_opcode(OP_DUP).push_opcode(OP_ADD); // [.., d9, d10, 4bb]
+    b = b.push_int(6).push_opcode(OP_PICK).push_opcode(OP_ADD).push_opcode(OP_NUMNOTEQUAL); // d10 != 4bb + fh -> [fh, fl, th, tl, d9, b]
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_BOOLOR).push_opcode(OP_TOALTSTACK); // [fh, fl, th, tl, d9]
+    b = b.push_int(1).push_opcode(OP_PICK); // [.., d9, tl]
+    b = ttt::split4(b).push_opcode(OP_DROP); // [.., d9, a]
+    b = b.push_int(3).push_opcode(OP_PICK).push_opcode(OP_DUP).push_opcode(OP_ADD).push_opcode(OP_DUP).push_opcode(OP_ADD).push_opcode(OP_ADD); // [.., d9, 4th + a]
+    b = b.push_opcode(OP_NUMNOTEQUAL); // [fh, fl, th, tl, b]
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_BOOLOR).push_opcode(OP_TOALTSTACK); // [fh, fl, th, tl]
+    b = b.push_opcode(OP_2DROP).push_opcode(OP_2DROP).push_opcode(OP_FROMALTSTACK); // [.., promo, d8, acc]
+    // the promotion code's validity and word1's digit 8
+    b = b.push_opcode(OP_TOALTSTACK).push_opcode(OP_SWAP).push_opcode(OP_DUP); // [d8, promo, promo]
+    b = b.push_int(1).push_opcode(OP_NUMEQUAL).push_opcode(OP_OVER).push_int(6).push_opcode(OP_GREATERTHANOREQUAL).push_opcode(OP_BOOLOR); // [d8, promo, bad]
+    b = b.push_opcode(OP_ROT).push_opcode(OP_ROT).push_opcode(OP_NUMNOTEQUAL).push_opcode(OP_BOOLOR); // [bad']
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_BOOLOR); // [dep_hi, dep_lo, cast_hi, b38_lo, acc]
+    for _ in 0..2 {
+        b = b.push_opcode(OP_SWAP).push_opcode(OP_0NOTEQUAL).push_opcode(OP_BOOLOR);
+    }
+    // [dep_hi, dep_lo, acc]: the depth byte against the layout's constant
+    b = b.push_opcode(OP_SWAP).push_int(i64::from(l.depth & 15)).push_opcode(OP_NUMNOTEQUAL).push_opcode(OP_BOOLOR);
+    b = b.push_opcode(OP_SWAP).push_int(i64::from(l.depth >> 4)).push_opcode(OP_NUMNOTEQUAL).push_opcode(OP_BOOLOR);
+    let depth = l.depth;
+    PosLeaf {
+        name: MALFORMED.into(),
+        script: ttt::finish(b, 0, l.file),
+        fires: Arc::new(move |_, h| is_malformed(h, depth)),
+    }
 }
 
 /// One kind's leaf: the re-commitment verify (then the constant prior pad

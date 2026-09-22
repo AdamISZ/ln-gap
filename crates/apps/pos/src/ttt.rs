@@ -189,7 +189,7 @@ pub fn word0(game_id: u16, depth: u32, mover: Role) -> u32 {
 // ----- script gadgets -----
 
 /// [v] -> [hi, lo]: v a nibble, v = 4*hi + lo. (No OP_DIV/OP_MUL in Script.)
-fn split4(b: Builder) -> Builder {
+pub(crate) fn split4(b: Builder) -> Builder {
     b.push_opcode(OP_DUP)
         .push_int(8)
         .push_opcode(OP_GREATERTHANOREQUAL) // v a

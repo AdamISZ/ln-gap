@@ -1,6 +1,6 @@
-//! The PoS absence-claim graph's chess scenario suite: PC1-PC11
-//! (POS_FACTCHAIN_PLAN.md step 7; D42; D44). The scenarios live in
-//! `lngap_harness::scenarios::pos_chess`. Run with `--test-threads=2`: eleven
+//! The PoS absence-claim graph's chess scenario suite: PC1-PC12
+//! (POS_FACTCHAIN_PLAN.md step 7; D42; D44; D45). The scenarios live in
+//! `lngap_harness::scenarios::pos_chess`. Run with `--test-threads=2`: twelve
 //! chess games on fresh regtests contend for the box.
 
 use lngap_harness::scenarios::pos_chess::*;
@@ -24,3 +24,4 @@ scenario_test!(pc8_garbage_signed_attested_entry_is_not_a_move, PC8);
 scenario_test!(pc9_mated_sides_illegal_answer_disproved, PC9);
 scenario_test!(pc10_claim_one_depth_ahead_countered, PC10);
 scenario_test!(pc11_false_counter_refuted, PC11);
+scenario_test!(pc12_malformed_signed_entry_disproved, PC12);

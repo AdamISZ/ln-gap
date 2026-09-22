@@ -66,6 +66,14 @@ impl Family {
     /// re-commitment reveal over the kind's exhibit (deepest), real where
     /// the kind finds a challenge, zeros otherwise.
     fn fired(&self, sk: &WotsSecret, prior: &[u8; 48], new: &[u8; 48]) -> Vec<String> {
+        self.fired_with(sk, prior, new, false)
+    }
+
+    /// As [`Family::fired`]; with `tolerate_errors` a kind leaf that ERRORS
+    /// (a board read off the end of the file, say — a malformed head)
+    /// counts as not firing instead of panicking, and the native decode of
+    /// a malformed head makes every kind's mirror `false`.
+    fn fired_with(&self, sk: &WotsSecret, prior: &[u8; 48], new: &[u8; 48], tolerate_errors: bool) -> Vec<String> {
         let sig = if self.depth >= 2 {
             let mut msg = prior.to_vec();
             msg.extend_from_slice(new);
@@ -74,14 +82,15 @@ impl Family {
             sk.sign(new).unwrap()
         };
         let pr = if self.depth == 1 { ChessState::initial() } else { chess_state(prior).unwrap() };
-        let af = chess_state(new).unwrap();
+        let af = chess_state(new).ok();
         let mut out = Vec::new();
+        let verify_form = |name: &str| name == "wrong_slot" || name == chess::MALFORMED;
         for (i, leaf) in self.leaves.iter().enumerate() {
-            let exhibit = if i == 0 {
-                vec![] // wrong_slot takes none
+            let exhibit = if verify_form(&leaf.name) {
+                vec![] // wrong_slot / chess_malformed take none
             } else {
                 let kind = chess::kinds()[i - 1];
-                find_kind(&pr.pos, af.mv, &af.pos, kind).map_or_else(|| vec![0; kind.exhibit_len()], |c| exhibit_values(c))
+                af.as_ref().and_then(|af| find_kind(&pr.pos, af.mv, &af.pos, kind)).map_or_else(|| vec![0; kind.exhibit_len()], exhibit_values)
             };
             // Witness, bottom-first: the kind's exhibit elements IN ORDER
             // (the emitter's slots model takes Kind::exhibit()[0] deepest),
@@ -92,24 +101,50 @@ impl Family {
             // bottoms at the LAST exhibit element — swapped). Upstream
             // never fired a 2-element exhibit (the C-suite's one disprove
             // was a Ray, one element); this suite's KingAttacked case does.
-            let mut w: Vec<Vec<u8>> = exhibit.iter().map(|&v| lngap_script32::sim::encode(v)).collect();
-            w.extend(refute::disprove_witness(&sig));
-            let ran = if i == 0 {
-                // wrong_slot is a ttt-shaped leaf: OP_VERIFY the predicate,
-                // so a non-firing tuple ERRORS
-                lngap_script32::sim::run(leaf.script.as_script(), w).is_ok()
+            // on a head the decoder rejects there is no native exhibit to
+            // copy: search the exhibit space as a challenger would (every
+            // square / ray index; a coarse grid for the two-element kinds)
+            let candidates: Vec<Vec<i64>> = if af.is_none() && !verify_form(&leaf.name) {
+                match exhibit.len() {
+                    0 => vec![vec![]],
+                    1 => (0..64).map(|v| vec![v]).collect(),
+                    _ => (0..64).step_by(9).flat_map(|a| (0..64).step_by(9).map(move |b| vec![a, b])).collect(),
+                }
             } else {
-                // a chess kind body leaves its verdict as the single
-                // remaining stack element (leaf_over_registers's finish):
-                // "fired" is a truthy verdict; an in-body failure (a
-                // range-check VERIFY) would be a bug — panic, as chess-fc's
-                // sweep does
-                let out = lngap_script32::sim::run(leaf.script.as_script(), w)
-                    .unwrap_or_else(|e| panic!("{} errors: {e}", leaf.name));
-                out.len() == 1 && !out[0].is_empty()
+                vec![exhibit]
             };
+            let mut ran = false;
+            for exhibit in candidates {
+                let mut w: Vec<Vec<u8>> = exhibit.iter().map(|&v| lngap_script32::sim::encode(v)).collect();
+                w.extend(refute::disprove_witness(&sig));
+                ran = if verify_form(&leaf.name) {
+                    // wrong_slot / chess_malformed are ttt-shaped leaves:
+                    // OP_VERIFY the predicate, so a non-firing tuple ERRORS
+                    lngap_script32::sim::run(leaf.script.as_script(), w).is_ok()
+                } else {
+                    // a chess kind body leaves its verdict as the single
+                    // remaining stack element (leaf_over_registers's finish):
+                    // "fired" is a truthy verdict; an in-body failure (a
+                    // range-check VERIFY) would be a bug — panic, as chess-fc's
+                    // sweep does — unless the caller tolerates it (a malformed
+                    // head's board read; D45's leaf is what fires then)
+                    match lngap_script32::sim::run(leaf.script.as_script(), w) {
+                        Ok(out) => out.len() == 1 && !out[0].is_empty(),
+                        Err(_) if tolerate_errors => false,
+                        Err(e) => panic!("{} errors: {e}", leaf.name),
+                    }
+                };
+                if ran {
+                    break;
+                }
+            }
             let native = (leaf.fires)(prior, new);
-            assert_eq!(ran, native, "leaf {} disagrees with its native mirror", leaf.name);
+            // a kind's mirror is the certificate search over the DECODED
+            // tuple, undefined on a head the decoder rejects (it answers
+            // false); the VERIFY-form leaves' mirrors are total
+            if !(tolerate_errors && af.is_none() && !verify_form(&leaf.name)) {
+                assert_eq!(ran, native, "leaf {} disagrees with its native mirror", leaf.name);
+            }
             if ran {
                 out.push(leaf.name.clone());
             }
@@ -215,6 +250,67 @@ fn each_illegal_line_fires_some_leaf() {
     let (p, n) = heads(&mated, &bad);
     let f = family_at(&sk, 5).fired(&sk, &p, &n);
     assert!(f.contains(&"chess_kingattacked".to_string()), "{f:?}");
+}
+
+/// D45: a malformed-but-attested NEW head — one the client's decoder
+/// rejects — is always disprovable, and `chess_malformed` fires on exactly
+/// the fields no kind judges. Before D45 the from = 255 case made every
+/// kind's board read error, leaving the parked state un-disprovable while
+/// the checked split still paid the mover.
+#[test]
+fn malformed_heads_are_disprovable() {
+    let sk = pair_key([9u8; 32]);
+    let fam = family_at(&sk, 2);
+    let prior = game(&["e2e4"]);
+    let new = play(&prior, "e7e5").unwrap();
+    let (p, n) = heads(&prior, &new);
+    assert!(!chess::is_malformed(&n, 2), "the honest head is well-formed");
+    assert!(fam.fired(&sk, &p, &n).is_empty());
+    // (label, mutation, must chess_malformed itself fire?)
+    let cases: Vec<(&str, Box<dyn Fn(&mut [u8; 48])>, bool)> = vec![
+        ("from = 255 (every kind errors)", Box::new(|h| h[8 + 36] = 255), true),
+        ("from = 64", Box::new(|h| h[8 + 36] = 64), true),
+        ("to = 255", Box::new(|h| h[8 + 37] = 255), true),
+        ("to = 64", Box::new(|h| h[8 + 37] = 64), true),
+        ("castling high nibble", Box::new(|h| h[8 + 33] |= 0x10), true),
+        ("byte 38 low nibble", Box::new(|h| h[8 + 38] |= 0x01), true),
+        ("depth byte 39 wrong", Box::new(|h| h[8 + 39] = 7), true),
+        ("promotion code 1 (pawn)", Box::new(|h| h[8 + 38] = 0x10), true),
+        ("promotion code 6 (king)", Box::new(|h| h[8 + 38] = 0x60), true),
+        ("promotion code 7", Box::new(|h| h[8 + 38] = 0x70), true),
+        ("word1 digit 8 (promo dup)", Box::new(|h| h[4] ^= 0x20), true),
+        ("word1 digit 9 (to dup)", Box::new(|h| h[4] ^= 0x01), true),
+        ("word1 digit 10 (to/from dup)", Box::new(|h| h[5] ^= 0x40), true),
+        ("word1 digit 11 (from dup)", Box::new(|h| h[5] ^= 0x01), true),
+        ("word1 byte 6", Box::new(|h| h[6] = 0x05), true),
+        ("word1 byte 7", Box::new(|h| h[7] = 0x50), true),
+        // judged by the kinds, not by chess_malformed
+        ("piece nibble 15 at square 0", Box::new(|h| h[8] |= 0xF0), false),
+        ("piece nibble 7 at square 63", Box::new(|h| h[8 + 31] = (h[8 + 31] & 0xF0) | 7), false),
+        ("side = 5", Box::new(|h| h[8 + 32] = 5), false),
+        ("ep = 200", Box::new(|h| h[8 + 34] = 200), false),
+        ("castling low nibble flipped", Box::new(|h| h[8 + 33] ^= 0x0F), false),
+    ];
+    for (label, mutate, malformed) in cases {
+        let mut nn = n;
+        mutate(&mut nn);
+        // the client's predicate is the ENTRY decode (state, word1, depth):
+        // every case but the castling low nibble is rejected by it
+        let client_rejects = lngap_chess_fc::ChessEntry::decode(&nn).is_err();
+        assert_eq!(client_rejects, !label.starts_with("castling low"), "{label}: the client's decode");
+        assert_eq!(chess::is_malformed(&nn, 2), malformed, "{label}: the native mirror");
+        let f = fam.fired_with(&sk, &p, &nn, true);
+        assert!(!f.is_empty(), "{label}: some leaf must fire: {f:?}");
+        assert_eq!(f.contains(&chess::MALFORMED.to_string()), malformed, "{label}: chess_malformed fired = {f:?}");
+    }
+    // depth 1 too (the single-head layout): from = 255 on an opening
+    let (sk1, fam1) = (refute_key([9u8; 32]), family_at(&refute_key([9u8; 32]), 1));
+    let s1 = play(&ChessState::initial(), "e2e4").unwrap();
+    let mut h1 = chess::head(GAME, 1, Role::User, &s1);
+    assert!(fam1.fired(&sk1, &[0; 48], &h1).is_empty());
+    h1[8 + 36] = 255;
+    let f = fam1.fired_with(&sk1, &[0; 48], &h1, true);
+    assert_eq!(f, vec![chess::MALFORMED.to_string()], "{f:?}");
 }
 
 #[test]

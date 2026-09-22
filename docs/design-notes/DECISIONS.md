@@ -1358,7 +1358,7 @@ Untouched: the D41 venue-substitution residual (dueness is a player-side
 property) and the malformed-state hole recorded in the same review (a
 signed chess entry with from-square 255 fails every kind leaf's board
 read and the checked split pays; a well-formedness leaf is the fix, not
-built here).
+built here — landed the next day as D45).
 
 **Measured (regtest, 2026-09-22).** The counter 178 vB. Chess
 (pos_chess_graph paths F1/F2): the staller's zero-head refutation of a
@@ -1374,6 +1374,77 @@ deepest path is now four pre-signed hops (claim, counter, refute, split),
 so the pot must cover four presign fees — the pos_chess_graph fixture's
 pot went 200k -> 400k sat at its 60k-sat fee; the suites' pots already
 did.
+
+## D45. The chess well-formedness leaf: the judge's notion of a valid entry is a superset of the client's
+
+Date: 2026-09-22. Context: the second finding of the 2026-09-21 review
+of the PoS chess graph, recorded as "untouched" in D44; landed the next
+day.
+
+**The hole.** chess.rs's module doc claimed that a malformed-but-attested
+state "self-griefs": no disprove fires, but the `1 - side` split cannot
+fire either. That holds only when the SIDE nibble is the malformed field.
+With a well-formed side and the from-square byte (state byte 36) set to
+255, every one of the twelve kind leaves fails at the preamble's board
+read (`OP_PICK` with a negative depth — "Operation not valid with the
+current stack size" on regtest) and `wrong_slot` does not fire, while
+the mover's checked split passes `code == 1 - side`. Regtest probe: the
+hub seals a SIGNED entry with from = 255, the user (whose client cannot
+decode it) claims absence, the hub refutes, no disprove is spendable
+under any exhibit, and the hub's split mined and took the pot. A
+related, smaller class: fields the native decoder rejects but the script
+never reads (the castling byte's high nibble, state byte 38's low
+nibble, the depth byte, word1) — a legal move with garbage there is
+upheld on-chain but undecodable off-chain, so an honest client claims
+absence over it and loses.
+
+**The fix: `chess_malformed`** (chess.rs `malformed`; `is_malformed` the
+native mirror), the last leaf of the chess disprove family, over the
+parked NEW head. Pure nibble arithmetic on the register file — it never
+errors, so a head that breaks the kinds' board reads still has a live
+disprove. It fires iff any of: a from/to square byte >= 64 (the high
+nibble >= 4); the castling byte's high nibble != 0; state byte 38's low
+nibble != 0; the depth byte != the layout's depth; a promotion code of 1
+or >= 6; word1 != the move rebuilt nibble-wise from the state's
+from/to/promotion (`to_u16() << 16`: digit 8 = the promotion nibble, 9 =
+`to >> 2`, 10 = `(to & 3) << 2 | from >> 4`, 11 = `from & 15`, 12..15 =
+0 — the two `split4` steps are the only arithmetic). Everything else the
+client's `ChessEntry::decode` rejects is judged by a kind that does not
+error on it: board nibbles by `Board`, the side by `Side`, the en-passant
+square by `EpField`, the castling low nibble by `CastlingField`, invalid
+promotion pieces also by `Promotion`. So the set of entries the chain
+upholds is now a subset of the set the client decodes: a client never has
+to claim absence over an entry it cannot read and then lose the
+refutation.
+
+**The principle worth keeping.** The on-chain judge defines validity; the
+client must accept everything the judge upholds. The previous doc had it
+backwards (the client was stricter), and "the mover self-griefs" was the
+wrong conclusion because the refuted output's split is keyed to one
+nibble, not to the whole state being sane. When a leaf family's native
+mirrors are "defined on well-formed encodings", the family needs one
+total leaf whose job is well-formedness, and its coverage must be the
+decoder's rejection set minus what the other leaves provably catch
+without erroring.
+
+**Sim and regtest.** sim_chess.rs `malformed_heads_are_disprovable`: a
+21-case sweep (both square bytes at 64 and 255, the castling high nibble,
+byte 38's low nibble, the depth byte, promotion codes 1/6/7, each word1
+digit group, plus the kind-judged fields) asserts the entry decode
+rejects each case (bar the castling low nibble, which it accepts), that
+`is_malformed` matches the intended field list exactly, and that some
+leaf fires on every case, with the kinds' exhibits searched as a
+challenger would since a rejected head has no native exhibit to copy; a
+legal head fires nothing (the existing safety sweeps now include the
+leaf). Regtest (pos_chess_graph path H; PC12): the from = 255 entry is
+refuted (36,545 vB), `chess_ray` fails with the stack error, and
+`chess_malformed` mines at 4,908 vB, the user taking the pot (PC12:
+41,641 vB in 3 transactions; SCENARIOS.md regenerated over the full
+suite); path B checks the leaf does not fire on a legal, well-formed
+head. The tic-
+tac-toe family needs no analogue: its 3-byte state has no field the
+native side rejects that the leaves do not judge (`cell_out_of_range`
+covers the move byte; every nibble of the state word is read).
 
 ## TODO
 

@@ -366,6 +366,35 @@ impl ChessPosGame {
         Ok(())
     }
 
+    /// The mover at the coming slot seals a SIGNED entry whose state is the
+    /// legal successor of `uci` with the from-square byte set to 255 — an
+    /// entry the client cannot decode and every kind leaf errors on (the
+    /// D45 case). The position does NOT advance.
+    fn play_malformed(&mut self, uci: &str) -> Result<()> {
+        self.rt.mine(1)?;
+        let slot = self.next_slot;
+        let mover = instance::mover_at(slot);
+        let mv = Move::parse(uci).ok_or_else(|| anyhow::anyhow!("bad uci {uci}"))?;
+        let mut pos = apply(&self.state.pos, mv).map_err(|v| anyhow::anyhow!("{v}"))?;
+        pos.fullmove = 0;
+        let new = ChessState { pos, mv, depth: slot as u8 };
+        let mut head = chess::head(GAME_ID, slot as u8, mover, &new);
+        head[8 + 36] = 255;
+        ensure!(ChessState::from_e(head[8..48].try_into().unwrap()).is_err(), "the client rejects the entry");
+        let sig = self.ks(mover).sign_wots(&instance::state_label(CONTRACT_ID, 1, slot), &chess::auth_message(&head))?;
+        let mut entry = head.to_vec();
+        for h in &sig.hashes {
+            entry.extend_from_slice(h);
+        }
+        self.miner.submit(entry);
+        let (block, table) = self.miner.seal_next(slot).map_err(|e| anyhow::anyhow!(e))?;
+        self.client.verify_and_append(&block, &table).map_err(|e| anyhow::anyhow!(e))?;
+        self.next_slot += 1;
+        self.say(format!("slot {slot} holds {mover}'s SIGNED but MALFORMED entry ({uci} with from-square 255) — attested; the client cannot decode it"));
+        self.sealed.insert(slot, block);
+        Ok(())
+    }
+
     /// The state-key signature over a sealed head's signed region (the D41
     /// authorship block), from that depth's mover's keystore — the same
     /// message as the published entry's, so the same signature
@@ -575,6 +604,27 @@ impl ChessPosGame {
         tx.input[0].witness = tapscript_witness(&w, &l.script, &p_tree.control_block(&format!("disprove_{name}"))?);
         self.say(format!("{challenger} disproves the parked tuple: {name} fires"));
         self.run_tx(&format!("disprove_{name}"), tx, challenger)?;
+        Ok(())
+    }
+
+    /// The claimant's exhibit-less disprove `name` off the refuted output
+    /// (`wrong_slot` or `chess_malformed`, D45): the pair reveal alone,
+    /// built without decoding the parked heads.
+    fn disprove_bare(&mut self, d: u32, pair_sig: &WotsSig, p_op: OutPoint, p_prev: &TxOut, name: &str) -> Result<()> {
+        ensure!(self.disproves_firing(d).iter().any(|n| n == name), "{name} must fire natively");
+        let ctx = self.ctx();
+        let p_tree = self.inst.refuted_tree(&ctx, d)?;
+        let leaf = format!("disprove_{name}");
+        let l = p_tree.leaf(&leaf)?;
+        let challenger = instance::mover_at(d).other();
+        let payout = self.pubs[challenger.idx()].payout_spk.clone();
+        let mut tx = lngap_btc::tx::build_spend(p_op, &l.timelock, vec![TxOut { value: p_prev.value - self.params.presign_fee, script_pubkey: payout }]);
+        let dsig = sign_tx(self.payment(challenger), &tx, p_prev, &l.script);
+        let mut w = refute::wots_wire(pair_sig);
+        w.push(dsig);
+        tx.input[0].witness = tapscript_witness(&w, &l.script, &p_tree.control_block(&leaf)?);
+        self.say(format!("{challenger} disproves the parked tuple: {name} fires"));
+        self.run_tx(&leaf, tx, challenger)?;
         Ok(())
     }
 
@@ -872,8 +922,29 @@ pub const PC11: Scenario = Scenario {
     },
 };
 
+pub const PC12: Scenario = Scenario {
+    id: "PC12",
+    title: "PoS graph, chess: a malformed signed entry is disproved (D45)",
+    expected: "the hub seals a SIGNED entry at slot 2 whose state has from-square 255 — undecodable by the client, and every kind leaf's board read errors on it (before D45 no disprove could touch it and the hub's checked split took the pot); the user claims absence, the hub refutes, and the user's chess_malformed disprove takes the pot: three transactions",
+    run: || {
+        let mut g = ChessPosGame::open(sat(POT))?;
+        g.play("e2e4")?;
+        g.play_malformed("e7e5")?; // slot 2: signed, attested, malformed
+        g.wait_to(g.mature_at(2))?;
+        g.claim_absent(2)?;
+        let (psig, h, p_op, p_prev) = g.refute(2)?;
+        let firing = g.disproves_firing(2);
+        ensure!(firing.iter().any(|n| n == chess::MALFORMED), "{firing:?}");
+        g.wait_to(h + u32::from(g.params.delta) + 1)?;
+        g.disprove_bare(2, &psig, p_op, &p_prev, chess::MALFORMED)?;
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "disprove_chess_malformed".to_string()], "{:?}", roles(&g));
+        ensure!(g.balances() == [sat(POT - 3 * FEE), sat(0)], "{:?}", g.balances());
+        Ok(report(&g, &PC12))
+    },
+};
+
 pub fn scenarios() -> Vec<Scenario> {
     vec![
-        PC1, PC2, PC3, PC4, PC5, PC6, PC7, PC8, PC9, PC10, PC11,
+        PC1, PC2, PC3, PC4, PC5, PC6, PC7, PC8, PC9, PC10, PC11, PC12,
     ]
 }
