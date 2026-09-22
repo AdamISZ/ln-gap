@@ -7,14 +7,18 @@
 //!
 //! - the SLASH spend: two possession proofs at the equivocated chunk take
 //!   the bond to the watcher (the always-on path — no nonce-discipline
-//!   assumption);
-//! - the BURN spend: the equivocation reuses the chunk's nonce, the
-//!   watcher extracts the group key (`extract_group_key`) and reveals it
-//!   to the hash mirror, destroying the bond's value (an OP_RETURN
-//!   output) — the heavier fixed-R path;
-//! - negatives: the same value twice is not evidence, a sig under the
-//!   wrong value fails, a wrong preimage fails, the reclaim is locked
-//!   until expiry and then pays the validator back.
+//!   assumption), once the evidence race has opened (`race_from`, D46);
+//! - the BURN spend as the fee RACE (D46): the equivocation reuses the
+//!   chunk's nonce, so the cheater itself extracts the group key
+//!   (`extract_group_key`) first and broadcasts a low-fee self-payment
+//!   through the mirror leaf; the watcher's spend — one zero-value
+//!   OP_RETURN output, the whole bond as fee — replaces it in the
+//!   mempool (RBF), and the block carries the watcher's: the value went
+//!   to the miner, the cheater got nothing;
+//! - negatives: evidence spends before `race_from` are rejected (no head
+//!   start), the same value twice is not evidence, a sig under the wrong
+//!   value fails, a wrong preimage fails, the reclaim is locked until
+//!   expiry and then pays the validator back.
 //!
 //! Deliberately a self-contained fixture here, not a harness world: no
 //! channel is involved, so the channel `Harness` is the wrong tool. The
@@ -125,10 +129,12 @@ fn bond_slash_burn_reclaim() {
     let (watch_x, _) = watcher.x_only_public_key();
     let watcher_spk = ScriptBuf::new_p2tr(SECP256K1, watch_x, None);
     let value = Amount::from_sat(100_000);
+    let h0 = rt.height().unwrap();
     let spec = BondSpec {
         value,
         validator: val_x,
-        expiry: rt.height().unwrap() + 50,
+        expiry: h0 + 50,
+        race_from: h0 + 8,
         burn_mirror: attester.burn_mirror().to_byte_array(),
     };
     let tree = bond_tree(&spec, &[(SLOT, &table)]).unwrap();
@@ -140,14 +146,25 @@ fn bond_slash_burn_reclaim() {
         let (b_op, b_prev) = rt.fund(&bond_spk, value).unwrap();
         let name = format!("slash_{SLOT}_{j}");
         let l = tree.leaf(&name).unwrap();
-        let tx = build_spend(
-            b_op,
-            &Timelock::NONE,
-            vec![TxOut {
-                value: b_prev.value - fee,
-                script_pubkey: watcher_spk.clone(),
-            }],
-        );
+        let mk = || {
+            build_spend(
+                b_op,
+                &l.timelock,
+                vec![TxOut {
+                    value: b_prev.value - fee,
+                    script_pubkey: watcher_spk.clone(),
+                }],
+            )
+        };
+        // before the race opens the evidence is not spendable — by anyone,
+        // the cheater included: no head start (D46)
+        let tx = mk();
+        let sig_a = sign_with(&att_a.secrets[j], &tx, &b_prev, &l.script);
+        let sig_b = sign_with(&att_b.secrets[j], &tx, &b_prev, &l.script);
+        let early = dry(&tx, slash_any_witness(sig_a, v_a, sig_b, v_b), &l.script, &tree.control_block(&name).unwrap());
+        assert!(rt.test_accept(&early).is_err(), "the slash must wait for the race to open");
+        rt.mine(u64::from(spec.race_from - rt.height().unwrap())).unwrap();
+        let tx = mk();
         let sig_a = sign_with(&att_a.secrets[j], &tx, &b_prev, &l.script);
         let sig_b = sign_with(&att_b.secrets[j], &tx, &b_prev, &l.script);
         let tx = dry(&tx, slash_any_witness(sig_a, v_a, sig_b, v_b), &l.script, &tree.control_block(&name).unwrap());
@@ -155,7 +172,7 @@ fn bond_slash_burn_reclaim() {
         println!("REGTEST 5: slash spend: {} vB", tx.vsize());
     }
 
-    // ============ burn: the extracted key destroys bond B ==============
+    // ============ burn: the fee race on bond B (D46) ====================
     {
         let (b_op, b_prev) = rt.fund(&bond_spk, value).unwrap();
         let x = extract_group_key(&attester.group_key(), SLOT as u64, j, v_a, v_b, &r_x, &att_a.secrets[j], &att_b.secrets[j])
@@ -167,17 +184,42 @@ fn bond_slash_burn_reclaim() {
             "the equivocation must leak the group key itself"
         );
         let l = tree.leaf("burn").unwrap();
-        let tx = build_spend(
+        let cb = tree.control_block("burn").unwrap();
+        let cheater_spk = ScriptBuf::new_p2tr(SECP256K1, val_x, None);
+        // the CHEATER moves first: it knows the key before anyone, and
+        // spends the bond back to itself with a token fee
+        let self_pay = build_spend(
             b_op,
-            &Timelock::NONE,
+            &l.timelock,
             vec![TxOut {
                 value: b_prev.value - fee,
-                script_pubkey: ScriptBuf::new_op_return(&[]), // the value is destroyed
+                script_pubkey: cheater_spk,
             }],
         );
-        let tx = dry(&tx, vec![x.secret_bytes().to_vec()], &l.script, &tree.control_block("burn").unwrap());
-        rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the burn must mine: {e}"));
-        println!("REGTEST 5: burn spend: {} vB", tx.vsize());
+        let self_pay = dry(&self_pay, vec![x.secret_bytes().to_vec()], &l.script, &cb);
+        let self_txid = rt.send_raw(&self_pay).expect("the cheater's self-payment enters the mempool");
+        // the WATCHER answers with the burn: one zero-value OP_RETURN
+        // output, the whole bond as fee — it replaces the self-payment.
+        // (The OP_RETURN carries a few bytes: with an empty one the
+        // transaction is 61 bytes and Core refuses it as `tx-size-small`,
+        // the 64-byte-transaction guard, whatever the standardness flags.)
+        let burn = build_spend(
+            b_op,
+            &l.timelock,
+            vec![TxOut {
+                value: Amount::ZERO,
+                script_pubkey: ScriptBuf::new_op_return(b"lngap-bond-burn"),
+            }],
+        );
+        let burn = dry(&burn, vec![x.secret_bytes().to_vec()], &l.script, &cb);
+        let burn_txid = rt.send_raw_any_fee(&burn).expect("the full-fee burn replaces the self-payment");
+        let mempool = rt.mempool().unwrap();
+        assert!(mempool.contains(&burn_txid) && !mempool.contains(&self_txid), "RBF: the burn evicts the cheater's spend");
+        rt.mine(1).unwrap();
+        assert!(!rt.is_unspent(&b_op).unwrap(), "the bond is spent");
+        assert!(rt.confirmations(&burn_txid).unwrap().is_some(), "the burn confirmed");
+        assert!(rt.confirmations(&self_txid).is_err() || rt.confirmations(&self_txid).unwrap().is_none(), "the self-payment never confirmed");
+        println!("REGTEST 5: burn by fee race: {} vB, {} sat to the miner", burn.vsize(), b_prev.value.to_sat());
     }
 
     // ============ negatives + the reclaim path on bond C ===============
@@ -188,7 +230,7 @@ fn bond_slash_burn_reclaim() {
         let mk = || {
             build_spend(
                 b_op,
-                &Timelock::NONE,
+                &l.timelock,
                 vec![TxOut {
                     value: b_prev.value - fee,
                     script_pubkey: watcher_spk.clone(),
@@ -213,7 +255,7 @@ fn bond_slash_burn_reclaim() {
         let l = tree.leaf("burn").unwrap();
         let t = build_spend(
             b_op,
-            &Timelock::NONE,
+            &l.timelock,
             vec![TxOut {
                 value: b_prev.value - fee,
                 script_pubkey: ScriptBuf::new_op_return(&[]),

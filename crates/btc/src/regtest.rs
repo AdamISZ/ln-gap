@@ -192,6 +192,18 @@ impl Regtest {
         Ok(txid)
     }
 
+    /// `sendrawtransaction` with `maxfeerate` 0: the node's "absurdly high
+    /// fee" refusal is a wallet-protection policy at the RPC layer, and a
+    /// transaction that deliberately pays its whole value to fee (the bond
+    /// burn race, D46) trips it. Miners have no such limit.
+    pub fn send_raw_any_fee(&self, tx: &Transaction) -> Result<Txid> {
+        let v: serde_json::Value = self
+            .rpc
+            .call("sendrawtransaction", &[serde_json::Value::String(serialize_hex(tx)), serde_json::json!(0)])
+            .with_context(|| format!("sendrawtransaction (maxfeerate 0) of {}", tx.compute_txid()))?;
+        Ok(v.as_str().ok_or_else(|| anyhow!("sendrawtransaction: no txid"))?.parse()?)
+    }
+
     /// Run the transaction through `testmempoolaccept`: `Ok(vsize)` if the
     /// node would accept it, `Err(reject-reason)` otherwise. The real script
     /// interpreter with full consensus flags; policy is relaxed by
