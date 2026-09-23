@@ -541,8 +541,16 @@ the same day after the user's challenge: the absence claim-refutation
 dance needs no chain representation of absence at all — the window
 enforces it, since a refutation that does not exist cannot be
 exhibited. Density WAS a hard requirement of the D28 PoW stall claim's
-fixed-position header scan, which the thin PoS claim drops.) The seal
-changes, not the shape: instead of `n4bit(header) <= target`, the
+fixed-position header scan, which the thin PoS claim drops.) [Amended
+2026-09-23, D47: density is NOT only a convenience. An attestation
+carries no proof of when it was made, so under a sparse cadence a
+scheduled attester colluding with the mover can attest his move at slot
+`d` AFTER the claim window and refute an honest absence claim; a late
+block simply "extends the tip". Under a dense cadence the on-time empty
+block at `d` makes the late one a second attestation at one slot —
+slashable equivocation. Density is what makes late attestation cost the
+bond.] The seal changes, not the shape: instead of `n4bit(header) <=
+target`, the
 venue's attester reveals one EC-OTS scalar per chunk of the header
 under that slot's epoch table (epoch = slot). A block is sealed iff the
 attestation verifies off-chain against the slot's table AND the old
@@ -1534,18 +1542,24 @@ penalty burned, 1/512 to the proposer, a correlation penalty up to 100%
 of the balance when many are slashed together, forced exit; all burns are
 balance decrements, which Bitcoin has no analogue of.
 
-**Why G is small for the games, by construction.** A venue equivocation
-on its own moves no money on the game graphs: the graph pays only on a
-PLAYER's signature (an unsigned substituted head supports no refutation,
-D41), and a player who signs both versions is convicted by the
-equivocation exhibit the moment the second signature is used on-chain
-(D39/D43), even under a partitioned equivocation. Compensation is the
-player's forfeit; the bond is deterrence for consensus integrity
-generally. `G` is real for a registry, where an equivocated slot can
-rewrite a name's owner and no player forfeit compensates anyone. For
-such apps the per-contract venue stake — the venue funds an output at
-contract open whose slash leaves are `evidence + 2-of-2 of the players`
-with a players-presigned skeleton, so the payee is fixed at open and the
+**What G is for the games.** [Corrected 2026-09-23 by D47; the first
+version of this paragraph claimed `G ≈ 0` "by construction", which holds
+only for a venue acting ALONE.] A venue acting alone moves no money on
+the game graphs: the graph pays only on a PLAYER's signature (an
+unsigned substituted head supports no refutation, D41), and a player who
+signs both versions is convicted by the equivocation exhibit the moment
+the second signature is used on-chain (D39/D43). But a venue colluding
+with ONE player steals the pot: by omission (the D41 substitution
+residual — drop the honest mover's entry, unslashable) or by LATE
+ATTESTATION (attest the colluding mover's signed move at slot `d` after
+the claim window; slashable only under a dense cadence, D47). So `G` is
+the pot, and the operative sizing rule is the plan's 5.5 as it always
+was — the bond exceeds the largest pot in flight — with this entry's
+`(1 − p)` factor. `G` is also real for a registry, where an equivocated
+slot can rewrite a name's owner and no player forfeit compensates anyone.
+The per-contract venue stake — the venue funds an output at contract
+open whose slash leaves are `evidence + 2-of-2 of the players` with a
+players-presigned skeleton, so the payee is fixed at open and the
 cheater's keys are useless — is the covenant-free alternative that
 compensates rather than burns, at the cost of venue capital and a signing
 round per contract. Recorded as an option, not built.
@@ -1570,6 +1584,135 @@ payload. Negatives (same value, wrong value, wrong preimage, early
 reclaim) unchanged; the reclaim after expiry pays the validator. D38's
 "burn … the value to an OP_RETURN output" is superseded by this entry's
 description of what the paths enforce.
+
+## D47. The venue is a schedule of one-time attesters, not a chain: committees, attribution, thresholds, and timeliness
+
+Date: 2026-09-23. Context: the equivocation-mechanics discussion (FROST
+partials, supermajorities, attribution) following D46; VENUE_QUORUM.md
+section 4 and EC_WOTS.md section 6 (local). DESIGN, agreed in discussion;
+nothing built. It reverses one recorded choice (fixed-R, D38) and
+corrects one recorded claim (D46's `G ≈ 0`, amended in place).
+
+**What equivocation requires under FROST, and what it reveals.** An
+attestation scalar is a t-of-n aggregate of per-member partials
+`z_i = ρ_i + λ_i·e·x_i`; a block is 192 of them. An honest member never
+signs two values at one (epoch, chunk) — it keeps that state, and doing
+so would leak its own share through its reused nonce share. So a second
+aggregate needs `t` willing members, and with `t > n/2` some of them
+double-signed individually. Equivocation is possible iff the adversary
+holds at least `t`; at BFT-style `t ≈ 2n/3` that is the same condition
+as "the adversary runs the venue". Detection is at the OUTPUT level and
+needs no partials: whoever holds both published blocks holds the
+possession-pair evidence (`PosClient::observe` already names it).
+Partials are individually verifiable (against the member's public share
+and nonce commitment — the identifiable-abort fact), so a rogue member
+double-signing inside honest sessions is caught by name; an adversarial
+supermajority's private session is not. In that case the honest minority
+is punished with the guilty majority, unavoidably with a single group
+key: a threshold signature is subset-agnostic BY DEFINITION (any `t`
+produce the same `(R, s)`, which is what makes the verifier one CHECKSIG
+under one constant), so no object verifiable against a fixed point can
+name its signers. Half-aggregation does not help (the `s` is summed with
+message-dependent weights; nothing isolates one member), and accountable
+threshold schemes hand the verifier the subset, O(t) work Script cannot
+do.
+
+**Attribution comes from the schedule, not the signature.** The
+pre-committed nonce registry (EC_WOTS.md: "the aggregate R is their sum
+point", published in advance) already fixes WHO signs each epoch. Lean
+into it: a scheduled committee `S_e` of size `k` per epoch, each member
+with its own pre-committed nonce shares, one per (epoch, chunk, VALUE).
+A valid attestation for epoch `e` verifies only under the registry's
+points, which embed `R_{S_e}`, and no other subset holds those nonce
+shares. Equivocation at `e` then requires EVERY member of `S_e` to have
+signed both values (one honest member makes it impossible), and the
+guilty set is exactly `S_e`, read off the public schedule. Punishment is
+per member: each member's bond is its own UTXO whose tree carries
+`slash_{e}_{j}` leaves for the epochs it is scheduled in — the same pair
+evidence, the same leaf, attribution encoded in WHICH bonds carry WHICH
+leaves. Members off the committee are untouched; the collective-
+punishment problem is gone. Cost: within an epoch the committee is
+`k`-of-`k`, so liveness needs skip-on-silence plus fallback committees
+with their own pre-committed nonces (the registry, and the points
+embedded per chunk in dispute leaves, multiply by the number of
+fallbacks); with a publication window of `W` slots a skipped slot costs
+latency, not correctness. This is the explicit trade between FROST's
+robustness (any `t` of `n`, RoAST-style) and accountability: robust
+means subset-agnostic, subset-agnostic means unattributable. Two cheaper
+partial measures: PROPOSER signatures on blocks (two blocks at one slot
+name at least one member — the same proposer, or an off-schedule one),
+and mandatory PARTIAL publication as a venue rule about its own
+signatures (a block is valid only with its `k` partials, each verifiable),
+which catches a rogue member inside honest sessions but not a private
+supermajority session whose aggregate is used on Bitcoin alone.
+
+**Drop fixed-R (reverses D38).** Under the fixed-R discipline an
+equivocation leaks the GROUP KEY publicly, and with `x` public anyone can
+attest anything under any published table: the D41/D43 authorship gate
+binds a head to the PLAYER's key, which a stalling player has, so after a
+leak every in-flight contract's staller can forge an attestation of a
+legal move at the slot it never published in, refute the honest absence
+claim, and take the pot. One venue equivocation becomes a theft enabler
+for every contract on the venue. Since D46 the bond burns by the fee race
+on the PAIR leaves, so the key leak buys nothing; the `burn` mirror leaf
+is redundant and the per-(epoch, chunk, value) nonces of the default
+attester are the right discipline (nothing leaks on equivocation, not the
+group key, not a share). Grafting stays the contained residual of
+EC_WOTS.md section 6. The fee lock's claim-then-attest-other case
+(ATTESTATION_FEES.md, local) moves to the promise / absence path against
+the bond, which it needed for claim-then-seal-nothing anyway.
+
+**No supermajority.** Per slot the ledger must guarantee three things:
+at most one attestation, produced within the slot's window, under the
+registry the contracts pinned. Nothing across slots: contracts never use
+prev-links, and the readout verifies possession under one slot's table.
+There is no shared state, so no fork-choice, no finality, no threshold
+over `n`. Supermajorities are how chain consensus buys safety for a
+shared state; we have none. The one parameter is the committee size
+`k`: equivocation needs all `k` and burns `k` bonds; attesting needs `k`
+online; censoring an entry needs every committee in its `W`-slot window
+to refuse. `k = 1` is the rotating single attester — strongest liveness
+(1-of-N over the window, `f^W` censorship), one bond per slot, fully
+attributable — and there the group key is nearly decorative: the
+credential that attests slot `s` is the scheduled member's nonce, since
+the contract's points are `R_s + e·X` and nobody else holds `r_s`. The
+"PoS algorithm" collapses to a registry, a schedule, Bitcoin as the
+clock, and skip-on-silence. Stakechains' 34%/67% exists because its
+sidechain has a state (payments) that must be final; ours does not.
+
+**Timeliness: what the chain was quietly doing.** An absence claim at
+`d` is refuted by ANY attestation at `d`, and an attestation carries no
+proof of when it was made. So a scheduled attester colluding with the
+mover can attest his signed move at `d` after the deadline and refute an
+honest claim; under D32's sparse cadence a late block just extends the
+tip, and `PosClient` accepts it. Under a DENSE cadence the honest
+attester's on-time empty block at `d` makes the late one a second
+attestation at one slot — slashable. Density was a security property,
+not a convenience (D32 amended). Slashable is not harmless, though: the
+contract must decide what an equivocated slot MEANS. If the refutation
+stands, venue + mover steal from an honest claimant by late attestation;
+if equivocation at `d` kills the refutation (a disprove leaf carrying the
+pair evidence), venue + claimant steal from an honest mover by
+equivocating against his timely move. Both cost the colluding committee
+its bonds, both have `G` = the pot; the choice is which honest party
+bears the residual, and it is open. The only way to make timing
+OBJECTIVE rather than merely slashable is Bitcoin anchoring — the venue
+commits its tip in an OP_RETURN periodically, and a refutation's block
+must be covered by an anchor before the claim height — which is the
+names app's SPV inclusion machinery reappearing, heavy but only in
+dispute, and it removes the symmetric attack because an anchored timely
+block cannot be killed. Design rule going forward: every slot is attested
+(empty or not) by its scheduled committee; a skipped slot is recorded by
+the next slot's attestation (a positive fact a claimant can read out to
+kill a late refutation); anchoring is the backstop if objectivity is
+wanted.
+
+**Consequences for the record.** D46's `G ≈ 0` corrected (a venue
+colluding with one player steals the pot by omission or by late
+attestation; the plan's 5.5 rule with the `(1 − p)` factor is operative).
+D38's fixed-R rationale superseded. D32's cadence amendment qualified.
+Open, in order: the equivocated-slot rule for contracts; committee size
+and fallback count per venue; whether to anchor.
 
 ## TODO
 
