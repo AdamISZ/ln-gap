@@ -134,7 +134,8 @@ fn bond_slash_burn_reclaim() {
         value,
         validator: val_x,
         expiry: h0 + 50,
-        race_from: h0 + 8,
+        race_window: 42, // the race opens at h0 + 8: late relative to a real bond's life, early enough for the fixture
+
         burn_mirror: attester.burn_mirror().to_byte_array(),
     };
     let tree = bond_tree(&spec, &[(SLOT, &table)]).unwrap();
@@ -163,7 +164,7 @@ fn bond_slash_burn_reclaim() {
         let sig_b = sign_with(&att_b.secrets[j], &tx, &b_prev, &l.script);
         let early = dry(&tx, slash_any_witness(sig_a, v_a, sig_b, v_b), &l.script, &tree.control_block(&name).unwrap());
         assert!(rt.test_accept(&early).is_err(), "the slash must wait for the race to open");
-        rt.mine(u64::from(spec.race_from - rt.height().unwrap())).unwrap();
+        rt.mine(u64::from(spec.race_from() - rt.height().unwrap())).unwrap();
         let tx = mk();
         let sig_a = sign_with(&att_a.secrets[j], &tx, &b_prev, &l.script);
         let sig_b = sign_with(&att_b.secrets[j], &tx, &b_prev, &l.script);

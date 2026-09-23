@@ -1497,9 +1497,16 @@ holds that key too; per-contract victim payees do not fit a taptree fixed
 at bond creation.
 
 **Chosen: the fee race, engineered.** Every evidence leaf (`burn`, every
-`slash_{slot}_{j}`) now carries `CLTV race_from`, a height fixed at bond
-setup (`BondSpec::race_from`, before `expiry` by a window wide enough for
-watchers and miners). This removes the cheater's head start: the
+`slash_{slot}_{j}`) now carries `CLTV race_from = expiry - race_window`
+(`BondSpec::race_window`; the window wide enough for watchers and
+miners). The race opens LATE on purpose: the capital then stays locked
+until near the reclaim in every outcome, exactly as under a plain
+timelocked bond, so the race can only take the principal and never hand
+it back early — its worst case (the cheater mines the eligible block) is
+the plain lock's every case, which is what makes the evidence path a
+free option on the principal rather than a trade (an early race height,
+as the first cut of the patch had, would let a winning cheater recover
+its capital before expiry). This removes the cheater's head start: the
 attestations are public data on the venue for the whole delay, anyone can
 build the spend, and at the race height the winning spend is the one
 paying the most fee. A miner takes the entire bond as fee by including
@@ -1549,7 +1556,8 @@ mechanism; they rest on the positive incentive (the fee stream) and on
 forced inclusion / windows.
 
 **Measured (regtest, tests/pos_bond.rs).** An evidence spend before
-`race_from` is rejected; the slash after it mines (paying the watcher,
+`race_from` (the fixture's window puts it 8 blocks after funding, 42
+before expiry) is rejected; the slash after it mines (paying the watcher,
 344 vB). The burn as a race: the cheater's low-fee self-payment through
 the mirror leaf enters the mempool first, the watcher's zero-value
 OP_RETURN spend with the whole bond as fee (167 vB) replaces it (RBF),
