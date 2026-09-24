@@ -3,6 +3,7 @@
 //!
 //! Everything in LN-GAP that touches the chain goes through this crate.
 
+pub mod adaptor;
 pub mod keys;
 pub mod regtest;
 pub mod script;

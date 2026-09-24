@@ -1811,6 +1811,47 @@ punished — unchanged. Bitcoin anchoring of the ordering statements
 (D47's OP_RETURN alternative) remains the objective long-range
 backstop.
 
+## D49. The atomic fee lock: a BIP340 adaptor pre-signature locked to a sum of anticipation points
+
+Date: 2026-09-24. Context: ATTESTATION_FEES.md (local; the observation
+of 2026-09-22), D48 (fees as the venue's positive incentive), the D47
+per-value nonce discipline landed the same day. BUILT and spent on
+regtest.
+
+**The primitive** (`lngap_btc::adaptor`): BIP340 adaptor signatures.
+`adaptor_sign(kp, msg, T)` produces a pre-signature `(R + T, s')` with
+`s' = k + e·d`, the challenge over the x-only FINAL nonce `R + T` (the
+signer retries `k` until `R + T` has even y; the secret is negated for
+an odd-y `P` as in plain BIP340); `adaptor_verify` checks `R + T` and
+`s'·G = R + e·P`; `adaptor_complete` adds `t` to `s'` and yields a valid
+BIP340 signature; `adaptor_extract` recovers `t = s − s'` from the
+completed signature. Unit-tested including odd-y signer keys and the
+wrong-secret / wrong-point negatives.
+
+**The lock** (`lngap_ec_wots`): `EpochTable::point_sum(msg, chunks)`
+sums the anticipation points a message selects (each x-only point lifted
+to even y), and `Attestation::scalar_sum(chunks)` sums the revealed
+secrets, which the D47 landing normalised to even-y points so that the
+two agree. A payment pre-signed under the adaptor point `ΣP` for Bob's
+head is therefore claimable exactly when the venue attests that head —
+the scalars exist only then, are public thereafter, and a different
+head's scalars do not open the lock — and the payer learns `Σs` from
+the payment itself. Nothing about it is on-chain but an ordinary
+signature.
+
+**Measured** (ec-wots/tests/fee_lock.rs, regtest): a 96-chunk head; the
+pre-signature is rejected by the node as a signature; the venue's
+attestation of a head one nibble off does not complete it; the
+attestation of the exact head completes it and the claim mines as a
+key spend of 129 vB; the payer extracts the secret from the confirmed
+witness and it equals the attestation's scalar sum. The payee is a plain
+key here; in the design (ATTESTATION_FEES.md section 2) it is the
+slot's proposer and the lock rides a channel HTLC-shaped output, which
+is the remaining channel-crate work. The per-slot variant (the slot
+number inside the attested head, so W locks to W candidate proposers
+resolve exclusively) is a layout choice on the head, not on this
+primitive.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
