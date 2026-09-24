@@ -1707,6 +1707,27 @@ the next slot's attestation (a positive fact a claimant can read out to
 kill a late refutation); anchoring is the backstop if objectivity is
 wanted.
 
+**Amended 2026-09-24 (the roster detour, VENUE_QUORUM.md section 7).**
+A 1-of-n roster — one member per slot, no threshold — was examined and
+rejected, which sharpened WHY the threshold is needed: not stake per
+attestation but ORDER. Two blocks by two members ("10 says 9 was empty";
+"9 exists") are unorderable by any third fact, so canonical history
+needs agreement (a threshold whose honest members refuse to sign
+earlier slots after later ones) or an external clock (Bitcoin
+anchoring). The design therefore separates PUBLICATION (the proposer:
+one signer, attributable, paid by the fee lock, 1-of-n inclusion
+liveness, one bond) from ORDER (the t-of-n notary attesting per-slot
+statements, consumed by any t, rewrite = self-contradiction = t bonds).
+Slashable at the ordering layer is self-contradiction only (two
+openings of a slot table; a backfill against the notary's own liveness
+bitmap); a consistent-but-false statement is censorship, unslashable.
+The liveness bitmap (every slot's attested message records which of the
+previous W slots were skipped, read out at the depth's deadline slot)
+replaces this entry's "skip record", so that the reader slot is fixed
+at open. OP_RETURN anchoring of the ordering statements is recorded as
+the objective alternative (rewrite impossible, no threshold, but
+Bitcoin-granular clock and SPV-in-Script disputes).
+
 **Consequences for the record.** D46's `G ≈ 0` corrected (a venue
 colluding with one player steals the pot by omission or by late
 attestation; the plan's 5.5 rule with the `(1 − p)` factor is operative).
