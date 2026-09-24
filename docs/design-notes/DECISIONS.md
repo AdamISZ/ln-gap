@@ -1779,6 +1779,17 @@ fee race (D46) and the per-contract venue stake (D46) stay ON THE
 RECORD as capital-at-risk options a venue may adopt; they are not the
 baseline.
 
+LANDED 2026-09-24: `Attester::new_fixed_r`, `extract_group_key` and the
+`burn` mirror leaf are gone (per-value nonces only; chunk secrets are
+even-y normalised so sums of secrets match sums of table points, for the
+fee lock); `BondSpec::evidence: Option<Evidence { race_window }>`, `None`
+the baseline — `bond_tree` is then `reclaim` alone; tests/pos_bond.rs
+plays the plain lock (rejected before expiry, reclaimed after, 130 vB)
+and the option (early evidence spend rejected; slash 344 vB; the race —
+the cheater's low-fee self-payment through the slash leaf replaced by
+the watcher's full-fee burn at 327 vB, 100,000 sat to the miner; reclaim
+195 vB).
+
 **What survives on-chain.** The readouts (positive facts) and the pair /
 bitmap leaves, but only INSIDE contracts, where they adjudicate the
 collided-slot rule between the two players (D47's open question: whose

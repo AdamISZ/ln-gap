@@ -19,7 +19,7 @@ pub use leaf::{
     readout_leaf, readout_tied_fragment, readout_value_fragment, readout_values_leaf, readout_values_witness, readout_witness_args, slash_any_witness,
     slash_leaf, slash_leaf_any, slash_witness_args, CHUNK_SCRIPT_BYTES,
 };
-pub use table::{extract_group_key, statement_challenge, Attestation, Attester, EpochTable};
+pub use table::{statement_challenge, Attestation, Attester, EpochTable};
 
 /// The value of message chunk `j`: the j-th nibble, high nibble first.
 pub fn chunk_value(msg: &[u8], j: usize) -> u8 {

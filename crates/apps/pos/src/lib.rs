@@ -147,18 +147,6 @@ impl PosMiner {
         }
     }
 
-    /// The fixed-R nonce-discipline variant (D38): one nonce per (slot,
-    /// chunk), so an equivocation leaks the group key — the bond's burn
-    /// path (`bond.rs`) is keyed to it.
-    pub fn new_fixed_r(seed: [u8; 32], genesis_digest: Digest, genesis_height: u32) -> PosMiner {
-        PosMiner {
-            attester: Attester::new_fixed_r(seed),
-            height: genesis_height,
-            tip: genesis_digest,
-            pending: Vec::new(),
-        }
-    }
-
     pub fn attester(&self) -> &Attester {
         &self.attester
     }
