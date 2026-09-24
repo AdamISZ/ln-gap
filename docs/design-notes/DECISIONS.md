@@ -1735,6 +1735,71 @@ D38's fixed-R rationale superseded. D32's cadence amendment qualified.
 Open, in order: the equivocated-slot rule for contracts; committee size
 and fallback count per venue; whether to anchor.
 
+## D48. Venue economics: franchise plus lock on both layers, ejection on self-contradiction, no venue slashing
+
+Date: 2026-09-24. Context: D46 (the fee race), D47 and its amendment
+(publication / order split; the threshold as the ordering mechanism),
+ATTESTATION_FEES.md and VENUE_QUORUM.md section 7 (local). The user's
+position, adopted: a design with only negative incentives is not viable;
+the working design is POSITIVE incentives via fees plus SACRIFICE via a
+voluntary timelock (or burn), and since fees do not reach the ordering
+layer, a quorum-level equivocation slash — collective by construction,
+and dependent on a miner race for want of covenants — is not attempted.
+DESIGN, agreed; nothing built.
+
+**The two layers, secured the same way.**
+
+- PUBLICATION (proposers). One signer per slot, attributable by its
+  signature, paid per attestation by the fee lock (ATTESTATION_FEES: a
+  PTLC on the point sum of the attested head, resolving in-channel;
+  this is why EC-OTS stays). Cost of participation: the time value of a
+  voluntary CLTV lock on Bitcoin. Inclusion liveness is 1-of-n over the
+  publication window. Misbehaviour — two blocks at one slot, an
+  off-schedule block — is attributable and punished by EJECTION: loss of
+  the franchise while the lock sits out its term.
+- ORDER (the t-of-n notary). The notary members ARE the proposers,
+  drawn from the same roster, so ejection costs them the same fee
+  stream. The notary attests the canonical per-slot statement ("slot s
+  = H" / "slot s skipped", the liveness bitmap of D47) under the slot's
+  table, consumed on schedule by any t live members. A rewrite is a
+  SELF-CONTRADICTION under the notary's own tables (two openings of one
+  slot table; a backfill against its bitmap), a pair of positive facts
+  anyone can verify, and it is used only for ejection of the
+  contradicting quorum — never for an on-chain race. The threshold size
+  says how many franchises must be thrown away to rewrite; the deterrent
+  is t x (forfeited fee stream + time value of the lock).
+
+**What this removes.** The D46 fee race and the D38 evidence leaves stop
+being part of the venue design: the member's bond is a plain CLTV lock
+(`reclaim` only — the hodlchains form). No covenant, no miner, no
+`(1 − p)`, no honest minority burned on-chain; an honest member of a
+contradicting quorum is ejected with it, a group-selection cost of the
+kind it accepted when it joined that quorum, not a capital loss. The
+fee race (D46) and the per-contract venue stake (D46) stay ON THE
+RECORD as capital-at-risk options a venue may adopt; they are not the
+baseline.
+
+**What survives on-chain.** The readouts (positive facts) and the pair /
+bitmap leaves, but only INSIDE contracts, where they adjudicate the
+collided-slot rule between the two players (D47's open question: whose
+refutation stands when a slot has two attestations). That is
+adjudication of the contract, not punishment of the venue, and it is
+the only place the evidence gadgets are executed.
+
+**Honest bounds.** The deterrent on both layers is bounded by franchise
+value: weak at bootstrap (no fee flow yet), strong once fees flow; the
+fee-sizing rule (fee proportional to the stake gated, ATTESTATION_FEES
+section 5) is what makes the franchise track the value it protects.
+Ejection is objective (self-contradiction, or two signed blocks) and can
+be a client rule at contract open for a single-group venue or an
+in-venue membership rule for a roster; either way it reads Bitcoin or
+the venue's own attestations, never anyone's opinion. Censorship,
+consistent-but-false statements at either layer, remains priced (the
+franchise) and backstopped (forced inclusion via OP_RETURN), never
+punished — unchanged. Bitcoin anchoring of the ordering statements
+(D47's OP_RETURN alternative) remains the objective long-range
+backstop.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
