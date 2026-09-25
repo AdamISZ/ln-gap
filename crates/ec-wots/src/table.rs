@@ -52,6 +52,7 @@ pub struct Attester {
 /// point for "chunk j has value v". One message per epoch, exactly the WOTS
 /// one-time discipline; a second attestation in the same epoch is an
 /// equivocation (see `slash_leaf`).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EpochTable {
     pub index: u64,
     pub chunks: usize,
@@ -159,6 +160,20 @@ impl Attester {
 }
 
 impl EpochTable {
+    /// A digest of the table (its epoch, chunk count and every point), the
+    /// object a member's registry announcement signs (`lngap_pos::roster`).
+    pub fn digest(&self) -> [u8; 32] {
+        let mut eng = sha256::Hash::engine();
+        eng.input(&self.index.to_be_bytes());
+        eng.input(&(self.chunks as u64).to_be_bytes());
+        for row in &self.points {
+            for pt in row {
+                eng.input(&pt.serialize());
+            }
+        }
+        sha256::Hash::from_engine(eng).to_byte_array()
+    }
+
     /// The sum of the anticipation points selected by `msg` over the chunk
     /// positions `chunks` (each x-only point lifted to even y — the
     /// normalisation of [`Attester::chunk_secret`]). Its discrete log is

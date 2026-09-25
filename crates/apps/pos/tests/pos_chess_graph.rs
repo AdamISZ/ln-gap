@@ -38,12 +38,15 @@
 //! - G: a garbage-signed attested entry admits no refutation (the D41
 //!   authorship fragment rejects the junk signature);
 //! - I: a LATE attestation is killed by the timeliness flags (D50): slot 2
-//!   seals empty on time, the deadline passes and the 15 validators
+//!   seals empty on time, the deadline passes and the 5 members
 //!   publish their flag scalars; the colluding proposer then seals the
 //!   hub's e7e5 at slot 2 late, the hub refutes with it, and the user's
-//!   `not_timely` spend — its own transaction signed under 8 of the 15
-//!   flag points (the majority) — takes the pot; 7 scalars are rejected
-//!   in-leaf, and on a timely slot (path B) no scalar exists to count.
+//!   `not_timely` spend — its own transaction signed under 3 of the 5
+//!   members' flag points (the majority) — takes the pot; 2 scalars are
+//!   rejected in-leaf, and on a timely slot (path B) no scalar exists to
+//!   count. The venue is a five-member roster in strict round robin
+//!   (D51): every slot is sealed by its scheduled member under that
+//!   member's announced table.
 
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1::{SecretKey, SECP256K1};
@@ -57,16 +60,15 @@ use lngap_chess::certificate::find_kind;
 use lngap_chess::leaf::{exhibit_values, Kind};
 use lngap_chess::{apply, Move};
 use lngap_chess_fc::{ChessEntry, ChessState};
-use lngap_ec_wots::{Attester, EpochTable, FlagKeys};
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsSig};
 use lngap_pos::chess;
 use lngap_pos::graph::not_timely_witness;
-use lngap_pos::instance::{self, FlagRegistry, Game as WhichGame, PosInstance};
+use lngap_pos::instance::{self, Game as WhichGame, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
-use lngap_pos::{PosMiner, SealedBlock, HEADER_CHUNKS};
+use lngap_pos::{Member, PosMiner, Registry, SealedBlock};
 
 const SEED: [u8; 32] = [7u8; 32];
 const GAME_ID: u16 = 1;
@@ -78,15 +80,13 @@ const D: u32 = 2;
 /// The chess state key's WOTS length in digits (84 message + 3 checksum
 /// over the 42 signed bytes — the 40 state bytes then the move, D43).
 const STATE_DIGITS: usize = 87;
-/// The venue's notary: 15 validators, and the contract demands the
-/// majority, 8 flags, to kill a refutation as not timely (D50 amended).
-const K: usize = 15;
-const T: u32 = 8;
-
-/// The venue's validators (their flag keys; in a deployment each notary
-/// member holds its own).
-fn validators() -> Vec<FlagKeys> {
-    (0..K as u8).map(|i| FlagKeys::new([0x60 + i; 32])).collect()
+/// The venue's roster: five members in strict round robin (D51), each
+/// with its member key, its attester and its flag keys; the flag
+/// threshold is the majority, 3 of 5 (D50 amended).
+const K: usize = 5;
+const T: u32 = 3;
+fn members() -> Vec<Member> {
+    (0..K as u8).map(|i| Member::new([SEED[0] + i; 32])).collect()
 }
 
 /// An entry's authorship message (D43): the 40 state bytes, then the
@@ -98,11 +98,12 @@ fn entry_msg(e: &ChessEntry) -> Vec<u8> {
     m
 }
 
-/// The venue's epoch tables, published at contract open (the attester's
-/// deterministic per-slot registry).
-fn epoch_tables() -> Vec<EpochTable> {
-    let attester = Attester::new(SEED);
-    (0..=MAX_DEPTH as u64).map(|s| attester.epoch_table(s, HEADER_CHUNKS)).collect()
+/// The venue's registry, published at contract open: the members' signed
+/// announcements — the scheduled member's table per slot, every member's
+/// flag point.
+fn registry() -> Registry {
+    let (gen, _t0) = lngap_pos::genesis(&members()[0].attester);
+    PosMiner::new(members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
 }
 
 /// Play `uci` from `s` (natively), if legal.
@@ -130,10 +131,9 @@ struct Venue {
 
 impl Venue {
     fn new() -> Venue {
-        let attester = Attester::new(SEED);
-        let (gen, _table0) = lngap_pos::genesis(&attester);
+        let (gen, _table0) = lngap_pos::genesis(&members()[0].attester);
         Venue {
-            miner: PosMiner::new(SEED, gen.header.digest(), 0),
+            miner: PosMiner::new(members(), gen.header.digest(), 0),
             sealed: std::collections::HashMap::new(),
         }
     }
@@ -199,8 +199,8 @@ impl Venue {
         let entry = ChessEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, state: state.clone(), sigs: sig.hashes.clone() }.encode();
         let parent = self.sealed[&slot].header.prev();
         let header = Header::new(&parent, &entry_root(&entry), &entry_head(&entry), slot);
-        let table = self.miner.attester().epoch_table(u64::from(slot), HEADER_CHUNKS);
-        let attestation = self.miner.attester().attest(&table, header.as_bytes());
+        let table = self.miner.table(slot).clone();
+        let attestation = self.miner.attester_at(slot).attest(&table, header.as_bytes());
         let late = SealedBlock { header, entry, attestation };
         assert!(late.verify_seal(&table).is_ok());
         self.sealed.insert(slot, late);
@@ -231,7 +231,7 @@ impl Game {
     /// The draft: both sides generate their per-depth keys under the
     /// standard labels (the chess game selects the 336-bit state keys),
     /// exchange the public offers, and build the SAME instance.
-    fn open(btc_open: u32, deadline: u32, value: Amount, tables: &[EpochTable]) -> Game {
+    fn open(btc_open: u32, deadline: u32, value: Amount, registry: &Registry) -> Game {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("posc/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("posc/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("posc/user-ks"));
@@ -241,12 +241,11 @@ impl Game {
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH).unwrap();
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH).unwrap();
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
-        // the flag registry (D50): every validator's point per slot,
-        // published with the epoch tables and pinned at open
-        assert_eq!(T, FlagRegistry::majority(K), "the PoC threshold is the majority");
-        let flags = FlagRegistry::from_validators(T, &validators(), MAX_DEPTH);
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_u, flags.clone()).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_h, flags).unwrap();
+        // the registry (D51): the scheduled member's table per slot and
+        // every member's flag point (D50), pinned at open
+        assert_eq!(registry.threshold, T, "the PoC threshold is the majority");
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_u, registry.clone()).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_h, registry.clone()).unwrap();
         let params = ChannelParams {
             presign_fee: Amount::from_sat(60_000), // the venue readout must be fee-covered: the chess pair refute is ~53 kvB; the 1k-sat regtest placeholder is below the relay floor for it (D42)
             ..ChannelParams::regtest(Amount::from_sat(400_000))
@@ -263,8 +262,8 @@ impl Game {
         };
         let ctx = g.ctx();
         assert_eq!(
-            g.inst.tree(&ctx, tables).unwrap().script_pubkey(),
-            inst_h.tree(&ctx, tables).unwrap().script_pubkey(),
+            g.inst.tree(&ctx).unwrap().script_pubkey(),
+            inst_h.tree(&ctx).unwrap().script_pubkey(),
             "both parties must build the same contract output"
         );
         g
@@ -335,11 +334,11 @@ struct Path {
 }
 
 impl Path {
-    fn open(rt: &Regtest, g: &Game, tables: &[EpochTable]) -> Path {
+    fn open(rt: &Regtest, g: &Game) -> Path {
         let ctx = g.ctx();
-        let tree = g.inst.tree(&ctx, tables).unwrap();
+        let tree = g.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
-        let graph = g.inst.graph(&ctx, c_op, &c_prev, tables).unwrap();
+        let graph = g.inst.graph(&ctx, c_op, &c_prev).unwrap();
         Path {
             venue: Venue::new(),
             graph,
@@ -635,15 +634,15 @@ fn dry(p: &PresignedTx, w: Vec<Vec<u8>>) -> Transaction {
 #[test]
 fn wired_pos_chess_graph() {
     let rt = Regtest::start().unwrap();
-    let tables = epoch_tables();
+    let registry = registry();
     // the deepest path (claim -> counter -> refute -> split, D44) takes
     // four 60k-sat pre-sign fees: the pot must cover them
     let value = Amount::from_sat(400_000);
 
     // ====== path A: an illegal move (a bishop jumps a pawn) is killed ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         assert_eq!(
             path.graph.len(),
             1 + MAX_DEPTH as usize * 8 + MAX_DEPTH as usize + (MAX_DEPTH as usize - 1) * 8,
@@ -679,8 +678,8 @@ fn wired_pos_chess_graph() {
 
     // ====== path B: a legal refutation stands ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
@@ -716,8 +715,8 @@ fn wired_pos_chess_graph() {
 
     // ====== path C: no publication — the timeout split pays ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
@@ -735,8 +734,8 @@ fn wired_pos_chess_graph() {
 
     // ====== path D: the depth-1 single-head form ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
@@ -756,8 +755,8 @@ fn wired_pos_chess_graph() {
 
     // ====== path E: fool's mate — the absence path IS the terminal path ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         // 1. f3 e5 2. g4 Qh4#
         for (slot, uci) in [(1, "f2f3"), (2, "e7e5"), (3, "g2g4"), (4, "d8h4")] {
             rt.mine(1).unwrap();
@@ -779,8 +778,8 @@ fn wired_pos_chess_graph() {
         // E2: same game, but the mated user ANSWERS with an illegal g4g5
         // (the king still attacked): the refutation parks it and hub's
         // chess_kingattacked disprove — a TWO-ELEMENT exhibit — takes it
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         for (slot, uci) in [(1, "f2f3"), (2, "e7e5"), (3, "g2g4"), (4, "d8h4")] {
             rt.mine(1).unwrap();
             path.seal(&mut g, slot, uci, true);
@@ -802,8 +801,8 @@ fn wired_pos_chess_graph() {
         // not move at 3" — vacuously true: the user's turn never came).
         // Before D44 this raced the user's honest `absent_2` on CLTV order
         // alone and the staller's timeout split could take the pot.
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
@@ -828,8 +827,8 @@ fn wired_pos_chess_graph() {
     {
         // the same attack, the staller declining the hopeless refutation:
         // the user's timeout split off the counter output pays after delta
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
@@ -854,8 +853,8 @@ fn wired_pos_chess_graph() {
         // not move at 2" — false): the hub refutes on the counter output
         // with the (1, 2) pair readout, nothing disproves it, and the
         // hub's self-checking split pays R(parked) = HubWins
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
@@ -887,8 +886,8 @@ fn wired_pos_chess_graph() {
         // cannot decode it, and every kind leaf's board read errors on
         // it — before D45 the parked state was un-disprovable and the
         // hub's checked split took the pot
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
@@ -925,8 +924,8 @@ fn wired_pos_chess_graph() {
 
     // ====== path G: a garbage-signed entry admits no refutation ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
@@ -946,8 +945,8 @@ fn wired_pos_chess_graph() {
 
     // ====== path I: a LATE attestation is killed by the timeliness flags (D50) ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         // slot 2 seals EMPTY on time: the hub did not publish
@@ -956,7 +955,8 @@ fn wired_pos_chess_graph() {
         // the slot's deadline passes; every validator saw it empty and
         // publishes its flag scalar (out of band — the claimant collects)
         rt.mine(1).unwrap();
-        let scalars: Vec<Option<SecretKey>> = validators().iter().map(|v| Some(v.flag_secret(2))).collect();
+        let scalars: Vec<Option<SecretKey>> = path.venue.miner.flag(2);
+        assert!(scalars.iter().all(Option::is_some), "every member flags");
         // the colluding proposer now seals the hub's e7e5 at slot 2, LATE
         let late = play(&path.state, "e7e5").unwrap();
         path.venue.seal_late(2, &late, g.keys_of(Role::Hub).0);

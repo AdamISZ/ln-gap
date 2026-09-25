@@ -1990,8 +1990,10 @@ at the deadline", `t` of which a refutation must carry; both bits at one
 slot = self-contradiction, named) plus a THIRD outcome for a slot that
 reaches neither threshold, which turns the omission attack from theft
 into griefing — post-PoC. Decided: the PoC pins `t = ⌈(k + 1) / 2⌉`
-(`FlagRegistry::majority`); LANDED 2026-09-26 — the harness and the
-regtest exhibit run 8 of 15 (7 rejected in-leaf, 8 mine at 430 vB). The
+(`Roster::majority`, formerly `FlagRegistry::majority`); LANDED
+2026-09-26 — the harness and the regtest exhibit ran 8 of 15 (7 rejected
+in-leaf, 8 mine at 430 vB), and since D51 the same day 3 of 5 (2
+rejected, 3 mine at 254 vB, 209 B of script). The
 threat model stated plainly: both lies cost about half the notary, and
 silence favours the mover.
 
@@ -2010,6 +2012,74 @@ attestation. Registry compression is post-PoC (any public derivation of
 the per-slot point from a long-term key leaks that key on reveal; the
 points must be fresh per slot, so only a commitment-plus-in-script-proof
 form is possible, and the leaf embeds the constants regardless).
+
+## D51. The roster: five one-time attesters in strict round robin, a signed registry, majority flags — no group key
+
+Date: 2026-09-26. Context: D47 (the venue as a schedule of one-time
+attesters), D48 (the members are the proposers; ejection by name), D50
+and its amendment (the flag; the majority threshold), ROSTER_PLAN.md
+(local). BUILT and played: the pos crate's unit tests, every regtest test
+of the pos crate, scenarios PS1-PS13 and PC1-PC14.
+
+**What it is.** The venue is now `n` members, a schedule, and Bitcoin as
+the clock (`lngap_pos::roster`). A [`Member`] holds a plain BIP340 member
+key, its own EC-OTS attester and its own flag keys, all from one seed.
+CONTENT is attested by ONE member per slot under that member's one-time
+table; TIME by every member's individual flag (D50) counted in script.
+Nothing is aggregated anywhere: no group key, no DKG, no FROST, no
+signing session — the only curve arithmetic is the anticipation points,
+the point sums of the fee lock, and the flag points, all of it built
+before this entry.
+
+**The schedule.** Strict round robin: `proposer_at(slot) = slot mod n`,
+genesis (slot 0) by member 0, `n = 5` in the harness ("just enough to be
+a quorum"; the numbers stay trivial). No backup proposer and no
+publication window: a silent scheduled member seals nothing, the mover's
+entry finds no proposer, and the mover LOSES by absence. That is the
+accepted limitation of this step, recorded and played (PS13, PC14):
+multi-slot attestation, or same-slot backups (one refute leaf per
+candidate table — flat on-chain cost, the collided-slot question then
+live), is future work.
+
+**The signed registry.** Table ownership is not provable from the points
+alone (`S = R + e·P` with `R` unpublished), so each member ANNOUNCES its
+tables for the slots it is scheduled for and its flag points for every
+slot, under its member key (`MemberPublic`, a signature over the
+announcement's digest). A [`Registry`] is built from verified
+announcements (one per member, roster order): per slot the SCHEDULED
+member's table and every member's flag point, threshold the majority. It
+replaces the loose `tables` argument on the instance: `PosInstance`
+carries the registry pinned at open, and `PosClient` verifies every seal
+against the scheduled member's announced table — a seal under any other
+table, even a valid one by another member, is not this venue's (unit
+test: an off-schedule seal by member 0 at member 2's slot is rejected). An
+equivocation observation names the member (`Equivocation::member`), which
+is D48's ejection evidence in the form a client can carry.
+
+**Flags at the deadline.** The harness worlds flag every slot that passed
+its deadline (`btc_open + slot + 1`) with no entry sealed — an empty
+block or no block — by every non-silent member, once; the claimant
+collects the scalars. PS12/PC13 re-run under named members: the
+colluding proposer's late block is named as member 2's equivocation
+against its own on-time empty block, 2 flags are rejected in-leaf, 3 of
+5 kill the refutation. PS7/PC7's double-play now names the member too.
+
+**Measured** (regtest). The `not_timely` leaf at k = 5: 209 B of script;
+the spend at 3 of 5: 254 vB (four signatures including the challenger's,
+two empty slots), down from 430 vB at 8 of 15. PC13: 36,987 vB in three
+transactions. PS13/PC14: the absence claim and the timeout split, two
+transactions, the silent member named in the narrative. No pre-signed
+transaction changes (166 / 129). A member's table is ~100 ms of curve
+arithmetic; the miner computes each slot's table once and the announcement
+and the seal share it; the suites announce 49 slots at open (the dispute
+waits seal empty slots well past the game's depth).
+
+**Out of scope, recorded.** Backups and windows (above); which of two
+CONTENT attestations at one slot is canonical (a strict round robin cannot
+produce it honestly; two by one member is the existing equivocation);
+anchoring; ejection beyond the client naming the member; the fee lock into
+the channel — the NEXT step, a separate commit (D49's leftover: the lock
+per slot to the scheduled proposer).
 
 ## TODO
 

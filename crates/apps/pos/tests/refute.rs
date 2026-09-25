@@ -12,7 +12,7 @@ use lngap_btc::sighash::sign_tapscript;
 use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
-use lngap_ec_wots::{Attester, EpochTable};
+use lngap_ec_wots::EpochTable;
 use lngap_factchain::slot::SlotEntry;
 use lngap_pos::refute::{
     disprove_witness, refute_key, refute_leaf, refute_witness, HEAD_CHUNK_START, HEAD_CHUNKS,
@@ -47,9 +47,8 @@ fn sink() -> ScriptBuf {
 
 /// A slot-1 block whose entry's head carries the move `mv`.
 fn sealed_move(mv: u8) -> (SealedBlock, EpochTable) {
-    let attester = Attester::new(SEED);
-    let (gen, _t0) = lngap_pos::genesis(&attester);
-    let mut miner = PosMiner::new(SEED, gen.header.digest(), 0);
+    let (gen, _t0) = lngap_pos::genesis(&lngap_pos::Member::new(SEED).attester);
+    let mut miner = PosMiner::single(SEED, gen.header.digest(), 0);
     let entry = SlotEntry {
         game_id: 1,
         depth: 1,

@@ -29,7 +29,7 @@ use lngap_btc::tx::build_spend;
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::Role;
 use lngap_contract::Contract;
-use lngap_ec_wots::{chunk_value, slash_any_witness, snum, Attestation, Attester, EpochTable};
+use lngap_ec_wots::{chunk_value, slash_any_witness, snum, Attestation, EpochTable};
 use lngap_factchain::slot::SlotEntry;
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_pos::bond::{bond_tree, BondSpec, Evidence};
@@ -53,9 +53,9 @@ fn sign_with(secret: &SecretKey, tx: &Transaction, prev: &TxOut, leaf: &ScriptBu
 /// second block at SLOT carrying X@0, attested under the same epoch table.
 /// Returns the slot's table, both headers, and both attestations.
 fn equivocation() -> (EpochTable, Vec<u8>, Vec<u8>, Attestation, Attestation) {
-    let attester = Attester::new(SEED);
-    let (gen, _t0) = lngap_pos::genesis(&attester);
-    let mut miner = PosMiner::new(SEED, gen.header.digest(), 0);
+    let (gen, _t0) = lngap_pos::genesis(&lngap_pos::Member::new(SEED).attester);
+    let mut miner = PosMiner::single(SEED, gen.header.digest(), 0);
+    let registry = miner.registry(SLOT).unwrap();
     let state_u32 = |b: &Board| lngap_lamport::bits_to_uint(&TicTacToe.state_bits(b));
     let entry = |mv: u8| {
         let new = TicTacToe.transition(&Board::empty(), &mv, Role::User).unwrap();
@@ -75,11 +75,11 @@ fn equivocation() -> (EpochTable, Vec<u8>, Vec<u8>, Attestation, Attestation) {
     let eb = entry(0);
     let header_b = Header::new(&gen.header.digest(), &entry_root(&eb), &entry_head(&eb), SLOT);
     let hdr_b = header_b.as_bytes().to_vec();
-    let att_b = miner.attester().attest(&table, header_b.as_bytes());
+    let att_b = miner.attester_at(SLOT).attest(&table, header_b.as_bytes());
     let hdr_a = block_a.header.as_bytes().to_vec();
     // both attestations open the same slot's table; the client names the event
     let mut client = PosClient::from_checkpoint(0, gen.header.digest());
-    client.verify_and_append(&block_a, &table).unwrap();
+    client.verify_and_append(&block_a, &registry).unwrap();
     let block_b = SealedBlock {
         header: header_b,
         entry: eb,
@@ -87,7 +87,7 @@ fn equivocation() -> (EpochTable, Vec<u8>, Vec<u8>, Attestation, Attestation) {
     };
     assert!(
         matches!(
-            client.observe(&block_b, &table),
+            client.observe(&block_b, &registry),
             Ok(lngap_pos::Observation::Equivocation(_))
         ),
         "the second attested header at slot {SLOT} is the equivocation"

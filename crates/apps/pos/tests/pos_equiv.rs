@@ -31,14 +31,13 @@ use lngap_btc::sighash::sign_tapscript;
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PresignedTx, Role};
 use lngap_contract::Contract;
-use lngap_ec_wots::{Attester, EpochTable, FlagKeys};
 use lngap_factchain::slot::{SlotEntry, STATE_BITS};
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsSig;
-use lngap_pos::instance::{self, FlagRegistry, PosInstance};
+use lngap_pos::instance::{self, PosInstance};
 use lngap_pos::refute;
-use lngap_pos::{PosClient, PosMiner, SealedBlock, HEADER_CHUNKS};
+use lngap_pos::{Member, PosClient, PosMiner, Registry, SealedBlock};
 use lngap_tictactoe::{Board, TicTacToe};
 
 /// The venue's attester seed (the single key standing in for the FROST
@@ -64,10 +63,17 @@ fn entry_msg(state: u32) -> Vec<u8> {
     state.to_be_bytes()[1..].to_vec()
 }
 
-/// The venue's epoch tables, published at contract open.
-fn epoch_tables() -> Vec<EpochTable> {
-    let attester = Attester::new(SEED);
-    (0..=MAX_DEPTH as u64).map(|s| attester.epoch_table(s, HEADER_CHUNKS)).collect()
+/// The venue's roster: five members in strict round robin (D51), each
+/// with its member key, its attester and its flag keys.
+const N_MEMBERS: u8 = 5;
+fn members() -> Vec<Member> {
+    (0..N_MEMBERS).map(|i| Member::new([SEED[0] + i; 32])).collect()
+}
+
+/// The venue's registry, published at contract open.
+fn registry() -> Registry {
+    let (gen, _t0) = lngap_pos::genesis(&members()[0].attester);
+    PosMiner::new(members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
 }
 
 /// The venue, sealing entries with REAL state signatures (unlike the
@@ -79,10 +85,9 @@ struct Venue {
 
 impl Venue {
     fn new() -> (Venue, lngap_n4bit::Digest) {
-        let attester = Attester::new(SEED);
-        let (gen, _t0) = lngap_pos::genesis(&attester);
+        let (gen, _t0) = lngap_pos::genesis(&members()[0].attester);
         let g = gen.header.digest();
-        (Venue { miner: PosMiner::new(SEED, g, 0), sealed: Default::default() }, g)
+        (Venue { miner: PosMiner::new(members(), g, 0), sealed: Default::default() }, g)
     }
     /// Seal `slot` carrying `mv` from `board`, signed with the mover's real
     /// state-key signature from `ks`. Returns the new board and the sig.
@@ -107,7 +112,7 @@ impl Venue {
     /// The equivocation: a SECOND sealed block at `slot`, same parent,
     /// carrying a conflicting move whose signature was reproduced by hand
     /// (the honest keystore refuses to produce it). Returns the block.
-    fn fork_move(&self, slot: u32, parent: &lngap_n4bit::Digest, board: &Board, mv: u8, sig: &WotsSig, tables: &[EpochTable]) -> SealedBlock {
+    fn fork_move(&self, slot: u32, parent: &lngap_n4bit::Digest, board: &Board, mv: u8, sig: &WotsSig, registry: &Registry) -> SealedBlock {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap();
         let entry = SlotEntry {
@@ -120,7 +125,7 @@ impl Venue {
         }
         .encode();
         let header = Header::new(parent, &entry_root(&entry), &entry_head(&entry), slot);
-        let attestation = self.miner.attester().attest(&tables[slot as usize], header.as_bytes());
+        let attestation = self.miner.attester_at(slot).attest(registry.table(slot), header.as_bytes());
         SealedBlock { header, entry, attestation }
     }
 }
@@ -148,7 +153,7 @@ struct Game {
 }
 
 impl Game {
-    fn open(btc_open: u32, deadline: u32, value: Amount, tables: &[EpochTable]) -> Game {
+    fn open(btc_open: u32, deadline: u32, value: Amount, registry: &Registry) -> Game {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("pos6/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("pos6/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("pos6/user-ks"));
@@ -158,19 +163,15 @@ impl Game {
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH).unwrap();
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH).unwrap();
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
-        // the venue's timeliness-flag registry (D50): three validators,
-        // threshold two — pinned at open like the epoch tables
-        let validators: Vec<FlagKeys> = (0..3u8).map(|i| FlagKeys::new([0x60 + i; 32])).collect();
-        let flags = FlagRegistry::from_validators(2, &validators, MAX_DEPTH);
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u, flags.clone()).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h, flags).unwrap();
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u, registry.clone()).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h, registry.clone()).unwrap();
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let g = Game { user, hub, user_ks, hub_ks, params, pubs, inst: inst_u };
         let ctx = g.ctx();
         assert_eq!(
-            g.inst.tree(&ctx, tables).unwrap().script_pubkey(),
-            inst_h.tree(&ctx, tables).unwrap().script_pubkey(),
+            g.inst.tree(&ctx).unwrap().script_pubkey(),
+            inst_h.tree(&ctx).unwrap().script_pubkey(),
             "both parties must build the same contract output"
         );
         g
@@ -212,16 +213,16 @@ fn exhibit_witness(g: &Game, p: &PresignedTx, sig_a: &WotsSig, sig_b: &WotsSig) 
 #[test]
 fn player_equivocation_leaf() {
     let rt = Regtest::start().unwrap();
-    let tables = epoch_tables();
+    let registry = registry();
     let value = Amount::from_sat(200_000);
 
     // ============ path U: the user double-plays depth 1 (no csv) ============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
         let ctx = g.ctx();
-        let tree = g.inst.tree(&ctx, &tables).unwrap();
+        let tree = g.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
-        let graph = g.inst.graph(&ctx, c_op, &c_prev, &tables).unwrap();
+        let graph = g.inst.graph(&ctx, c_op, &c_prev).unwrap();
         assert_eq!(
             graph.len(),
             166,
@@ -233,7 +234,7 @@ fn player_equivocation_leaf() {
         // the honest depth-1 move, signed for real: X@4
         rt.mine(1).unwrap();
         let (_board_a, sig_a) = venue.seal_move_signed(1, &Board::empty(), 4, &mut g.user_ks);
-        client.verify_and_append(&venue.sealed[&1], &tables[1]).unwrap();
+        client.verify_and_append(&venue.sealed[&1], &registry).unwrap();
         // the double-play: X@0 from the empty board. The honest keystore
         // refuses; the conflicting signature is reproduced by hand.
         let board_b = TicTacToe.transition(&Board::empty(), &0, Role::User).unwrap();
@@ -242,9 +243,9 @@ fn player_equivocation_leaf() {
             "the honest keystore refuses to equivocate"
         );
         let sig_b = adversarial_state_sig("pos6/user-ks", 1, &entry_msg(state_u32(&board_b)));
-        let fork = venue.fork_move(1, &gen_digest, &Board::empty(), 0, &sig_b, &tables);
+        let fork = venue.fork_move(1, &gen_digest, &Board::empty(), 0, &sig_b, &registry);
         assert!(
-            matches!(client.observe(&fork, &tables[1]), Ok(lngap_pos::Observation::Equivocation(_))),
+            matches!(client.observe(&fork, &registry), Ok(lngap_pos::Observation::Equivocation(_))),
             "the second sealed block at slot 1 is the equivocation"
         );
         let p = skel(&graph, "equiv_1");
@@ -288,21 +289,21 @@ fn player_equivocation_leaf() {
 
     // ============ path H: the hub double-plays depth 2 (csv branch) =========
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
         let ctx = g.ctx();
-        let tree = g.inst.tree(&ctx, &tables).unwrap();
+        let tree = g.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
-        let graph = g.inst.graph(&ctx, c_op, &c_prev, &tables).unwrap();
+        let graph = g.inst.graph(&ctx, c_op, &c_prev).unwrap();
         let (venue, gen_digest) = Venue::new();
         let mut venue = venue;
         let mut client = PosClient::from_checkpoint(0, gen_digest);
         // slot 1: the user's honest X@4; slot 2: the hub's honest O@0
         rt.mine(1).unwrap();
         let (board1, _) = venue.seal_move_signed(1, &Board::empty(), 4, &mut g.user_ks);
-        client.verify_and_append(&venue.sealed[&1], &tables[1]).unwrap();
+        client.verify_and_append(&venue.sealed[&1], &registry).unwrap();
         rt.mine(1).unwrap();
         let (_board_a, sig_a) = venue.seal_move_signed(2, &board1, 0, &mut g.hub_ks);
-        client.verify_and_append(&venue.sealed[&2], &tables[2]).unwrap();
+        client.verify_and_append(&venue.sealed[&2], &registry).unwrap();
         // the hub's double-play: O@1 from the post-slot-1 board
         let board_b = TicTacToe.transition(&board1, &1, Role::Hub).unwrap();
         assert!(
@@ -311,9 +312,9 @@ fn player_equivocation_leaf() {
         );
         let sig_b = adversarial_state_sig("pos6/hub-ks", 2, &entry_msg(state_u32(&board_b)));
         let parent = venue.sealed[&1].header.digest();
-        let fork = venue.fork_move(2, &parent, &board1, 1, &sig_b, &tables);
+        let fork = venue.fork_move(2, &parent, &board1, 1, &sig_b, &registry);
         assert!(
-            matches!(client.observe(&fork, &tables[2]), Ok(lngap_pos::Observation::Equivocation(_))),
+            matches!(client.observe(&fork, &registry), Ok(lngap_pos::Observation::Equivocation(_))),
             "the second sealed block at slot 2 is the equivocation"
         );
         let p = skel(&graph, "equiv_2");

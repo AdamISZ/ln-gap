@@ -39,14 +39,13 @@ use lngap_btc::sighash::sign_tapscript;
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PresignedTx, Role};
 use lngap_contract::Contract;
-use lngap_ec_wots::{Attester, EpochTable, FlagKeys};
 use lngap_factchain::slot::SlotEntry;
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsSig};
-use lngap_pos::instance::{self, FlagRegistry, PosInstance};
+use lngap_pos::instance::{self, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
-use lngap_pos::{PosMiner, SealedBlock, HEADER_CHUNKS};
+use lngap_pos::{Member, PosMiner, Registry, SealedBlock};
 use lngap_tictactoe::{Board, TicTacToe};
 
 const SEED: [u8; 32] = [7u8; 32];
@@ -63,11 +62,19 @@ fn state_u32(b: &Board) -> u32 {
     lngap_lamport::bits_to_uint(&TicTacToe.state_bits(b))
 }
 
-/// The venue's epoch tables, published at contract open (the attester's
-/// deterministic per-slot registry).
-fn epoch_tables() -> Vec<EpochTable> {
-    let attester = Attester::new(SEED);
-    (0..=MAX_DEPTH as u64).map(|s| attester.epoch_table(s, HEADER_CHUNKS)).collect()
+/// The venue's roster: five members in strict round robin (D51), each
+/// with its member key, its attester and its flag keys.
+const N_MEMBERS: u8 = 5;
+fn members() -> Vec<Member> {
+    (0..N_MEMBERS).map(|i| Member::new([SEED[0] + i; 32])).collect()
+}
+
+/// The venue's registry, published at contract open (the members'
+/// signed announcements: the scheduled member's table per slot, every
+/// member's flag point).
+fn registry() -> Registry {
+    let (gen, _t0) = lngap_pos::genesis(&members()[0].attester);
+    PosMiner::new(members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
 }
 
 /// The venue: the blocks sealed so far, by slot.
@@ -78,10 +85,9 @@ struct Venue {
 
 impl Venue {
     fn new() -> Venue {
-        let attester = Attester::new(SEED);
-        let (gen, _table0) = lngap_pos::genesis(&attester);
+        let (gen, _table0) = lngap_pos::genesis(&members()[0].attester);
         Venue {
-            miner: PosMiner::new(SEED, gen.header.digest(), 0),
+            miner: PosMiner::new(members(), gen.header.digest(), 0),
             sealed: std::collections::HashMap::new(),
         }
     }
@@ -158,7 +164,7 @@ impl Game {
     /// The draft: both sides generate their per-depth keys under the
     /// standard labels, exchange the public offers, and build the SAME
     /// instance (checked: both trees agree, exhibits included).
-    fn open(btc_open: u32, deadline: u32, value: Amount, tables: &[EpochTable]) -> Game {
+    fn open(btc_open: u32, deadline: u32, value: Amount, registry: &Registry) -> Game {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("pos4b/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("pos4b/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("pos4b/user-ks"));
@@ -168,12 +174,11 @@ impl Game {
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH).unwrap();
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH).unwrap();
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
-        // the venue's timeliness-flag registry (D50): three validators,
-        // threshold two — pinned at open like the epoch tables
-        let validators: Vec<FlagKeys> = (0..3u8).map(|i| FlagKeys::new([0x60 + i; 32])).collect();
-        let flags = FlagRegistry::from_validators(2, &validators, MAX_DEPTH);
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u, flags.clone()).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h, flags).unwrap();
+        // the venue's registry (D51): the scheduled member's table per
+        // slot and every member's flag point, threshold the majority (3
+        // of 5) — pinned at open
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u, registry.clone()).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h, registry.clone()).unwrap();
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let g = Game {
@@ -188,8 +193,8 @@ impl Game {
         // the draft's agreement property: both sides build the same output
         let ctx = g.ctx();
         assert_eq!(
-            g.inst.tree(&ctx, tables).unwrap().script_pubkey(),
-            inst_h.tree(&ctx, tables).unwrap().script_pubkey(),
+            g.inst.tree(&ctx).unwrap().script_pubkey(),
+            inst_h.tree(&ctx).unwrap().script_pubkey(),
             "both parties must build the same contract output"
         );
         g
@@ -255,11 +260,11 @@ struct Path {
 }
 
 impl Path {
-    fn open(rt: &Regtest, g: &Game, tables: &[EpochTable]) -> Path {
+    fn open(rt: &Regtest, g: &Game) -> Path {
         let ctx = g.ctx();
-        let tree = g.inst.tree(&ctx, tables).unwrap();
+        let tree = g.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
-        let graph = g.inst.graph(&ctx, c_op, &c_prev, tables).unwrap();
+        let graph = g.inst.graph(&ctx, c_op, &c_prev).unwrap();
         Path { venue: Venue::new(), graph, board: Board::empty(), pair_sig: None }
     }
 
@@ -534,14 +539,14 @@ fn dry(p: &PresignedTx, w: Vec<Vec<u8>>) -> Transaction {
 #[test]
 fn wired_pos_graph() {
     let rt = Regtest::start().unwrap();
-    let tables = epoch_tables();
+    let registry = registry();
     let value = Amount::from_sat(200_000);
 
     // ================= path A: an illegal (occupied-cell) move is killed ==
     {
-        let g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
+        let g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
         let mut g = g;
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut path = Path::open(&rt, &g);
         assert_eq!(path.graph.len(), 166, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43) + 8 x (counter, refute, 3 + 3 splits) (D44)");
         // slot 1: user's legal X@4; slot 2: hub plays the OCCUPIED cell 4
         rt.mine(1).unwrap();
@@ -569,8 +574,8 @@ fn wired_pos_graph() {
 
     // ================= path B: a legal refutation stands =================
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
@@ -596,8 +601,8 @@ fn wired_pos_graph() {
 
     // ================= path C: a real stall pays the claimant ============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
@@ -613,8 +618,8 @@ fn wired_pos_graph() {
 
     // ================= path D: the depth-1 single-head form ==============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4); // legal opening
         rt.mine(2).unwrap(); // past claim_from(1)
@@ -635,8 +640,8 @@ fn wired_pos_graph() {
 
     // ============ path E: the terminal exhibit pays the winner (D37) ====
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         // the winning line: X@0, O@3, X@1, O@4, X@2 — the top row,
         // terminal at depth 5 with the user the last mover
         for (i, mv) in [0u8, 3, 1, 4, 2].into_iter().enumerate() {
@@ -673,8 +678,8 @@ fn wired_pos_graph() {
 
     // ============ path F: the gate rejects open states; a draw pays =====
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         // the drawn line XOX/XOO/OXX: 0,1,3,4,2 then 5,7,6,8
         for (i, mv) in [0u8, 1, 3, 4, 2].into_iter().enumerate() {
             rt.mine(1).unwrap();
@@ -712,8 +717,8 @@ fn wired_pos_graph() {
 
     // ============ path G: a garbage-signed attested entry is not a move ==
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &tables);
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4); // X@4, really signed
         rt.mine(1).unwrap();
@@ -748,9 +753,9 @@ fn wired_pos_graph() {
             rt.height().unwrap() + 1,
             rt.height().unwrap() + 400,
             value,
-            &tables,
+            &registry,
         );
-        let mut path = Path::open(&rt, &g, &tables);
+        let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();

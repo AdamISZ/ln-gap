@@ -1,6 +1,8 @@
 //! The PoS venue world: one channel's worth of keystores (for real per-depth
-//! entry signatures), one PoS venue (`lngap_pos::PosMiner`), slots driven by
-//! the Bitcoin clock. Step 2 of POS_FACTCHAIN_PLAN.md (D32).
+//! entry signatures), one PoS venue (`lngap_pos::PosMiner` — since D51 a
+//! five-member roster in strict round robin, its registry announced at
+//! open), slots driven by the Bitcoin clock. Step 2 of
+//! POS_FACTCHAIN_PLAN.md (D32).
 //!
 //! The world plays a scripted game of tic-tac-toe INTO the venue: each move
 //! becomes the entry of the block sealed at its slot, attested under that
@@ -22,7 +24,7 @@ use lngap_factchain::slot::SlotEntry;
 use lngap_lamport::Reveal;
 use lngap_n4bit::{hash_claim, Digest};
 use lngap_names::ServedData;
-use lngap_pos::{PosClient, PosMiner, SealedBlock};
+use lngap_pos::{Member, PosClient, PosMiner, Registry, SealedBlock};
 use lngap_tictactoe::{Board, OPEN};
 use lngap_tictactoe_fc::{registry, TicTacToeFc, TttFcParams};
 use tracing::info;
@@ -34,9 +36,16 @@ use crate::{init_log, Harness};
 pub const STAKE: Amount = Amount::from_sat(50_000);
 pub const ID_GAME: u32 = 30;
 pub const GAME_ID: u16 = 1;
-/// The attester's seed label (the single key standing in for the FROST
-/// group key, per the ec-wots crate's design).
+/// The roster's base seed: member `i` is seeded `VENUE_SEED[0] + i` (five
+/// members in strict round robin, D51).
 pub const VENUE_SEED: [u8; 32] = [0x5A; 32];
+pub const N_MEMBERS: u8 = 5;
+/// The registry announced at open covers slots `0..=REGISTRY_SLOTS`.
+pub const REGISTRY_SLOTS: u32 = 32;
+
+pub fn members() -> Vec<Member> {
+    (0..N_MEMBERS).map(|i| Member::new([VENUE_SEED[0] + i; 32])).collect()
+}
 
 /// A block the venue sealed, kept whole for later steps' exhibit
 /// construction (the attestation is the refutation's raw material).
@@ -44,7 +53,11 @@ pub struct PosWorld {
     pub h: Harness,
     pub miner: PosMiner,
     pub client: PosClient,
-    /// The registry: every sealed slot's epoch table.
+    /// The registry the members announced at open (the scheduled member's
+    /// table per slot, every member's flag point), what the client
+    /// verifies seals against.
+    pub registry: Registry,
+    /// Every sealed slot's epoch table, as the venue published it.
     pub tables: HashMap<u32, EpochTable>,
     /// Every sealed block, by slot.
     pub sealed: HashMap<u32, SealedBlock>,
@@ -70,9 +83,11 @@ impl PosWorld {
         init_log();
         let store = ServedData::default();
         let h = Harness::new(label, registry(store.clone()))?;
-        let attester = lngap_ec_wots::Attester::new(VENUE_SEED);
-        let (gen, table0) = lngap_pos::genesis(&attester);
+        let members = members();
+        let (gen, table0) = lngap_pos::genesis(&members[0].attester);
         let checkpoint = gen.header.digest();
+        let mut miner = PosMiner::new(members, checkpoint, 0);
+        let registry = miner.registry(REGISTRY_SLOTS)?;
         let btc_open = h.height();
         let program = TicTacToeFc::new(
             TttFcParams {
@@ -86,8 +101,9 @@ impl PosWorld {
             store,
         );
         let mut w = PosWorld {
-            miner: PosMiner::new(VENUE_SEED, checkpoint, 0),
+            miner,
             client: PosClient::from_checkpoint(0, checkpoint),
+            registry,
             tables: HashMap::from([(0u32, table0)]),
             sealed: HashMap::from([(0u32, gen)]),
             blocks: HashMap::new(),
@@ -183,8 +199,9 @@ impl PosWorld {
         }
         let (block, table) = self.miner.seal_next(slot).map_err(|e| anyhow!(e))?;
         self.client
-            .verify_and_append(&block, &table)
+            .verify_and_append(&block, &self.registry)
             .map_err(|e| anyhow!(e))?;
+        let proposer = self.miner.proposer_at(slot);
         if let Some((entry, bytes)) = pending {
             // anyone verifies the entry: content, and the signature against
             // the mover's venue commitments
@@ -205,13 +222,13 @@ impl PosWorld {
                 .map_err(|e| anyhow!(e))?;
             self.depth = slot;
             self.say(format!(
-                "slot {slot} sealed with {mover}'s move ({}); attested",
+                "slot {slot} sealed by member {proposer} with {mover}'s move ({}); attested",
                 self.board.render()
             ));
             self.blocks.insert(slot, bytes);
         } else {
             self.blocks.insert(slot, Vec::new());
-            self.say(format!("slot {slot} sealed EMPTY (cadence)"));
+            self.say(format!("slot {slot} sealed EMPTY by member {proposer} (cadence)"));
         }
         self.tables.insert(slot, table);
         self.sealed.insert(slot, block);

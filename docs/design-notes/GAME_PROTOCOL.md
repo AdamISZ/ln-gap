@@ -207,5 +207,11 @@ dispute, and nothing on the stall path.
    committed point per slot and reveal its scalar when the slot passes
    its deadline empty; a claimant holding `t` of the `k` scalars signs
    its own spend under those points and a LATE refutation dies, the
-   late attester named by the on-time flags (PS12, PC13; 430 vB at the
-   majority 8-of-15, the PoC's threshold since the D50 amendment).]
+   late attester named by the on-time flags (PS12, PC13; 254 vB at the
+   majority 3-of-5). Since 2026-09-26 the venue is a ROSTER (D51): five
+   members in strict round robin, each sealing its scheduled slots under
+   its own one-time table and flagging empty slots at their deadlines,
+   with a signed per-member registry the client verifies seals against;
+   no group key. A silent scheduled proposer stalls the mover, who loses
+   by absence — the accepted limitation until backups or windows land
+   (PS13, PC14).]
