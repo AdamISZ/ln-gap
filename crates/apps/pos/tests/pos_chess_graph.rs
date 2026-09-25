@@ -41,9 +41,9 @@
 //!   seals empty on time, the deadline passes and the 15 validators
 //!   publish their flag scalars; the colluding proposer then seals the
 //!   hub's e7e5 at slot 2 late, the hub refutes with it, and the user's
-//!   `not_timely` spend — its own transaction signed under 10 of the 15
-//!   flag points — takes the pot; 9 scalars are rejected in-leaf, and on
-//!   a timely slot (path B) no scalar exists to count.
+//!   `not_timely` spend — its own transaction signed under 8 of the 15
+//!   flag points (the majority) — takes the pot; 7 scalars are rejected
+//!   in-leaf, and on a timely slot (path B) no scalar exists to count.
 
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1::{SecretKey, SECP256K1};
@@ -78,10 +78,10 @@ const D: u32 = 2;
 /// The chess state key's WOTS length in digits (84 message + 3 checksum
 /// over the 42 signed bytes — the 40 state bytes then the move, D43).
 const STATE_DIGITS: usize = 87;
-/// The venue's notary: 15 validators, and the contract demands 10 flags
-/// to kill a refutation as not timely (D50).
+/// The venue's notary: 15 validators, and the contract demands the
+/// majority, 8 flags, to kill a refutation as not timely (D50 amended).
 const K: usize = 15;
-const T: u32 = 10;
+const T: u32 = 8;
 
 /// The venue's validators (their flag keys; in a deployment each notary
 /// member holds its own).
@@ -243,6 +243,7 @@ impl Game {
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
         // the flag registry (D50): every validator's point per slot,
         // published with the epoch tables and pinned at open
+        assert_eq!(T, FlagRegistry::majority(K), "the PoC threshold is the majority");
         let flags = FlagRegistry::from_validators(T, &validators(), MAX_DEPTH);
         let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_u, flags.clone()).unwrap();
         let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_h, flags).unwrap();
@@ -970,21 +971,21 @@ fn wired_pos_chess_graph() {
         let bad = path.disprove(&rt, &g, D, p_op, &p_prev, Kind::Ray);
         assert!(rt.test_accept(&bad).is_err(), "the late e7e5 is a legal move: no tuple disprove fires");
         // ...t - 1 flags do not reach the threshold...
-        let mut nine = scalars.clone();
-        for s in nine.iter_mut().skip(T as usize - 1) {
+        let mut short_of_t = scalars.clone();
+        for s in short_of_t.iter_mut().skip(T as usize - 1) {
             *s = None;
         }
-        let short = path.not_timely(&g, D, p_op, &p_prev, &nine);
+        let short = path.not_timely(&g, D, p_op, &p_prev, &short_of_t);
         match rt.test_accept(&short) {
             Err(e) => println!("note: not_timely with {} of {K} flags correctly rejected: {e}", T - 1),
             Ok(v) => panic!("not_timely must not fire under the threshold (accepted at {v} vB)"),
         }
         // ...and t of k kill the refutation: the user takes the pot
-        let mut ten = scalars.clone();
-        for s in ten.iter_mut().skip(T as usize) {
+        let mut exactly_t = scalars.clone();
+        for s in exactly_t.iter_mut().skip(T as usize) {
             *s = None;
         }
-        let ntx = path.not_timely(&g, D, p_op, &p_prev, &ten);
+        let ntx = path.not_timely(&g, D, p_op, &p_prev, &exactly_t);
         rt.mine_with(&[ntx.clone()]).unwrap_or_else(|e| panic!("not_timely with {T} of {K} flags must mine: {e}"));
         println!("REGTEST PC: not_timely ({T} of {K} flags): {} vB, script {} B", ntx.vsize(), g.inst.refuted_tree(&g.ctx(), D).unwrap().leaf("not_timely").unwrap().script.len());
         assert_eq!(rt.balance_of(&g.user.public().payout_spk).unwrap() - before, value - g.params.presign_fee - g.params.presign_fee - g.params.presign_fee, "the pot less three hops' fees");

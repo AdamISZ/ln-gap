@@ -214,6 +214,15 @@ pub struct FlagRegistry {
 }
 
 impl FlagRegistry {
+    /// The PoC's threshold for `k` validators: a simple majority,
+    /// `⌈(k + 1) / 2⌉` (D50 amended). The flag is one-sided — silence
+    /// votes for presence — so false emptiness costs `t` flaggers and a
+    /// standing late attestation costs `k − t + 1` abstainers plus the
+    /// proposer; they balance at the majority and no `t` beats half.
+    pub fn majority(k: usize) -> u32 {
+        (k as u32 + 2) / 2
+    }
+
     /// The registry the validators publish: every slot `0..=slots`, one
     /// point per validator (the harness's reproduction of published data).
     pub fn from_validators(threshold: u32, validators: &[FlagKeys], slots: u32) -> FlagRegistry {
@@ -260,8 +269,9 @@ pub struct PosInstance {
     /// Index `d - 1`.
     pub keys: Vec<PosDepthKeys>,
     pub outcomes: Vec<Outcome>,
-    /// The timeliness-flag registry and threshold (D50): slot `d`'s points
-    /// are the `not_timely` leaf's constants on the depth-`d` refuted tree.
+    /// The timeliness-flag registry and threshold (D50; the PoC pins the
+    /// threshold at [`FlagRegistry::majority`]): slot `d`'s points are the
+    /// `not_timely` leaf's constants on the depth-`d` refuted tree.
     pub flags: FlagRegistry,
 }
 
@@ -487,5 +497,21 @@ impl PosInstance {
             )?);
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `⌈(k + 1) / 2⌉`: the two lies balance at the majority (D50 amended).
+    #[test]
+    fn majority_threshold() {
+        for (k, t) in [(1usize, 1u32), (2, 2), (3, 2), (4, 3), (5, 3), (15, 8), (16, 9), (100, 51)] {
+            assert_eq!(FlagRegistry::majority(k), t, "k = {k}");
+            // false emptiness costs t; a standing late attestation costs k - t + 1
+            let late = k as u32 - t + 1;
+            assert!(late == t || late + 1 == t, "k = {k}: {t} vs {late}");
+        }
     }
 }

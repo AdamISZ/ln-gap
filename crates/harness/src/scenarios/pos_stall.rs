@@ -59,9 +59,12 @@ const GRAPH_LEN: usize = 166;
 /// checksum digits over the 3 state bytes).
 const STATE_DIGITS: usize = 8;
 /// The venue's notary: 15 validators holding flag keys; the contract
-/// demands 10 flags to kill a refutation as not timely (D50).
+/// demands a simple majority, 8 flags, to kill a refutation as not
+/// timely (D50 amended: `FlagRegistry::majority`; false emptiness costs
+/// 8 flaggers, a standing late attestation 8 abstainers plus the
+/// proposer).
 const K: usize = 15;
-const T: u32 = 10;
+const T: u32 = 8;
 
 /// The venue's validators' flag keys (each notary member holds its own).
 fn validators() -> Vec<FlagKeys> {
@@ -155,6 +158,7 @@ impl PosGame {
         // block per Bitcoin block while the game is being played
         let btc_open = rt.height()? + 1;
         let deadline = btc_open + 400;
+        ensure!(T == FlagRegistry::majority(K), "the PoC threshold is the majority");
         let flags = FlagRegistry::from_validators(T, &validators(), MAX_DEPTH);
         let inst = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, GRACE, keys_u, flags)?;
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
@@ -948,25 +952,25 @@ pub const PS11: Scenario = Scenario {
 pub const PS12: Scenario = Scenario {
     id: "PS12",
     title: "PoS graph: a LATE attestation is killed by the timeliness flags (D50)",
-    expected: "the hub stalls at slot 2 (sealed empty on time); at the deadline 10 of the 15 validators publish their flag scalars; the proposer, colluding, then seals the hub's O@1 at slot 2 late; the user claims absence, the hub refutes with the late block (the readout passes, the move is legal, no tuple disprove fires), and the user's not_timely spend — its own transaction signed under the 10 flag points — takes the pot; with 9 flags the leaf rejects it: three transactions",
+    expected: "the hub stalls at slot 2 (sealed empty on time); at the deadline 8 of the 15 validators (the majority) publish their flag scalars; the proposer, colluding, then seals the hub's O@1 at slot 2 late; the user claims absence, the hub refutes with the late block (the readout passes, the move is legal, no tuple disprove fires), and the user's not_timely spend — its own transaction signed under the 8 flag points — takes the pot; with 7 flags the leaf rejects it: three transactions",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?; // X@4
         g.idle_slot()?; // slot 2 seals EMPTY on time: the hub stalls
         g.idle_slot()?; // slot 2's deadline passes
-        g.flag(2, 9)?; // nine validators flag first...
+        g.flag(2, 7)?; // seven validators flag first...
         g.play_late(2, 1)?; // ...the proposer seals the hub's O@1 late anyway
         g.wait_to(g.mature_at(2))?;
         g.claim_absent(2)?;
         let (_psig, h, p_op, p_prev) = g.refute(2)?;
         ensure!(g.disproves_firing(2).is_empty(), "the late move is legal: no tuple disprove fires");
         g.wait_to(h + u32::from(g.params.delta) + 1)?;
-        // nine flags do not reach the threshold
+        // seven flags do not reach the threshold
         let short = g.not_timely(2, p_op, &p_prev, false)?.expect("assembled");
         ensure!(g.rt.test_accept(&short).is_err(), "not_timely must not fire under the threshold");
-        g.say("the user's not_timely with 9 of 15 flags: rejected in-leaf (threshold 10), never confirmed".to_string());
-        // the tenth validator's flag arrives: the refutation dies
-        g.flag(2, 10)?;
+        g.say("the user's not_timely with 7 of 15 flags: rejected in-leaf (threshold 8), never confirmed".to_string());
+        // the eighth validator's flag arrives: the refutation dies
+        g.flag(2, 8)?;
         g.not_timely(2, p_op, &p_prev, true)?;
         ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "not_timely".to_string()], "{:?}", roles(&g));
         ensure!(g.balances() == [sat(POT - 3_000), sat(0)], "{:?}", g.balances());

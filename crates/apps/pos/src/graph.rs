@@ -379,7 +379,7 @@ mod tests {
     /// The leaf's script grows by exactly one 32-byte key push plus one
     /// opcode per validator (34 bytes, 8.5 vB); at k = 15 it is under 560
     /// bytes. Each signer then costs a 64-byte witness element (16 vB) and
-    /// each non-signer an empty one (~0.25 vB): 10-of-15 is ~0.4 kvB all in.
+    /// each non-signer an empty one (~0.25 vB): 8-of-15 is ~0.4 kvB all in.
     #[test]
     fn not_timely_leaf_size_is_linear_in_k() {
         let params = ChannelParams::regtest(Amount::from_sat(400_000));

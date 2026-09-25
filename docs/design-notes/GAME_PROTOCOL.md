@@ -207,5 +207,5 @@ dispute, and nothing on the stall path.
    committed point per slot and reveal its scalar when the slot passes
    its deadline empty; a claimant holding `t` of the `k` scalars signs
    its own spend under those points and a LATE refutation dies, the
-   late attester named by the on-time flags (PS12, PC13; 454 vB at
-   10-of-15).]
+   late attester named by the on-time flags (PS12, PC13; 430 vB at the
+   majority 8-of-15, the PoC's threshold since the D50 amendment).]

@@ -1956,10 +1956,11 @@ k = 15: 549 B of script — 34 B per validator (a 32-byte x-only key push
 plus one opcode; the design note's 33-byte estimate was for compressed
 points, tapscript keys are x-only) — the size is linear in `k` (unit
 test). The spend at 10-of-15: 454 vB (eleven 64-byte signatures including
-the challenger's, five empty slots), paying the claimant the refuted
-output less the fee. PS12: `absent_2` + `absent_2/refute` + `not_timely`
-= 35,415 vB in three transactions; PC13: 37,187 vB in three (the
-refutation dominates as ever). Stack: `k + 2` elements; the 1,000-element
+the challenger's, five empty slots); at the majority 8-of-15 adopted by
+the amendment below: 430 vB (nine signatures, seven empty slots), paying
+the claimant the refuted output less the fee. PS12: `absent_2` +
+`absent_2/refute` + `not_timely` = 35,383 vB in three transactions; PC13:
+37,155 vB in three (the refutation dominates as ever). Stack: `k + 2` elements; the 1,000-element
 limit bounds `k` near 900; the sigop budget never binds (each real
 signature spends 50 of a budget its own 64 bytes grow).
 
@@ -1988,8 +1989,9 @@ presence to be a positive statement too (a second per-slot bit, "filled
 at the deadline", `t` of which a refutation must carry; both bits at one
 slot = self-contradiction, named) plus a THIRD outcome for a slot that
 reaches neither threshold, which turns the omission attack from theft
-into griefing — post-PoC. Decided: the PoC pins `t = ⌈(k + 1) / 2⌉`; the
-harness's `T = 10` of 15 is to be updated to 8 in the next patch. The
+into griefing — post-PoC. Decided: the PoC pins `t = ⌈(k + 1) / 2⌉`
+(`FlagRegistry::majority`); LANDED 2026-09-26 — the harness and the
+regtest exhibit run 8 of 15 (7 rejected in-leaf, 8 mine at 430 vB). The
 threat model stated plainly: both lies cost about half the notary, and
 silence favours the mover.
 
