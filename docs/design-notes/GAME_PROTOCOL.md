@@ -214,4 +214,8 @@ dispute, and nothing on the stall path.
    with a signed per-member registry the client verifies seals against;
    no group key. A silent scheduled proposer stalls the mover, who loses
    by absence — the accepted limitation until backups or windows land
-   (PS13, PC14).]
+   (PS13, PC14). The FEE LOCK (D52, 2026-09-26) pays the slot's
+   proposer per attestation, atomically: a channel output whose
+   pre-signed claim carries the payer's adaptor pre-signature under the
+   head's point sum, completed by the sealed block's scalar sum
+   (FL1-FL3: settled in-channel, claimed on-chain, refunded by timeout).]

@@ -2081,6 +2081,69 @@ anchoring; ejection beyond the client naming the member; the fee lock into
 the channel — the NEXT step, a separate commit (D49's leftover: the lock
 per slot to the scheduled proposer).
 
+## D52. The fee lock in the channel: the proposer paid per attestation, atomically, by an adaptor pre-signature on a channel output
+
+Date: 2026-09-26. Context: ATTESTATION_FEES.md (local; the design), D49
+(the primitive), D48 (fees are the venue's positive incentive; the
+members are the proposers), D51 (the payee is the slot's scheduled
+member), FEE_LOCK_PLAN.md (local). BUILT and played: scenarios FL1-FL3
+on a real channel on regtest.
+
+**The output.** A fee lock is a channel contract output
+(`lngap_channel::FeeLock`, an ordinary `ContractOutput` on both
+commitment versions): the payer offers `value` to the counterparty —
+the payee, the proposer's node (the hub in the PoC; which member the
+hub is does not touch the mechanism) — locked to the point `ΣP`, the
+sum of the anticipation points the payer's HEAD selects under the slot's
+SCHEDULED member's table (`lngap_pos::fee::lock_point`, over the 96 head
+chunks of `registry.table(slot)`). Its tree: `revoke` (standard);
+`claim`, 2-of-2 to the payee's payout, pre-signed — the PAYER's half an
+adaptor pre-signature under `ΣP`; `timeout`, after `expiry` (CLTV), the
+payer's key alone. The payee can broadcast `claim` only by completing
+the pre-signature with `Σs`, the sealed block's scalar sum over the same
+chunks (`lngap_pos::fee::lock_secret`), which exists iff the member
+attested exactly that head at exactly that slot; and the completed
+signature, once public, hands `Σs` to the payer (D49's extract).
+
+**The channel carries pre-signatures.** `PresignedTx` gained `adaptor:
+Option<(Role, T)>`: for that role `sign_as` produces the pre-signature,
+`CommitSigs` carries it (`GraphSig::{Full, Adaptor}`), `add_sig`
+verifies it against `T`, `fully_signed` accepts it, `complete(t)` turns
+it into the signature (checked: a wrong `t` is rejected before the node
+sees it), `extract_secret` reads `t` back from the confirmed witness.
+Nothing else in the channel changed; every existing graph is `Full`.
+
+**In-channel settlement is a plain update.** The payee, holding `Σs`,
+hands it to the payer and proposes the settled state (the lock removed,
+`value` to the payee — `FeeLock::settled`); the payer's policy accepts
+iff the delivered secret opens the lock and the update moves exactly the
+lock (`FeeLock::accept_settlement`) — Lightning's update_fulfill with
+the secret out of band. The payee's acceptance of the OFFER checks the
+lock is over the head it was handed for that slot under the scheduled
+member's table. The refund is the symmetric update or the on-chain
+sweep.
+
+**Played** (FL1-FL3; `ChannelParty` pair on regtest, the D51 roster
+beside it; the party layer downcasts every contract to a game instance,
+so the lock is driven at the channel level): FL1 — the user locks 5,000
+sat to its head at slot 1, member 1 seals it, the hub settles
+in-channel, cooperative close: nothing on Bitcoin but the close
+(94,500 / 104,500). FL2 — the hub force-closes, waits out its delay,
+completes `claim` with the scalar sum and broadcasts it; the user
+extracts the secret from the confirmed witness: commitment, both
+balance claims, the fee claim (171 vB), 677 vB in four transactions
+(94,000 / 102,000). FL3 — member 1 seals slot 1 EMPTY: the empty head's scalar
+sum does not complete the pre-signature (rejected at `complete`), and
+after `expiry` the user force-closes and sweeps `timeout` (147 vB): 653
+vB in four (97,000 / 99,000).
+
+**Out of scope, recorded.** Routing the lock through the party layer
+and the publication reserve at contract open (ATTESTATION_FEES section
+5); publication windows (`W` locks, one per candidate slot, resolving
+exclusively); promises; the fee market; member income distribution;
+the payee's own venue membership (in the PoC the hub stands for member
+1's node and nothing checks it).
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

@@ -5,6 +5,7 @@
 
 pub mod chain;
 pub mod commit;
+pub mod feelock;
 pub mod funding;
 pub mod presign;
 pub mod protocol;
@@ -24,7 +25,8 @@ use lngap_btc::{hash160, Hash160};
 use serde::{Deserialize, Serialize};
 
 pub use commit::{CommitCtx, Commitment};
-pub use presign::PresignedTx;
+pub use feelock::FeeLock;
+pub use presign::{GraphSig, PresignedTx};
 
 /// Which side of the channel. Index 0 is the user, 1 is the hub, everywhere.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

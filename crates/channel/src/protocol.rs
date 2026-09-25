@@ -20,7 +20,7 @@ use tracing::{info, warn};
 
 use crate::chain::{Broadcast, Chain};
 use crate::commit::{build_commitment, CommitCtx, Commitment, OutputKind};
-use crate::presign::{GraphKey, PresignedTx};
+use crate::presign::{GraphKey, GraphSig, PresignedTx};
 use crate::sweep::{build_sweep, SweepInput};
 use crate::{ChannelParams, ChannelState, PartyKeys, PartyPubKeys, Role};
 
@@ -31,7 +31,7 @@ pub enum Msg {
     Propose { state: ChannelState },
     /// Signatures on the receiver's commitment for `seq` and on every
     /// pre-signed graph transaction of both versions.
-    CommitSigs { seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, Signature)> },
+    CommitSigs { seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, GraphSig)> },
     /// Revocation of `seq`, plus the sender's revocation hash for `seq + 2`.
     RevokeAndAck { seq: u64, secret: [u8; 32], next_rev_hash: Hash160 },
     /// Cooperative close: proposer's signature on the close tx built with `fee`.
@@ -297,12 +297,12 @@ impl ChannelParty {
         let graph_sigs = rec
             .graph
             .iter()
-            .map(|(k, p)| (k.clone(), p.sigs[self.me.idx()].expect("signed at build")))
+            .map(|(k, p)| (k.clone(), p.my_sig(self.me).expect("signed at build")))
             .collect();
         Ok(Msg::CommitSigs { seq, commit_sig, graph_sigs })
     }
 
-    fn accept_commit_sigs(&mut self, seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, Signature)>) -> Result<()> {
+    fn accept_commit_sigs(&mut self, seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, GraphSig)>) -> Result<()> {
         let t0 = std::time::Instant::now();
         let n = graph_sigs.len();
         let r = self.accept_commit_sigs_inner(seq, commit_sig, graph_sigs);
@@ -311,7 +311,7 @@ impl ChannelParty {
         }
         r
     }
-    fn accept_commit_sigs_inner(&mut self, seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, Signature)>) -> Result<()> {
+    fn accept_commit_sigs_inner(&mut self, seq: u64, commit_sig: Signature, graph_sigs: Vec<(GraphKey, GraphSig)>) -> Result<()> {
         let them = self.me.other();
         let leaf = self.funding_tree.leaf("funding")?.clone();
         let funding_prevout = self.funding.1.clone();
