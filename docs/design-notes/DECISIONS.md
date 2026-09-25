@@ -2195,7 +2195,15 @@ being skipped. The collided-slot rule (two members sealing one slot with
 different heads) becomes reachable by an honest race and stays deferred:
 for games it is benign (two mover-signed heads at one depth is the
 mover's equivocation; the same head under two proposers refutes either
-way).
+way), and TIMELINESS under a collision needs no rule of its own — the
+flag majority is the definition of "empty at the deadline", not an
+estimate of it, so an entry that reached only a minority's view by the
+deadline was late by the venue's own rule and the mover's remedy is to
+reach the majority in time (its hub's job); the only residual is t
+members lying about their view, unprovable, answered by the franchise.
+The headers stay prev-linked in the venue's record for its own judgment
+of its members; no contract reads the link, so the venue's list needs
+no fork-choice rule.
 
 **The fee.** With a shared key every member can compute any head's
 content secret in advance, so the content sum alone no longer proves
