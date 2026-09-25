@@ -31,12 +31,12 @@ use lngap_btc::sighash::sign_tapscript;
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PresignedTx, Role};
 use lngap_contract::Contract;
-use lngap_ec_wots::{Attester, EpochTable};
+use lngap_ec_wots::{Attester, EpochTable, FlagKeys};
 use lngap_factchain::slot::{SlotEntry, STATE_BITS};
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsSig;
-use lngap_pos::instance::{self, PosInstance};
+use lngap_pos::instance::{self, FlagRegistry, PosInstance};
 use lngap_pos::refute;
 use lngap_pos::{PosClient, PosMiner, SealedBlock, HEADER_CHUNKS};
 use lngap_tictactoe::{Board, TicTacToe};
@@ -158,8 +158,12 @@ impl Game {
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH).unwrap();
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH).unwrap();
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h).unwrap();
+        // the venue's timeliness-flag registry (D50): three validators,
+        // threshold two — pinned at open like the epoch tables
+        let validators: Vec<FlagKeys> = (0..3u8).map(|i| FlagKeys::new([0x60 + i; 32])).collect();
+        let flags = FlagRegistry::from_validators(2, &validators, MAX_DEPTH);
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u, flags.clone()).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h, flags).unwrap();
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let g = Game { user, hub, user_ks, hub_ks, params, pubs, inst: inst_u };

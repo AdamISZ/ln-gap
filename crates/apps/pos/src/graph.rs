@@ -26,6 +26,20 @@
 //! check the code against the parked state, because a PoS refutation
 //! carries no code reveal for a `code_mismatch` leaf to judge.
 //!
+//! The timeliness flag (D50, NON_INCLUSION_THRESHOLD.md). A refutation
+//! proves the venue attested slot `d`'s head, never WHEN: a proposer
+//! colluding with the mover can attest his signed move after the deadline
+//! and refute an honest claim. So the refuted tree carries one more
+//! claimant leaf, `not_timely`: `k` validator flag points for slot `d` as
+//! script constants, counted by CHECKSIGADD against a threshold `t`. A
+//! validator that saw the slot pass its deadline empty published its flag
+//! secret; the claimant signs its own spend under any `t` of them and the
+//! refutation dies. Rule (D50): the refutation dies on `t` flags — the
+//! rogue-`t` residual (false emptiness against a timely move) falls on the
+//! honest mover, who has a venue to pursue by name (the `t` points in the
+//! witness), rather than the late-attestation residual on the claimant,
+//! who has nobody.
+//!
 //! The counter (D44). The thin claim asserts no venue content, so nothing
 //! in it says the claim was DUE — that the claimant itself moved at
 //! `d - 1`. Without that, the staller at `d - 1` can claim `absent_d`
@@ -49,9 +63,13 @@
 //! counter.
 
 use anyhow::Result;
+use bitcoin::key::{Keypair, XOnlyPublicKey};
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
+use bitcoin::secp256k1::{SecretKey, SECP256K1};
+use bitcoin::{Script, Transaction, TxOut};
 use lngap_btc::script::BuilderExt;
+use lngap_btc::sighash::sign_tapscript;
 use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::Timelock;
 use lngap_channel::{CommitCtx, Role};
@@ -269,10 +287,59 @@ pub fn claim_tree(
     TapTree::new(leaves)
 }
 
+/// The `not_timely` leaf on the refutation output P_d (D50): the
+/// claimant's timeliness disprove. Same gate as the disprove family (CSV
+/// `delta`, the challenger's payment key), then the slot's `k` validator
+/// flag points counted by CHECKSIGADD against the threshold `t`:
+///
+/// ```text
+///   <delta> CSV DROP <challenger> CHECKSIGVERIFY
+///   <F_1> CHECKSIG <F_2> CHECKSIGADD ... <F_k> CHECKSIGADD
+///   <t> GREATERTHANOREQUAL
+/// ```
+///
+/// Witness (consumption order): the challenger's signature, then one slot
+/// per validator — a 64-byte signature of THIS spend under `F_i` (made
+/// with the published scalar `f_i`), or empty. BIP342 makes an empty
+/// signature add zero and continue and a non-empty invalid one fail, so
+/// exactly the validators whose scalars the claimant holds count, and each
+/// counted signature names its validator. No pair reveal: the leaf judges
+/// the slot, not the parked tuple.
+pub fn not_timely_leaf(ctx: &CommitCtx, l: &Layout, flags: &[XOnlyPublicKey], t: u32) -> Leaf {
+    assert!(!flags.is_empty() && 1 <= t && t as usize <= flags.len(), "1 <= t <= k");
+    let challenger = ctx.key(l.mover.other()).payment;
+    let mut b = Builder::new().csv(ctx.params.delta).checksigverify(&challenger);
+    for (i, f) in flags.iter().enumerate() {
+        b = b.push_x_only_key(f).push_opcode(if i == 0 { OP_CHECKSIG } else { OP_CHECKSIGADD });
+    }
+    b = b.push_int(i64::from(t)).push_opcode(OP_GREATERTHANOREQUAL);
+    Leaf::new("not_timely", b.into_script(), Timelock::csv(ctx.params.delta))
+}
+
+/// The `not_timely` witness (wire order, bottom first) for the spend `tx`
+/// of input `input` through `leaf`: `scalars[i]` is validator `i`'s
+/// published flag secret for the slot, or `None` (an empty slot in the
+/// witness); `challenger` signs first in consumption order (last in wire
+/// order). The claimant signs its OWN transaction under every scalar it
+/// holds — nobody signs anybody else's transaction.
+pub fn not_timely_witness(tx: &Transaction, input: usize, prevouts: &[TxOut], leaf: &Script, challenger: &Keypair, scalars: &[Option<SecretKey>]) -> Vec<Vec<u8>> {
+    let mut w = Vec::with_capacity(scalars.len() + 1);
+    for f in scalars.iter().rev() {
+        w.push(match f {
+            Some(f) => sign_tapscript(&Keypair::from_secret_key(SECP256K1, f), tx, input, prevouts, leaf).expect("sighash").as_ref().to_vec(),
+            None => Vec::new(),
+        });
+    }
+    w.push(sign_tapscript(challenger, tx, input, prevouts, leaf).expect("sighash").as_ref().to_vec());
+    w
+}
+
 /// The tree of the refutation output P_d: the claimant's disprove family
 /// over the parked tuple (after `delta`) — the game's own predicate set —
-/// then the mover's self-checking splits after `delta + delta'`.
-pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Result<TapTree> {
+/// and its `not_timely` leaf over slot `d`'s `flags` with threshold `t`
+/// (D50), then the mover's self-checking splits after `delta + delta'`.
+#[allow(clippy::too_many_arguments)]
+pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome], flags: &[XOnlyPublicKey], t: u32) -> Result<TapTree> {
     let challenger = ctx.key(l.mover.other()).payment;
     let family = match game {
         Game::Ttt => ttt::disprove_leaves(l, &keys.refute),
@@ -289,6 +356,7 @@ pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys
         }
         leaves.push(Leaf::new(format!("disprove_{}", pl.name), b.into_script(), Timelock::csv(ctx.params.delta)));
     }
+    leaves.push(not_timely_leaf(ctx, l, flags, t));
     let w = ctx.params.delta + ctx.params.delta_prime;
     for o in outcomes {
         let leaf = match game {
@@ -298,4 +366,41 @@ pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys
         leaves.push(leaf);
     }
     TapTree::new(leaves)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::Amount;
+    use lngap_btc::keys::Seed;
+    use lngap_channel::{ChannelParams, PartyKeys};
+    use lngap_ec_wots::FlagKeys;
+
+    /// The leaf's script grows by exactly one 32-byte key push plus one
+    /// opcode per validator (34 bytes, 8.5 vB); at k = 15 it is under 560
+    /// bytes. Each signer then costs a 64-byte witness element (16 vB) and
+    /// each non-signer an empty one (~0.25 vB): 10-of-15 is ~0.4 kvB all in.
+    #[test]
+    fn not_timely_leaf_size_is_linear_in_k() {
+        let params = ChannelParams::regtest(Amount::from_sat(400_000));
+        let pubs = [
+            PartyKeys::from_seed(Role::User, Seed::from_label("nt/user")).public(),
+            PartyKeys::from_seed(Role::Hub, Seed::from_label("nt/hub")).public(),
+        ];
+        let ctx = CommitCtx { params: &params, keys: &pubs, broadcaster: Role::User, seq: 1, rev_hash: [0u8; 20] };
+        let l = Layout::at(2, 1, Role::Hub);
+        let validators: Vec<FlagKeys> = (0..15u8).map(|i| FlagKeys::new([i + 1; 32])).collect();
+        let points: Vec<XOnlyPublicKey> = validators.iter().map(|v| v.flag_point(2)).collect();
+        let len = |k: usize| not_timely_leaf(&ctx, &l, &points[..k], 1).script.len();
+        let base = len(1) - 34;
+        for k in [1usize, 2, 5, 10, 15] {
+            assert_eq!(len(k), base + 34 * k, "34 bytes per validator");
+        }
+        assert!(len(15) < 560, "15 validators: {} B", len(15));
+        // t up to 16 is a single-byte push; the threshold is checked
+        let leaf = not_timely_leaf(&ctx, &l, &points, 10);
+        assert_eq!(leaf.script.len(), base + 34 * 15);
+        assert_eq!(leaf.name, "not_timely");
+        assert_eq!(leaf.timelock, Timelock::csv(params.delta));
+    }
 }

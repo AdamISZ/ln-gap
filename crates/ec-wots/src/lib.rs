@@ -11,7 +11,13 @@
 //! The attester in this crate is a single key standing in for a FROST quorum:
 //! a FROST group key is a plain BIP340 key and indistinguishable on-chain, so
 //! every Script-level property tested here is the same one a quorum gets.
+//!
+//! Beside the content attestation sits the TIMELINESS flag ([`FlagKeys`],
+//! D50): one committed point per validator per slot, whose secret a
+//! validator reveals when the slot passes its deadline empty; the contract
+//! side counts `t` of the `k` revealed scalars as individual signatures.
 
+mod flag;
 mod leaf;
 mod table;
 
@@ -19,6 +25,7 @@ pub use leaf::{
     readout_leaf, readout_tied_fragment, readout_value_fragment, readout_values_leaf, readout_values_witness, readout_witness_args, slash_any_witness,
     slash_leaf, slash_leaf_any, slash_witness_args, CHUNK_SCRIPT_BYTES,
 };
+pub use flag::FlagKeys;
 pub use table::{statement_challenge, Attestation, Attester, EpochTable};
 
 /// The value of message chunk `j`: the j-th nibble, high nibble first.

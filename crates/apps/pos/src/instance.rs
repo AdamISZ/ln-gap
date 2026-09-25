@@ -25,6 +25,11 @@
 //! build the same [`PosInstance`] — the graph's script pubkeys agree iff
 //! the merged key sets agree.
 //!
+//! From D50 the refuted tree also carries `not_timely`: slot `d`'s
+//! validator flag points from the [`FlagRegistry`] pinned at open, counted
+//! against the contract's threshold. The registry is venue data like the
+//! epoch tables; the threshold is the contract's own dial.
+//!
 //! The disprove spends are NOT pre-signed: they are the claimant's own
 //! runtime transactions (their witness is the refutation's reveal, unknown
 //! at setup; the claimant signs at dispute time). Everything else is a
@@ -51,13 +56,14 @@
 //! its mover's state key opens the head's claimed state.
 
 use anyhow::{bail, ensure, Result};
+use bitcoin::key::XOnlyPublicKey;
 use bitcoin::{Amount, OutPoint, TxOut};
 use lngap_btc::taptree::TapTree;
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_channel::{CommitCtx, PresignedTx, Role};
 use lngap_contract::instance::key_label;
 use lngap_contract::{Contract, Outcome, Payout, CODE_BITS};
-use lngap_ec_wots::EpochTable;
+use lngap_ec_wots::{EpochTable, FlagKeys};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsPublic};
 use lngap_lamport::PublicKey;
@@ -196,6 +202,45 @@ pub fn collect_keys(mine: &[(u32, PosKeyOffer)], theirs: &[(u32, PosKeyOffer)], 
     Ok(out)
 }
 
+/// The venue's timeliness-flag registry as a contract pins it (D50): per
+/// slot, the `k` validators' flag points (`points[slot][i]`, index slot
+/// like the epoch tables), and the contract's threshold `t` — a
+/// per-contract dial (a bigger pot may demand a larger `t` against false
+/// emptiness), independent of the roster size.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FlagRegistry {
+    pub threshold: u32,
+    pub points: Vec<Vec<XOnlyPublicKey>>,
+}
+
+impl FlagRegistry {
+    /// The registry the validators publish: every slot `0..=slots`, one
+    /// point per validator (the harness's reproduction of published data).
+    pub fn from_validators(threshold: u32, validators: &[FlagKeys], slots: u32) -> FlagRegistry {
+        FlagRegistry {
+            threshold,
+            points: (0..=u64::from(slots)).map(|s| validators.iter().map(|v| v.flag_point(s)).collect()).collect(),
+        }
+    }
+
+    /// The validator count `k` (the first slot's point count; `check`
+    /// enforces it everywhere).
+    pub fn k(&self) -> usize {
+        self.points.get(1).map(Vec::len).unwrap_or(0)
+    }
+
+    fn check(&self, max_depth: u32) -> Result<()> {
+        ensure!(self.points.len() > max_depth as usize, "flag points for slots 1..={max_depth} required");
+        let k = self.k();
+        ensure!(k >= 1, "at least one validator");
+        ensure!(1 <= self.threshold && self.threshold as usize <= k, "flag threshold {} must be within 1..={k}", self.threshold);
+        for d in 1..=max_depth as usize {
+            ensure!(self.points[d].len() == k, "slot {d}: {} flag points, {k} validators", self.points[d].len());
+        }
+        Ok(())
+    }
+}
+
 /// A PoS absence-claim game instance: the tuple both parties build after
 /// the key exchange.
 #[derive(Clone, Debug)]
@@ -215,11 +260,16 @@ pub struct PosInstance {
     /// Index `d - 1`.
     pub keys: Vec<PosDepthKeys>,
     pub outcomes: Vec<Outcome>,
+    /// The timeliness-flag registry and threshold (D50): slot `d`'s points
+    /// are the `not_timely` leaf's constants on the depth-`d` refuted tree.
+    pub flags: FlagRegistry,
 }
 
 impl PosInstance {
-    pub fn new(id: u32, value: Amount, deadline: u32, game_id: u16, game: Game, btc_open: u32, grace: u32, keys: Vec<PosDepthKeys>) -> Result<PosInstance> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(id: u32, value: Amount, deadline: u32, game_id: u16, game: Game, btc_open: u32, grace: u32, keys: Vec<PosDepthKeys>, flags: FlagRegistry) -> Result<PosInstance> {
         ensure!(!keys.is_empty(), "no depths");
+        flags.check(keys.len() as u32)?;
         for (i, k) in keys.iter().enumerate() {
             let d = i as u32 + 1;
             ensure!(k.mover == mover_at(d), "depth {d}: mover mismatch");
@@ -232,7 +282,7 @@ impl PosInstance {
         // HubWins 1 / Draw 2); chess's Draw split can never fire on this
         // graph (chess.rs's resolution fragment).
         let outcomes = Contract::outcomes(&TicTacToe);
-        Ok(PosInstance { id, value, deadline, game_id, game, btc_open, grace, keys, outcomes })
+        Ok(PosInstance { id, value, deadline, game_id, game, btc_open, grace, keys, outcomes, flags })
     }
 
     pub fn max_depth(&self) -> u32 {
@@ -305,9 +355,12 @@ impl PosInstance {
         graph::claim_tree(ctx, self.game, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes, counter)
     }
 
-    /// The refutation output's tree at depth `d`.
+    /// The refutation output's tree at depth `d`: the disprove family, the
+    /// `not_timely` leaf over slot `d`'s flag points (D50), the checked
+    /// splits. (The tic-tac-toe exhibit output's tree is this tree too, so
+    /// a late terminal exhibit dies the same way.)
     pub fn refuted_tree(&self, ctx: &CommitCtx, d: u32) -> Result<TapTree> {
-        graph::refuted_tree(ctx, self.game, &self.layout(d), self.depth_keys(d), &self.outcomes)
+        graph::refuted_tree(ctx, self.game, &self.layout(d), self.depth_keys(d), &self.outcomes, &self.flags.points[d as usize], self.flags.threshold)
     }
 
     /// Payout outputs for `payout` of `v` to the parties' payout scripts.

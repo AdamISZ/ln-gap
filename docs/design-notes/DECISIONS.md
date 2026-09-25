@@ -1733,7 +1733,12 @@ colluding with one player steals the pot by omission or by late
 attestation; the plan's 5.5 rule with the `(1 − p)` factor is operative).
 D38's fixed-R rationale superseded. D32's cadence amendment qualified.
 Open, in order: the equivocated-slot rule for contracts; committee size
-and fallback count per venue; whether to anchor.
+and fallback count per venue; whether to anchor. [The timeliness half of
+the equivocated-slot rule is CLOSED by D50 (2026-09-25): a refutation
+dies on `t` validator flags, counted as individual signatures in the
+`not_timely` leaf; the late attester is named by the on-time flags, not
+by a pair leaf. Which of two CONTENT attestations at one slot is
+canonical remains open.]
 
 ## D48. Venue economics: franchise plus lock on both layers, ejection on self-contradiction, no venue slashing
 
@@ -1851,6 +1856,123 @@ is the remaining channel-crate work. The per-slot variant (the slot
 number inside the attested head, so W locks to W candidate proposers
 resolve exclusively) is a layout choice on the head, not on this
 primitive.
+
+## D50. The timeliness flag: one committed point per validator per slot, counted by CHECKSIGADD; the refutation dies on t flags
+
+Date: 2026-09-25. Context: NON_INCLUSION_THRESHOLD.md and
+NOT_TIMELY_PLAN.md (local), D47 (timeliness is what the chain was quietly
+providing; the equivocated-slot rule left open), D48 (ejection by name is
+the venue's only punishment, so a false statement about time must NAME its
+authors), D49 (EC-OTS stays for content; the fee lock rides its points).
+BUILT and played on regtest: `pos_chess_graph` path I, scenarios PS12 and
+PC13.
+
+**The problem.** A refutation proves the venue attested slot `d`'s head
+and never WHEN. A proposer colluding with the mover attests his signed
+move after the deadline and refutes an honest absence claim; a venue
+colluding with the claimant says a slot was empty against a timely move.
+Both are statements about TIME, and both need to be threshold-attested
+(one rogue member cannot make them) and attributable (D48 ejects by
+name). Aggregation cannot give attribution here: a threshold signature is
+subset-agnostic by definition (VENUE_QUORUM.md section 7, D47), so the
+on-chain object carries no information about who built it. Attribution
+has to come from counting INDIVIDUAL signatures, `t` per statement, which
+is affordable only if the statement is small.
+
+**The split.** CONTENT (the head, 96 chunks of 16 values) stays with ONE
+named signer, the slot's proposer, under its one-time table: the existing
+readout, the fee lock's point sum, equivocation naming the proposer by its
+points. TIME is content-free — "slot `s` held no valid entry when its
+deadline passed" — one BIT per validator, so each validator holds ONE
+committed point per slot (`lngap_ec_wots::FlagKeys`: `flag_secret(slot)`,
+even-y normalised like the chunk secrets; `flag_point(slot)`), published
+in the registry next to the slot's head table, and "t of k say empty" is
+tapscript's native count over their individual signatures. The threshold
+lives only where the statement is a bit, which is what keeps it linear.
+
+**The flag.** Venue side: when slot `s` passes its deadline with no valid
+entry, validator `i` publishes `f_{i,s}` as DATA, anywhere (delivery is
+out of band; the harness hands the scalars to the claimant directly);
+it publishes nothing otherwise. That is the whole per-validator
+timeliness duty, D47's density rule stated individually — an empty slot
+is consumed by its flags instead of by an empty block. Contract side: one
+more claimant leaf on every refuted output P_d (`graph::not_timely_leaf`,
+appended by `refuted_tree`), same gate as the disprove family, no pair
+reveal:
+
+    <delta> CSV DROP <challenger> CHECKSIGVERIFY
+    <F_1,d> CHECKSIG <F_2,d> CHECKSIGADD ... <F_k,d> CHECKSIGADD
+    <t> GREATERTHANOREQUAL
+
+The claimant collects any `t` published scalars, signs ITS OWN spend
+under those `t` points (a revealed scalar is a private key for its point,
+the EC-OTS possession proof unchanged — `graph::not_timely_witness`), and
+leaves the other `k − t` witness slots empty: BIP342 makes an empty
+signature add zero and continue and a non-empty invalid one fail. Nobody
+signs anybody else's transaction; validators never see the contract or
+the transaction and need not be online at dispute time.
+
+**The rule (closes D47's open point): the refutation dies on `t` flags.**
+The two residuals cannot both be avoided; the choice is who bears which.
+Under this rule the rogue-`t` residual (false emptiness against a timely
+move) falls on the honest MOVER, who has a venue to pursue by name — the
+`t` points in the claimant's witness are the authors, and their flags
+contradict the venue's own record of the slot, D48's ejection evidence.
+Under the other rule ("the refutation stands") the late-attestation
+residual would fall on the honest CLAIMANT, who has nobody: a late block
+looks like any block. Attribution decides it.
+
+**What it enforces.** Honest timely mover: no honest validator flagged
+the slot, the claimant cannot assemble `t` signatures, the refutation
+stands (path B: `not_timely` with no scalars is rejected). Late mover:
+the honest validators' flags exist from the deadline on, the claimant's
+disprove window (`delta` after the refutation) is after that, the
+refutation dies (path I, PS12, PC13). Rogue `t` colluding with the
+claimant: they can kill an honest refutation, and the witness names them.
+Substitution (the venue seals junk in the mover's slot): unchanged, the
+D41 residual — no refutation exists, the absence path resolves. A
+validator that omits a flag for an empty slot: unprovable, harmless while
+`t` of `k` published. `t − 1` flags: rejected in-leaf (path I, PS12,
+PC13).
+
+**Decisions taken.** (1) Granularity: per SLOT on the current graph
+(slot = depth today, so `not_timely` at depth `d` counts slot `d`'s
+points); flags do not depend on windows or lanes, and the leaf carries
+over unchanged when those land (with lanes the flag is per lane, one
+refute leaf and one `not_timely` leaf per depth). (2) `t` is an
+INSTANCE parameter: `PosInstance` carries a `FlagRegistry { threshold,
+points[slot][i] }`, checked at `new` (`1 <= t <= k`, every depth's slot
+has its `k` points) — a per-contract dial, independent of roster size (a
+bigger pot may demand a larger `t` against false emptiness: the
+false-emptiness residual costs `t` ejections, the late-attestation
+residual one proposer plus the honest validators' silence). (3) Delivery
+out of band. (4) No pre-signed transaction changes: disproves are
+runtime; the skeleton counts stay 166 (ttt) and 129 (chess). The ttt
+terminal exhibit's output tree IS the refuted tree, so a late terminal
+exhibit dies the same way.
+
+**Measured** (regtest, `pos_chess_graph` path I; the suites). The leaf at
+k = 15: 549 B of script — 34 B per validator (a 32-byte x-only key push
+plus one opcode; the design note's 33-byte estimate was for compressed
+points, tapscript keys are x-only) — the size is linear in `k` (unit
+test). The spend at 10-of-15: 454 vB (eleven 64-byte signatures including
+the challenger's, five empty slots), paying the claimant the refuted
+output less the fee. PS12: `absent_2` + `absent_2/refute` + `not_timely`
+= 35,415 vB in three transactions; PC13: 37,187 vB in three (the
+refutation dominates as ever). Stack: `k + 2` elements; the 1,000-element
+limit bounds `k` near 900; the sigop budget never binds (each real
+signature spends 50 of a budget its own 64 bytes grow).
+
+**Out of scope, recorded.** The early-flag / filled-slot CLIENT rule (a
+flag published before the deadline, or for a slot the venue's record
+shows filled, is evidence against its publisher — a `PosClient::observe`
+variant, later); registry compression (`R + v·Q`, unvetted); the
+hash-preimage variant (a revealed 20-byte preimage serves a content-free
+flag as well as a scalar, ~30 B of script per validator, curve-free —
+same leaf shape, EC first); the harness delivers flags by hand (no venue
+data structure carries them); the collided-slot rule for two CONTENT
+attestations at one slot (D47's other open question) is untouched — the
+flags decide timeliness, not which of two heads is canonical.
 
 ## TODO
 

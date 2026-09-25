@@ -201,4 +201,11 @@ dispute, and nothing on the stall path.
    PC1-PC12 (chess); it includes the equivocation leaf (D39, per-depth
    since D43), the counter that makes a thin claim's dueness enforceable
    (D44), the chess well-formedness leaf (D45), and, for chess, needs no
-   terminal exhibit family (D42).]
+   terminal exhibit family (D42). Since 2026-09-25 every refuted tree
+   also carries the TIMELINESS flag leaf `not_timely` (D50,
+   NON_INCLUSION_THRESHOLD.md): the venue's validators each hold one
+   committed point per slot and reveal its scalar when the slot passes
+   its deadline empty; a claimant holding `t` of the `k` scalars signs
+   its own spend under those points and a LATE refutation dies, the
+   late attester named by the on-time flags (PS12, PC13; 454 vB at
+   10-of-15).]
