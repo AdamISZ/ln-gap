@@ -1,4 +1,4 @@
-//! The PoS absence-claim graph's scenario suite: PS1-PS13 (D40; plan step 7; D44; D50; D51).
+//! The PoS absence-claim graph's scenario suite: PS1-PS13 (D40; plan step 7; D44; D50; D51; D53).
 //! The scenarios live in `lngap_harness::scenarios::pos_stall`.
 
 use lngap_harness::scenarios::pos_stall::*;
@@ -24,4 +24,4 @@ scenario_test!(ps9_garbage_signed_attested_entry_is_not_a_move, PS9);
 scenario_test!(ps10_claim_one_depth_ahead_countered, PS10);
 scenario_test!(ps11_false_counter_refuted, PS11);
 scenario_test!(ps12_late_attestation_killed_by_the_flags, PS12);
-scenario_test!(ps13_silent_proposer_mover_loses_by_absence, PS13);
+scenario_test!(ps13_silent_member_skipped_another_seals, PS13);

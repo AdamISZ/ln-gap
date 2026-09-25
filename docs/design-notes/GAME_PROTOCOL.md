@@ -218,4 +218,9 @@ dispute, and nothing on the stall path.
    proposer per attestation, atomically: a channel output whose
    pre-signed claim carries the payer's adaptor pre-signature under the
    head's point sum, completed by the sealed block's scalar sum
-   (FL1-FL3: settled in-channel, claimed on-chain, refunded by timeout).]
+   (FL1-FL3: settled in-channel, claimed on-chain, refunded by timeout).
+   D53 (the same day) replaced the round robin: ONE content key shared
+   by the members, a per-member per-slot proposer bit revealed by
+   whoever seals and required by the refute leaf (any member seals any
+   slot, named by its point), and the fee lock's point is the content
+   sum plus the proposer's point.]

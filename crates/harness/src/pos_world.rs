@@ -1,7 +1,8 @@
 //! The PoS venue world: one channel's worth of keystores (for real per-depth
-//! entry signatures), one PoS venue (`lngap_pos::PosMiner` — since D51 a
-//! five-member roster in strict round robin, its registry announced at
-//! open), slots driven by the Bitcoin clock. Step 2 of
+//! entry signatures), one PoS venue (`lngap_pos::PosMiner` — since D51/D53
+//! a five-member roster sharing one content key, any member sealing any
+//! slot, its registry announced at open), slots driven by the Bitcoin
+//! clock. Step 2 of
 //! POS_FACTCHAIN_PLAN.md (D32).
 //!
 //! The world plays a scripted game of tic-tac-toe INTO the venue: each move
@@ -36,8 +37,9 @@ use crate::{init_log, Harness};
 pub const STAKE: Amount = Amount::from_sat(50_000);
 pub const ID_GAME: u32 = 30;
 pub const GAME_ID: u16 = 1;
-/// The roster's base seed: member `i` is seeded `VENUE_SEED[0] + i` (five
-/// members in strict round robin, D51).
+/// The venue's content seed (the key every member shares, D53) and the
+/// roster's base seed: member `i` is seeded `VENUE_SEED[0] + i` (five
+/// members; the default sealer prefers `slot mod 5`).
 pub const VENUE_SEED: [u8; 32] = [0x5A; 32];
 pub const N_MEMBERS: u8 = 5;
 /// The registry announced at open covers slots `0..=REGISTRY_SLOTS`.
@@ -84,9 +86,9 @@ impl PosWorld {
         let store = ServedData::default();
         let h = Harness::new(label, registry(store.clone()))?;
         let members = members();
-        let (gen, table0) = lngap_pos::genesis(&members[0].attester);
+        let (gen, table0) = lngap_pos::genesis(&lngap_ec_wots::Attester::new(VENUE_SEED), &members[0], 0);
         let checkpoint = gen.header.digest();
-        let mut miner = PosMiner::new(members, checkpoint, 0);
+        let mut miner = PosMiner::new(VENUE_SEED, members, checkpoint, 0);
         let registry = miner.registry(REGISTRY_SLOTS)?;
         let btc_open = h.height();
         let program = TicTacToeFc::new(
@@ -201,7 +203,7 @@ impl PosWorld {
         self.client
             .verify_and_append(&block, &self.registry)
             .map_err(|e| anyhow!(e))?;
-        let proposer = self.miner.proposer_at(slot);
+        let proposer = block.proposer;
         if let Some((entry, bytes)) = pending {
             // anyone verifies the entry: content, and the signature against
             // the mover's venue commitments

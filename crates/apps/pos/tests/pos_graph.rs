@@ -42,6 +42,8 @@ use lngap_contract::Contract;
 use lngap_factchain::slot::SlotEntry;
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsSig};
+use lngap_ec_wots::Attester;
+use lngap_pos::graph::proposer_witness;
 use lngap_pos::instance::{self, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
@@ -73,8 +75,8 @@ fn members() -> Vec<Member> {
 /// signed announcements: the scheduled member's table per slot, every
 /// member's flag point).
 fn registry() -> Registry {
-    let (gen, _t0) = lngap_pos::genesis(&members()[0].attester);
-    PosMiner::new(members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
+    let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
+    PosMiner::new(SEED, members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
 }
 
 /// The venue: the blocks sealed so far, by slot.
@@ -85,9 +87,9 @@ struct Venue {
 
 impl Venue {
     fn new() -> Venue {
-        let (gen, _table0) = lngap_pos::genesis(&members()[0].attester);
+        let (gen, _table0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
         Venue {
-            miner: PosMiner::new(members(), gen.header.digest(), 0),
+            miner: PosMiner::new(SEED, members(), gen.header.digest(), 0),
             sealed: std::collections::HashMap::new(),
         }
     }
@@ -317,6 +319,9 @@ impl Path {
         };
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), &tx, &a_prev, &p.leaf.script);
         let mut w = w;
+        // the proposer fragment (D53): the block's proposer scalar signs too, naming the member
+        let blk = &self.venue.sealed[&d];
+        w.extend(proposer_witness(sign_with(&blk.proposer_secret, &tx, &a_prev, &p.leaf.script), blk.proposer));
         w.push(mover_sig);
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the refutation at depth {d} must mine: {e}"));
@@ -352,6 +357,7 @@ impl Path {
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, a_prev, &p.leaf.script))
             .collect();
         let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&mk_junk(&new_head), &mk_junk(&prev_head)]);
+        w.extend(proposer_witness(sign_with(&new_block.proposer_secret, tx, a_prev, &p.leaf.script), new_block.proposer));
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
         w.push(mover_sig);
         let mut tx = p.tx.clone();
@@ -386,6 +392,7 @@ impl Path {
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, c_prev, &p.leaf.script))
             .collect();
         let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig, &prev_sig]);
+        w.extend(proposer_witness(sign_with(&new_block.proposer_secret, tx, c_prev, &p.leaf.script), new_block.proposer));
         let sig_u = sign_tx(&g.user.payment, tx, c_prev, &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, tx, c_prev, &p.leaf.script);
         w.push(sig_h);
@@ -787,6 +794,7 @@ fn wired_pos_graph() {
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
             .collect();
         let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig, &prev_sig]);
+        w.extend(proposer_witness(sign_with(&new_block.proposer_secret, &tx, &a_prev, &p.leaf.script), new_block.proposer));
         w.push(sign_tx(g.payment_of(instance::mover_at(D)), &tx, &a_prev, &p.leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         // mine_with (generateblock), not test_accept: the fee placeholder is

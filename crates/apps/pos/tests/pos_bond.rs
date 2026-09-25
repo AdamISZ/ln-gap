@@ -53,7 +53,7 @@ fn sign_with(secret: &SecretKey, tx: &Transaction, prev: &TxOut, leaf: &ScriptBu
 /// second block at SLOT carrying X@0, attested under the same epoch table.
 /// Returns the slot's table, both headers, and both attestations.
 fn equivocation() -> (EpochTable, Vec<u8>, Vec<u8>, Attestation, Attestation) {
-    let (gen, _t0) = lngap_pos::genesis(&lngap_pos::Member::new(SEED).attester);
+    let (gen, _t0) = lngap_pos::genesis(&lngap_ec_wots::Attester::new(SEED), &lngap_pos::Member::new(SEED), 0);
     let mut miner = PosMiner::single(SEED, gen.header.digest(), 0);
     let registry = miner.registry(SLOT).unwrap();
     let state_u32 = |b: &Board| lngap_lamport::bits_to_uint(&TicTacToe.state_bits(b));
@@ -75,7 +75,7 @@ fn equivocation() -> (EpochTable, Vec<u8>, Vec<u8>, Attestation, Attestation) {
     let eb = entry(0);
     let header_b = Header::new(&gen.header.digest(), &entry_root(&eb), &entry_head(&eb), SLOT);
     let hdr_b = header_b.as_bytes().to_vec();
-    let att_b = miner.attester_at(SLOT).attest(&table, header_b.as_bytes());
+    let att_b = miner.content().attest(&table, header_b.as_bytes());
     let hdr_a = block_a.header.as_bytes().to_vec();
     // both attestations open the same slot's table; the client names the event
     let mut client = PosClient::from_checkpoint(0, gen.header.digest());
@@ -84,6 +84,8 @@ fn equivocation() -> (EpochTable, Vec<u8>, Vec<u8>, Attestation, Attestation) {
         header: header_b,
         entry: eb,
         attestation: att_b,
+        proposer: 0,
+        proposer_secret: miner.proposer_secret(0, SLOT),
     };
     assert!(
         matches!(

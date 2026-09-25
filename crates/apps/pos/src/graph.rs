@@ -106,14 +106,65 @@ pub fn absent_leaf(ctx: &CommitCtx, name: &str, claimant: Role, claim_from: u32)
     Leaf::new(name.to_string(), b.push_int(1).into_script(), tl)
 }
 
+/// The proposer fragment (D53): a signature under ONE of the venue's `n`
+/// member proposer points for the slot, selected by a witness index —
+/// the readout's PICK gadget over member points. Witness enters as
+/// `[.., sig_p, i]` (the index on top); after the fragment both are
+/// consumed. The mover signs the refutation with the proposer scalar the
+/// block revealed, so every refutation names its proposer; an attestation
+/// with no proposer reveal is inert on-chain, and no member can attach
+/// another's.
+///
+/// ```text
+///   <P_0> ... <P_{n-1}>        n pushes
+///   <n> PICK                   copy i
+///   <n-1> SWAP SUB PICK        select P_i
+///   <n+2> ROLL SWAP            bring sig_p under it
+///   CHECKSIGVERIFY
+///   drop the n points and i
+/// ```
+pub fn proposer_fragment(mut b: Builder, points: &[XOnlyPublicKey]) -> Builder {
+    let n = points.len();
+    assert!((1..=16).contains(&n), "the proposer index is a nibble");
+    for pt in points {
+        b = b.push_x_only_key(pt);
+    }
+    b = b
+        .push_int(n as i64)
+        .push_opcode(OP_PICK)
+        .push_int(n as i64 - 1)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_SUB)
+        .push_opcode(OP_PICK)
+        .push_int(n as i64 + 2)
+        .push_opcode(OP_ROLL)
+        .push_opcode(OP_SWAP)
+        .push_opcode(OP_CHECKSIGVERIFY);
+    for _ in 0..(n + 1) / 2 {
+        b = b.push_opcode(OP_2DROP);
+    }
+    if (n + 1) % 2 == 1 {
+        b = b.push_opcode(OP_DROP);
+    }
+    b
+}
+
+/// The proposer fragment's witness elements (wire order, bottom first):
+/// the signature under member `i`'s proposer point, then the index.
+pub fn proposer_witness(sig_p: Vec<u8>, i: usize) -> Vec<Vec<u8>> {
+    vec![sig_p, lngap_ec_wots::snum(i as u8)]
+}
+
 /// The mover's refutation leaf on the claim output: the mover's payment
 /// signature first (the pre-signed skeleton pins the output to the refuted
-/// tree), then the readout-and-park. The D41 authorship fragment rides the
+/// tree), then the proposer fragment over slot `d`'s member points (D53),
+/// then the readout-and-park. The D41 authorship fragment rides the
 /// gate slot: per parked head, the witness must carry THAT head's mover's
 /// state-key signature over the head's signed region (the D43 tied-WOTS
 /// verify against the parked digits) — a garbage-signed attested entry
 /// admits no refutation.
-pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Leaf {
+#[allow(clippy::too_many_arguments)]
+pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>, proposers: &[XOnlyPublicKey]) -> Leaf {
     let body = match table_prev {
         Some(tp) => refute::refute_leaf_pair_gated(tp, table, &keys.refute, |b| {
             // the D41 authorship gate: tic-tac-toe checks BOTH parked heads
@@ -131,7 +182,7 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
         }),
         None => refute::refute_leaf(table, &keys.refute, |b| authorship(b, game, l.file, 0, &keys.state)),
     };
-    let mut b = Builder::new().checksigverify(&ctx.key(l.mover).payment);
+    let mut b = proposer_fragment(Builder::new().checksigverify(&ctx.key(l.mover).payment), proposers);
     for ins in body.instructions() {
         b = match ins.expect("valid script") {
             bitcoin::script::Instruction::Op(op) => b.push_opcode(op),
@@ -152,7 +203,8 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
 /// cannot see (the exhibited move is legal).
 ///
 /// The wiring is `absent_d`'s: CLTV to after slot `d`'s window (the
-/// attestation must exist) plus 2-of-2, so the exhibit transaction is
+/// attestation must exist) plus 2-of-2, then the proposer fragment over
+/// slot `d`'s member points (D53), so the exhibit transaction is
 /// pre-signed and the exhibit output is pinned to its tree. The key is the
 /// depth-`d` refute key — both leaves bind the same two epoch tables, so
 /// the signed message is provably the same 96 bytes, and the contexts are
@@ -169,6 +221,7 @@ pub fn exhibit_leaf(
     keys: &PosDepthKeys,
     keys_prev: &PosDepthKeys,
     claim_from: u32,
+    proposers: &[XOnlyPublicKey],
 ) -> Leaf {
     let mut b = Builder::new().cltv(claim_from);
     let mut tl = Timelock::cltv(claim_from);
@@ -176,7 +229,7 @@ pub fn exhibit_leaf(
         b = b.csv(ctx.params.to_self_delay);
         tl.csv = Some(ctx.params.to_self_delay);
     }
-    b = ctx.two_of_two_verify(b);
+    b = proposer_fragment(ctx.two_of_two_verify(b), proposers);
     let body = refute::refute_leaf_pair_gated(table_prev, table, &keys.refute, |b| {
         let b = ttt::authorship_fragment(b, l.file, l.new, &keys.state);
         let b = ttt::authorship_fragment(b, l.file, 0, &keys_prev.state);
@@ -276,8 +329,9 @@ pub fn claim_tree(
     keys_prev: Option<&PosDepthKeys>,
     outcomes: &[Outcome],
     counter: bool,
+    proposers: &[XOnlyPublicKey],
 ) -> Result<TapTree> {
-    let mut leaves = vec![refute_leaf(ctx, game, l, table_prev, table, keys, keys_prev)];
+    let mut leaves = vec![refute_leaf(ctx, game, l, table_prev, table, keys, keys_prev, proposers)];
     if counter {
         leaves.push(counter_leaf(ctx, "counter"));
     }
@@ -375,6 +429,22 @@ mod tests {
     use lngap_btc::keys::Seed;
     use lngap_channel::{ChannelParams, PartyKeys};
     use lngap_ec_wots::FlagKeys;
+
+    /// The proposer fragment: n key pushes plus a fixed gadget; the drops
+    /// balance the pushes and the index.
+    #[test]
+    fn proposer_fragment_size() {
+        let validators: Vec<FlagKeys> = (0..16u8).map(|i| FlagKeys::new([i + 0x20; 32])).collect();
+        let points: Vec<XOnlyPublicKey> = validators.iter().map(|v| v.flag_point(1)).collect();
+        let len = |n: usize| proposer_fragment(Builder::new(), &points[..n]).into_script().len();
+        for n in [1usize, 2, 5, 15, 16] {
+            let drops = (n + 1) / 2 + (n + 1) % 2;
+            let wide = usize::from(n + 2 > 16); // the ROLL depth outgrows OP_16
+            assert_eq!(len(n), 33 * n + 10 + wide + drops, "n = {n}");
+        }
+        assert_eq!(proposer_witness(vec![0u8; 64], 3), vec![vec![0u8; 64], vec![3]]);
+        assert_eq!(proposer_witness(vec![0u8; 64], 0), vec![vec![0u8; 64], vec![]]);
+    }
 
     /// The leaf's script grows by exactly one 32-byte key push plus one
     /// opcode per validator (34 bytes, 8.5 vB); at k = 15 it is under 560

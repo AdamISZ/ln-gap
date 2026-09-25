@@ -221,10 +221,11 @@ pub struct PosInstance {
     /// Index `d - 1`.
     pub keys: Vec<PosDepthKeys>,
     pub outcomes: Vec<Outcome>,
-    /// The venue's registry as pinned at open (D51): per slot the scheduled
-    /// member's epoch table (the refute leaves' constants) and every
-    /// member's flag point (the `not_timely` leaf's, D50), and the flag
-    /// threshold (the majority, D50 amended).
+    /// The venue's registry as pinned at open (D51, D53): per slot the
+    /// shared content table (the refute leaves' constants), every member's
+    /// proposer point (the refute leaves' proposer fragment) and flag point
+    /// (the `not_timely` leaf's, D50), and the flag threshold (the
+    /// majority, D50 amended).
     pub registry: Registry,
 }
 
@@ -288,6 +289,7 @@ impl PosInstance {
                     self.depth_keys(d),
                     self.depth_keys(d - 1),
                     self.claim_from(d),
+                    self.registry.proposers(d),
                 ));
             }
         }
@@ -300,8 +302,8 @@ impl PosInstance {
 
     /// The claim output's tree at depth `d`, with the counter leaf from
     /// depth 2 (D44). The refutation leaf embeds the head chunks' points
-    /// of the registry's tables for slots `d - 1` and `d` (the scheduled
-    /// members' announced tables).
+    /// of the registry's shared tables for slots `d - 1` and `d`, and
+    /// slot `d`'s member proposer points (D53).
     pub fn claim_tree(&self, ctx: &CommitCtx, d: u32) -> Result<TapTree> {
         self.claim_tree_with(ctx, d, d >= 2)
     }
@@ -316,7 +318,7 @@ impl PosInstance {
     fn claim_tree_with(&self, ctx: &CommitCtx, d: u32, counter: bool) -> Result<TapTree> {
         let l = self.layout(d);
         let (prev, table) = if d >= 2 { (Some(self.registry.table(d - 1)), self.registry.table(d)) } else { (None, self.registry.table(1)) };
-        graph::claim_tree(ctx, self.game, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes, counter)
+        graph::claim_tree(ctx, self.game, &l, prev, table, self.depth_keys(d), (d >= 2).then(|| self.depth_keys(d - 1)), &self.outcomes, counter, self.registry.proposers(d))
     }
 
     /// The refutation output's tree at depth `d`: the disprove family, the

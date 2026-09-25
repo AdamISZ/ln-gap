@@ -2144,6 +2144,116 @@ exclusively); promises; the fee market; member income distribution;
 the payee's own venue membership (in the PoC the hub stands for member
 1's node and nothing checks it).
 
+## D53. One content key for the venue, one proposer bit per member: any member seals any slot, and the refutation names it by a point
+
+Date: 2026-09-26. Context: the windows discussion of the same day; D47
+(aggregation cannot name its signers), D50 (a one-bit statement counted
+by individual signatures), D51 (the roster's strict round robin and its
+accepted limitation), D52 (the fee lock). DESIGN agreed, then BUILT the
+same day (the "Built" note at the end).
+
+**The observation.** A signature over a BIT scales; a signature over a
+MESSAGE does not. The content attestation is EC-OTS over the head — a
+table of 96 × 16 points per signer per slot — so a venue whose proposer
+is unknown at contract open costs the contract n tables per depth (n
+refute leaves, n pre-signatures; n² for the two-head form). A
+content-free statement costs one point per member per slot. So the
+content attestation goes under ONE key every member holds — a 1-of-n
+FROST key, which is a shared secret; no signing session, no DKG worth
+the name — and everything that must name a member is a one-bit
+statement beside it.
+
+**Two bits per member per slot.** The flag `F_{i,s}` ("slot s was empty
+at its deadline", D50), revealed by every member that saw it; and the
+proposer point `P_{i,s}` ("I sealed slot s"), revealed by the member
+that did and carried by its block. The same primitive — a revealed
+scalar is a private key for its point, used to sign the disputing
+party's own transaction — with opposite polarity. Nothing cryptographic
+ties the proposer scalar to the head; the tie is (a) co-signing the same
+transaction in the refute leaf and (b) the venue rule that a block is
+valid only with its proposer scalar attached.
+
+**The contract.** Per slot the registry pins ONE shared content table
+(every member co-signs its digest in its announcement), the n proposer
+points and the n flag points. The refute leaf opens the head under the
+shared table exactly as before and, before the readout, requires a
+signature under ONE of the n proposer points, selected by a witness
+index with the readout's own PICK gadget (`graph::proposer_fragment`):
+about 34 bytes per member, one leaf per depth, one pre-signature. The
+tic-tac-toe terminal exhibit carries the same fragment. Every refutation
+that reaches Bitcoin therefore names its proposer; an attestation with
+no proposer scalar is inert on-chain; no member can attach another's.
+
+**The venue.** Any member seals any slot; the schedule, if the venue
+keeps one, is its own business; a silent member costs nothing, since
+inclusion liveness is 1-of-n per slot. The client verifies a block's
+seal under the slot's shared table AND its proposer reveal against that
+member's point; an equivocation names the block's proposer. D51's strict
+round robin and its accepted limitation (a silent scheduled member
+stalls the mover) are superseded: PS13/PC14 now play the silent member
+being skipped. The collided-slot rule (two members sealing one slot with
+different heads) becomes reachable by an honest race and stays deferred:
+for games it is benign (two mover-signed heads at one depth is the
+mover's equivocation; the same head under two proposers refutes either
+way).
+
+**The fee.** With a shared key every member can compute any head's
+content secret in advance, so the content sum alone no longer proves
+who did anything. The lock's adaptor point becomes the content sum PLUS
+the intended proposer's point, and its secret the content secret plus
+that member's proposer scalar (notation below): only member `i` can
+complete it, and completing it IS member `i`'s statement that it sealed
+slot `s` with this head. The payer designates its hub, a member, as the
+payee; one lock, not n, because the hub can seal any slot. A claim with
+no such block on the venue — sealed by nobody, by someone else, or with
+another head — is a self-contradiction against the venue's record,
+evidence against `i` by name (FL4). The cooperative path and the channel
+machinery are unchanged: the channel sees a point.
+
+**Notation** (D49 and D52 wrote `Σs` for three things). For slot `s`,
+chunk `j`, value `v`: table point `A_{s,j,v}`, secret `a_{s,j,v}`. For a
+head `h` with nibbles `v_j`: `C_h = Σ_j A_{s,j,v_j}` (the content sum,
+`EpochTable::point_sum`) and `c_h = Σ_j a_{s,j,v_j}` (its log,
+`Attestation::scalar_sum`). Member `i`'s proposer point `P_{i,s} =
+p_{i,s}·G`. The lock: `T = C_h + P_{i,s}`, `t = c_h + p_{i,s}`, `t·G =
+T`; the pre-signature `s'` with `s'·G = R + H(R + T, P, m)·P`, completed
+by `s = s' + t`, extracted by `t = s − s'`.
+
+**What it costs and what it does not.** Registry per slot: one table
+(was one), plus n proposer points (new, 32 B each). Contract per depth:
+one refute leaf plus ~34 B per member, one pre-signature; nothing else
+changes. Off-chain: nothing. What is given up is what the round robin
+never really provided: an on-chain guarantee that a named member was
+responsible for a slot. Responsibility is a venue rule; a member's
+failure to seal is an omission the venue prices, as silence on the flags
+already is.
+
+**Built** (2026-09-26, the same day). `lngap_pos::roster`: `Member { key,
+proposer: FlagKeys, flags: FlagKeys }` (the content key is the venue's,
+`PosMiner::content`); `MemberPublic` signs the content tables' DIGESTS
+plus its proposer and flag points; `Registry::build(roster, tables,
+announcements, max_slot)` checks every member co-signed every table;
+`Roster::majority`. `SealedBlock` carries `proposer` and
+`proposer_secret`; `PosMiner::{seal_by, seal_next (the default sealer:
+slot mod n, skipping silent members), default_sealer, proposer_secret,
+content}`; `PosClient` verifies the proposer reveal against the named
+member's point and the seal under the shared table (a forged tag and an
+out-of-roster index are rejected; unit-tested), and names the second
+block's proposer on equivocation. `graph::proposer_fragment` /
+`proposer_witness` in the refute and exhibit leaves (size unit-tested:
+33 B per member plus a fixed gadget). `lngap_pos::fee::{content_point,
+content_secret, content_secret_of, lock_point(registry, slot, head,
+member), lock_secret(block), fee_lock(.., member, ..)}`. Measured: the
+chess refutation at depth 2 is 36,607 vB, up 62 vB from D51 (five points,
+one signature, one index). Scenarios: PS13/PC14 rewritten — member 2
+silent, member 3 seals the hub's move, the user's spurious claim is
+refuted with member 3's block and the witness names member 3; PS12/PC13
+name member 1 as the late attester; FL1-FL3 lock to `C_h + P_{1,1}`; FL4
+NEW — the hub completes the lock without sealing, from the shared key
+plus its own proposer scalar, the claim mines, and the user names member
+1 against the venue's record. Every suite green: PS1-PS13, PC1-PC14,
+FL1-FL4, the pos crate, the venue world.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

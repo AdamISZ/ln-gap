@@ -35,6 +35,7 @@ use lngap_factchain::slot::{SlotEntry, STATE_BITS};
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsSig;
+use lngap_ec_wots::Attester;
 use lngap_pos::instance::{self, PosInstance};
 use lngap_pos::refute;
 use lngap_pos::{Member, PosClient, PosMiner, Registry, SealedBlock};
@@ -72,8 +73,8 @@ fn members() -> Vec<Member> {
 
 /// The venue's registry, published at contract open.
 fn registry() -> Registry {
-    let (gen, _t0) = lngap_pos::genesis(&members()[0].attester);
-    PosMiner::new(members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
+    let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
+    PosMiner::new(SEED, members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
 }
 
 /// The venue, sealing entries with REAL state signatures (unlike the
@@ -85,9 +86,9 @@ struct Venue {
 
 impl Venue {
     fn new() -> (Venue, lngap_n4bit::Digest) {
-        let (gen, _t0) = lngap_pos::genesis(&members()[0].attester);
+        let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
         let g = gen.header.digest();
-        (Venue { miner: PosMiner::new(members(), g, 0), sealed: Default::default() }, g)
+        (Venue { miner: PosMiner::new(SEED, members(), g, 0), sealed: Default::default() }, g)
     }
     /// Seal `slot` carrying `mv` from `board`, signed with the mover's real
     /// state-key signature from `ks`. Returns the new board and the sig.
@@ -125,8 +126,8 @@ impl Venue {
         }
         .encode();
         let header = Header::new(parent, &entry_root(&entry), &entry_head(&entry), slot);
-        let attestation = self.miner.attester_at(slot).attest(registry.table(slot), header.as_bytes());
-        SealedBlock { header, entry, attestation }
+        let attestation = self.miner.content().attest(registry.table(slot), header.as_bytes());
+        SealedBlock { header, entry, attestation, proposer: 1, proposer_secret: self.miner.proposer_secret(1, slot) }
     }
 }
 

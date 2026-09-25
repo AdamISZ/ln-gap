@@ -1,5 +1,5 @@
 //! The PoS absence-claim graph's chess scenario suite: PC1-PC14
-//! (POS_FACTCHAIN_PLAN.md step 7; D42; D44; D45; D50; D51). The scenarios live in
+//! (POS_FACTCHAIN_PLAN.md step 7; D42; D44; D45; D50; D51; D53). The scenarios live in
 //! `lngap_harness::scenarios::pos_chess`. Run with `--test-threads=2`: fourteen
 //! chess games on fresh regtests contend for the box.
 
@@ -26,4 +26,4 @@ scenario_test!(pc10_claim_one_depth_ahead_countered, PC10);
 scenario_test!(pc11_false_counter_refuted, PC11);
 scenario_test!(pc12_malformed_signed_entry_disproved, PC12);
 scenario_test!(pc13_late_attestation_killed_by_the_flags, PC13);
-scenario_test!(pc14_silent_proposer_mover_loses_by_absence, PC14);
+scenario_test!(pc14_silent_member_skipped_another_seals, PC14);

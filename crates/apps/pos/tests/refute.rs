@@ -47,7 +47,7 @@ fn sink() -> ScriptBuf {
 
 /// A slot-1 block whose entry's head carries the move `mv`.
 fn sealed_move(mv: u8) -> (SealedBlock, EpochTable) {
-    let (gen, _t0) = lngap_pos::genesis(&lngap_pos::Member::new(SEED).attester);
+    let (gen, _t0) = lngap_pos::genesis(&lngap_ec_wots::Attester::new(SEED), &lngap_pos::Member::new(SEED), 0);
     let mut miner = PosMiner::single(SEED, gen.header.digest(), 0);
     let entry = SlotEntry {
         game_id: 1,

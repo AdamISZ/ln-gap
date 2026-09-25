@@ -1,4 +1,4 @@
-//! The fee lock scenarios FL1-FL3 (D52): the proposer paid per attestation,
+//! The fee lock scenarios FL1-FL4 (D52, D53): the proposer paid per attestation,
 //! atomically, in a real channel. The scenarios live in
 //! `lngap_harness::scenarios::fee_lock`.
 
@@ -15,3 +15,4 @@ macro_rules! scenario_test {
 scenario_test!(fl1_paid_in_channel_for_the_attestation, FL1);
 scenario_test!(fl2_on_chain_claim_completes_the_pre_signature, FL2);
 scenario_test!(fl3_no_attestation_the_timeout_refunds, FL3);
+scenario_test!(fl4_rogue_claim_without_the_attestation_is_named, FL4);

@@ -33,7 +33,8 @@ use lngap_factchain::slot::SlotEntry;
 use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsPublic, WotsSig};
-use lngap_pos::graph::not_timely_witness;
+use lngap_ec_wots::Attester;
+use lngap_pos::graph::{not_timely_witness, proposer_witness};
 use lngap_pos::instance::{self, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
@@ -56,13 +57,16 @@ const GRAPH_LEN: usize = 166;
 /// The state key's reveal length (the tied-WOTS authorship: 6 message + 2
 /// checksum digits over the 3 state bytes).
 const STATE_DIGITS: usize = 8;
-/// The venue's roster (D51): five members in strict round robin, each
-/// with its member key, its attester (the tables of the slots it
-/// proposes) and its flag keys; the flag threshold is the majority, 3 of
-/// 5 (D50 amended: false emptiness costs 3 flaggers, a standing late
-/// attestation 3 abstainers plus the proposer).
+/// The venue's roster (D51, D53): five members sharing ONE content key
+/// (seeded `SEED`), each with its member key, its proposer keys and its
+/// flag keys; any member seals any slot (the default sealer prefers
+/// `slot mod 5` and skips silent members); the flag threshold is the
+/// majority, 3 of 5 (D50 amended: false emptiness costs 3 flaggers, a
+/// standing late attestation 3 abstainers plus the proposer).
 const K: usize = 5;
 const T: u32 = 3;
+/// The hub's member: the colluding proposer in the late fixtures.
+const HUB_MEMBER: usize = 1;
 /// The registry announced at open covers slots `0..=REGISTRY_SLOTS` (the
 /// dispute waits seal empty slots well past the game's depth).
 const REGISTRY_SLOTS: u32 = 48;
@@ -143,9 +147,9 @@ impl PosGame {
     fn open(value: Amount) -> Result<PosGame> {
         let rt = Regtest::start()?;
         let members = members();
-        let (gen, _t0) = lngap_pos::genesis(&members[0].attester);
+        let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members[0], 0);
         let gen_digest = gen.header.digest();
-        let mut miner = PosMiner::new(members, gen_digest, 0);
+        let mut miner = PosMiner::new(SEED, members, gen_digest, 0);
         let registry = miner.registry(REGISTRY_SLOTS)?;
         ensure!(registry.threshold == T && registry.n() == K, "the PoC threshold is the majority of the roster");
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("ps/user"));
@@ -235,19 +239,16 @@ impl PosGame {
     /// the mover's pinned key.
     fn seal(&mut self, entry: Option<(SlotEntry, Board)>) -> Result<()> {
         let slot = self.next_slot;
-        let proposer = self.miner.proposer_at(slot);
-        if self.miner.is_silent(proposer) {
-            // the strict round robin's accepted limitation (D51): no
-            // backup proposer — the slot gets no block, the entry is lost
+        let Some(proposer) = self.miner.default_sealer(slot) else {
             self.next_slot += 1;
             let dropped = if entry.is_some() { "; the mover's entry is NOT sealed" } else { "" };
-            self.say(format!("slot {slot}: its scheduled proposer, member {proposer}, is SILENT — no block{dropped}"));
+            self.say(format!("slot {slot}: every member is SILENT — no block{dropped}"));
             return Ok(());
-        }
+        };
         if let Some((e, _)) = &entry {
             self.miner.submit(e.encode());
         }
-        let (block, _table) = self.miner.seal_next(slot).map_err(|e| anyhow::anyhow!(e))?;
+        let (block, _table) = self.miner.seal_by(slot, proposer).map_err(|e| anyhow::anyhow!(e))?;
         self.client.verify_and_append(&block, &self.registry).map_err(|e| anyhow::anyhow!(e))?;
         self.next_slot += 1;
         if let Some((e, new)) = entry {
@@ -275,22 +276,6 @@ impl PosGame {
         let entry = SlotEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, mv, state: lngap_lamport::bits_to_uint(&state_bits(&new)), sigs: sig.hashes.clone() };
         self.seal(Some((entry, new.clone())))?;
         Ok((new, sig))
-    }
-
-    /// The mover at the coming slot plays `mv` legally, signed for real,
-    /// but the slot's scheduled proposer is SILENT: nothing is sealed (the
-    /// strict round robin has no backup, D51), the board does not advance.
-    fn play_unsealed(&mut self, mv: u8) -> Result<()> {
-        let slot = self.next_slot;
-        ensure!(self.miner.is_silent(self.miner.proposer_at(slot)), "slot {slot}'s proposer is not silent");
-        self.tick()?;
-        let mover = instance::mover_at(slot);
-        let new = TicTacToe.transition(&self.board, &mv, mover).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let sig = self.ks(mover).sign_wots(&instance::state_label(CONTRACT_ID, 1, slot), &entry_msg(lngap_lamport::bits_to_uint(&state_bits(&new))))?;
-        let entry = SlotEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, mv, state: lngap_lamport::bits_to_uint(&state_bits(&new)), sigs: sig.hashes.clone() };
-        self.seal(Some((entry, new)))?;
-        ensure!(self.sealed.get(&slot).is_none() && self.depth < slot, "nothing sealed, the board unchanged");
-        Ok(())
     }
 
     /// One empty venue slot (the mover stalls, or the game is over).
@@ -391,12 +376,13 @@ impl PosGame {
         Ok(())
     }
 
-    /// The colluding proposer seals `mv` for the mover of `slot` (sealed
-    /// empty on time, its deadline passed), late: a second header at that
-    /// slot, attested under its table, the mover's real signature on the
-    /// entry (D50's late-attestation fixture). The client names it an
-    /// equivocation against the on-time empty block; the mover's
-    /// refutation reads it.
+    /// The hub's member seals `mv` for the mover of `slot` (sealed empty
+    /// on time, its deadline passed), late: a second header at that slot,
+    /// attested under the shared table and tagged with member 1's
+    /// proposer scalar (D53), the mover's real signature on the entry
+    /// (D50's late-attestation fixture). The client names it an
+    /// equivocation by member 1 against the on-time empty block; the
+    /// mover's refutation reads it and names member 1 in its witness.
     fn play_late(&mut self, slot: u32, mv: u8) -> Result<(Board, WotsSig)> {
         ensure!(slot < self.next_slot && self.rt.height()? > self.btc_open + slot, "slot {slot}'s deadline has passed");
         ensure!(self.sealed[&slot].entry.is_empty(), "the on-time block at slot {slot} was empty");
@@ -406,14 +392,14 @@ impl PosGame {
         let entry = SlotEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, mv, state: lngap_lamport::bits_to_uint(&state_bits(&new)), sigs: sig.hashes.clone() }.encode();
         let parent = self.sealed[&slot].header.prev();
         let header = Header::new(&parent, &entry_root(&entry), &entry_head(&entry), slot);
-        let attestation = self.miner.attester_at(slot).attest(self.registry.table(slot), header.as_bytes());
-        let late = SealedBlock { header, entry, attestation };
+        let attestation = self.miner.content().attest(self.registry.table(slot), header.as_bytes());
+        let late = SealedBlock { header, entry, attestation, proposer: HUB_MEMBER, proposer_secret: self.miner.proposer_secret(HUB_MEMBER, slot) };
         let member = match self.client.observe(&late, &self.registry) {
             Ok(lngap_pos::Observation::Equivocation(e)) => e.member,
             other => anyhow::bail!("the late block at slot {slot} is a second attestation of the slot: {other:?}"),
         };
         let b = new.render();
-        self.say(format!("slot {slot} sealed AGAIN, LATE, by member {member} with {mover}'s move {mv} ({b}) (the proposer colludes): the client names member {member}'s equivocation against its on-time empty block"));
+        self.say(format!("slot {slot} sealed AGAIN, LATE, by member {member} with {mover}'s move {mv} ({b}) (the hub's member colludes): the client names member {member}'s equivocation against the on-time empty block"));
         self.sealed.insert(slot, late);
         self.board = new.clone();
         self.depth = slot;
@@ -442,8 +428,8 @@ impl PosGame {
         let entry = SlotEntry { game_id: GAME_ID, depth: d as u8, mover: mover.idx() as u8, mv, state: lngap_lamport::bits_to_uint(&state_bits(&new)), sigs: sig.hashes.clone() }.encode();
         let parent = self.sealed[&(d - 1)].header.digest();
         let header = Header::new(&parent, &entry_root(&entry), &entry_head(&entry), d);
-        let attestation = self.miner.attester_at(d).attest(self.registry.table(d), header.as_bytes());
-        let fork = SealedBlock { header, entry, attestation };
+        let attestation = self.miner.content().attest(self.registry.table(d), header.as_bytes());
+        let fork = SealedBlock { header, entry, attestation, proposer: HUB_MEMBER, proposer_secret: self.miner.proposer_secret(HUB_MEMBER, d) };
         let member = match self.client.observe(&fork, &self.registry) {
             Ok(lngap_pos::Observation::Equivocation(e)) => e.member,
             other => anyhow::bail!("the second sealed block at slot {d} is the equivocation: {other:?}"),
@@ -524,7 +510,10 @@ impl PosGame {
         };
         let sigs_new = sign_at(&self.sealed[&d]);
         let sigs_prev = sign_at(&self.sealed[&(d - 1)]);
-        let w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r, &prev_r]);
+        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r, &prev_r]);
+        // the proposer fragment (D53): the block's proposer scalar signs too, naming the member
+        let blk = &self.sealed[&d];
+        w.extend(proposer_witness(sign_tx(&Keypair::from_secret_key(SECP256K1, &blk.proposer_secret), &tx, &prev, &leaf), blk.proposer));
         Ok((w, pair_sig))
     }
 
@@ -1011,21 +1000,22 @@ pub const PS12: Scenario = Scenario {
 
 pub const PS13: Scenario = Scenario {
     id: "PS13",
-    title: "PoS graph: the scheduled proposer is SILENT — the mover loses by absence (D51's accepted limitation)",
-    expected: "member 2, slot 2's proposer in the strict round robin, is silent: the hub's O@1 is signed and submitted but nothing seals it (no backup proposer); at the deadline the other four members flag slot 2 empty; the user's absence claim has no refutation to meet (no attestation of slot 2 exists) and the timeout split pays: two transactions; the silent member is named in the record, an omission the venue prices but cannot prove",
+    title: "PoS graph: a silent member does not stall the mover — another member seals the slot (D53)",
+    expected: "member 2 is silent; the hub's O@1 at slot 2 is sealed by member 3 (any member seals any slot; the default sealer skips the silent one); the user's spurious absence claim is refuted with member 3's block — the refutation's witness names member 3 through the proposer fragment — no disprove fires, and the hub's self-checking split pays HubWins: three transactions; the silent member cost nothing",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
-        g.play(4)?; // X@4, slot 1 by member 1
-        g.miner.silence(2); // slot 2's proposer goes silent
-        g.play_unsealed(1)?; // the hub's O@1 finds no proposer
+        g.play(4)?; // X@4
+        g.miner.silence(2); // member 2 goes silent
+        g.play(1)?; // O@1: sealed by member 3, not member 2
+        ensure!(g.sealed[&2].proposer == 3, "the default sealer skipped the silent member");
         g.wait_to(g.mature_at(2))?;
-        ensure!(g.flags[&2].iter().filter(|f| f.is_some()).count() == 4, "the four live members flag slot 2");
-        let (h, _, _) = g.claim_absent(2)?;
-        g.say("the hub cannot refute: no attestation of slot 2 exists — member 2 sealed nothing, and the strict round robin has no backup (D51)".to_string());
-        g.wait_to(h + u32::from(g.params.delta) + 1)?;
-        g.split(2, "absent_2", 0, None)?;
-        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/split_UserWins".to_string()], "{:?}", roles(&g));
-        ensure!(g.balances() == [sat(POT - 2_000), sat(0)], "{:?}", g.balances());
+        g.claim_absent(2)?; // the user's spurious claim
+        let (psig, h, _, _) = g.refute(2)?;
+        ensure!(g.disproves_firing(2).is_empty(), "the parked move is legal");
+        g.wait_to(h + u32::from(g.params.delta) + u32::from(g.params.delta_prime) + 1)?;
+        g.split(2, "absent_2/refuted", 1, Some(&psig))?;
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "absent_2/refuted/split_HubWins".to_string()], "{:?}", roles(&g));
+        ensure!(g.balances() == [sat(0), sat(POT - 3_000)], "{:?}", g.balances());
         Ok(report(&g, &PS13))
     },
 };
