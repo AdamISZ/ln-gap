@@ -1974,6 +1974,41 @@ data structure carries them); the collided-slot rule for two CONTENT
 attestations at one slot (D47's other open question) is untouched — the
 flags decide timeliness, not which of two heads is canonical.
 
+**Amended 2026-09-26: the threshold is a simple majority.** The flag is
+one-sided: `t` flags kill a refutation, and the ABSENCE of `t` flags is
+read as "filled on time", so silence votes for presence without anyone
+signing. The two lies therefore cost different numbers of members —
+false emptiness `t` flaggers (named in the witness); a late attestation
+standing, the slot's proposer plus `k − t + 1` validators who merely
+abstain (an omission, unattributable). They balance at `t = (k + 1) / 2`
+(`t = 8` at `k = 15`), and no `t` makes both cost more than half: with a
+single quorum deciding a binary question where one side is a vote and
+the other is silence, a bare majority is the ceiling. Going past it needs
+presence to be a positive statement too (a second per-slot bit, "filled
+at the deadline", `t` of which a refutation must carry; both bits at one
+slot = self-contradiction, named) plus a THIRD outcome for a slot that
+reaches neither threshold, which turns the omission attack from theft
+into griefing — post-PoC. Decided: the PoC pins `t = ⌈(k + 1) / 2⌉`; the
+harness's `T = 10` of 15 is to be updated to 8 in the next patch. The
+threat model stated plainly: both lies cost about half the notary, and
+silence favours the mover.
+
+Same date, the other open points: the early-flag / filled-slot client
+rule is DROPPED as a mechanism — a flag has no timestamp, so "early" is
+one client's observation, and a flag against a filled slot is the same
+undecidable two-object symmetry as D47's two attestations; short of
+anchoring every judgment about time is a client's view, which is D48's
+model (clients choose their quorum; a client that distrusts a validator's
+flag holds it against them on whatever basis it likes). The
+hash-preimage flag stays on the record as an alternative (~30 B of script
+and 20-byte reveals per validator against 34 B and 64-byte signatures;
+curve-free; same soundness, since a copied reveal gains nothing without
+the challenger's signature) — EC is kept for uniformity with the content
+attestation. Registry compression is post-PoC (any public derivation of
+the per-slot point from a long-term key leaks that key on reveal; the
+points must be fresh per slot, so only a commitment-plus-in-script-proof
+form is possible, and the leaf embeds the constants regardless).
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
