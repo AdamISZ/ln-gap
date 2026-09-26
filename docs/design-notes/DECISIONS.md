@@ -2262,6 +2262,87 @@ plus its own proposer scalar, the claim mines, and the user names member
 1 against the venue's record. Every suite green: PS1-PS13, PC1-PC14,
 FL1-FL4, the pos crate, the venue world.
 
+## D54. The venue keeps wall-clock time; only the claim window reads Bitcoin's clock
+
+Date: 2026-09-26. Context: the clock discussion following D53 (what
+the venue borrows from Bitcoin: the clock, the order between slots,
+finality through dispute windows); the decision to run the PoC's final
+cut on signet, with real block arrival, not only on regtest. DESIGN,
+agreed; to be built in the signet cut.
+
+**The problem.** Slots have been Bitcoin block intervals: slot `d` seals
+at height `b_0 + d`, its deadline is a height, the harness seals one
+venue block per Bitcoin block. Theoretically tidy — the venue's deadline
+and the contract's claim window are the same number — and practically
+wrong: block arrival is exponential, so "publish within two blocks" is
+ninety minutes one time and a few seconds the next. A game that moves
+every thirty seconds cannot be timed by heights at all.
+
+**Where each clock is actually read.** Three places, and only one is
+latency-sensitive:
+- the mover's deadline for slot `d` is read by the MEMBERS alone, when
+  they decide whether to flag; no script sees it (`not_timely` counts
+  signatures, D50);
+- the claim's earliest validity is the CLTV of `absent_d` (and of the
+  exhibits, and through them the counter's dueness, D44), and it must
+  fall after the mover's deadline so an honest publication is attested
+  before a claim is possible;
+- the dispute windows `δ`, `δ'`, `Δ` are relative locks on the slow path,
+  where block granularity only delays a resolution.
+
+**Decision.** Slots are WALL-CLOCK intervals: the instance carries a
+start time `t_0` and a slot length `ℓ` (seconds; a venue parameter),
+slot `d`'s deadline is `T_d = t_0 + d·ℓ`, and members judge "empty by
+`T_d`" against their own clocks. The flag's semantics name a time
+instead of a height; nothing else about it changes. Honest members must
+agree on the deadline to within their clock skew — NTP-level, seconds —
+so the honest-partition residual of D53 becomes skew times publication
+rate, negligible. The mover's window is exactly `ℓ`, never ninety
+minutes and never three seconds. Slot numbering and the registry stay
+indexed by `d`; the venue's cadence decouples from block arrival, which
+is the point of having a venue.
+
+The claim window couples to it through Bitcoin's TIME locks: `absent_d`
+carries an absolute CLTV against median-time-past, `T_d + m`, in place
+of the height `b_0 + d + 1 + g`. The margin `m` covers two things: MTP
+lags real time by roughly an hour (the median of the last eleven
+timestamps), and a miner may set a timestamp up to two hours ahead of
+network time, so a hostile miner can bring MTP to `T_d` while real time
+is still short of it. `m` of two hours plus skew closes the hostile
+model; a smaller `m` is fine under a weaker one, and it is a parameter.
+An early claim is not itself harmful — the mover refutes inside `δ` —
+so the invariant is only that `T_d` precedes the claim's confirmation
+plus `δ`, which `m` plus `δ` guarantee. The margin sits on the slow
+path, as the old grace period did. Relative windows stay in blocks.
+
+**What changes in the code** (the signet cut). `PosInstance` gains
+`t_0` and `ℓ` and `claim_from(d)` returns a time; `lngap_btc::tx::Timelock`
+gains an absolute-time CLTV (nLockTime ≥ 500,000,000; `check_timelock`,
+`build_spend` and `PresignedTx::new` follow); `absent_leaf`,
+`exhibit_leaf` and the counter's dueness use it; `PosMiner::flag`
+takes the members' `now`; the harness worlds tick on time, with
+regtest block timestamps driven by `setmocktime` so MTP advances as a
+test intends, and the venue seals several slots per Bitcoin block or
+none. Flags, proposer bits, the refutation, the disprove family, the
+fee lock and every relative window are untouched.
+
+**The signet cut.** The PoC is to be runnable on signet — chess, or
+another game — so that real-time behaviour is seen with normal block
+delay: a game moving every `ℓ` seconds on the venue while Bitcoin
+blocks arrive every ten minutes or so, and a dispute taking its hours
+of `δ` blocks when one happens. Beyond the clock this needs: a `Chain`
+implementation over a signet node (RPC, already a dependency) with
+polling instead of `generate`; wallet funding from a faucet; fee
+estimation for the large refutations (~36 kvB, standard, cheap on
+signet) rather than the fixed regtest placeholder; and a driver that
+advances the worlds on block arrival and on the wall clock rather than
+by mining. None of it touches the graph.
+
+**What is given up.** The identity of the venue's deadline with the
+contract's window. The venue's clock is now the members' shared wall
+clock, and Bitcoin's role narrows to what only it can do: bound when a
+claim may be made, order the slow path, and settle it.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
