@@ -138,7 +138,7 @@ pub fn state_label(id: u32, seq: u64, d: u32) -> String {
 
 /// What one side contributes at one depth (pubs only; the secrets stay in
 /// its key store).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PosKeyOffer {
     pub refute: Option<WotsPublic>,
     pub mover_code: Option<PublicKey>,

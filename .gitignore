@@ -4,3 +4,6 @@
 /regtest-data/
 /tools/explorer/node_modules/
 /tools/scriptgen/target/
+
+# the interactive chess-on-the-venue game's runtime directory (the node, the venue's blocks, the players' offers)
+/chess-venue/

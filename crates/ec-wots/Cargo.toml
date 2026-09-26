@@ -8,6 +8,7 @@ license.workspace = true
 bitcoin.workspace = true
 secp256k1.workspace = true
 anyhow.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 lngap-btc = { path = "../btc" }

@@ -15,7 +15,7 @@
 //! [`lock_secret`] is the attestation's scalar sum plus it.
 
 use bitcoin::key::Parity;
-use bitcoin::secp256k1::{PublicKey, Scalar, SecretKey, SECP256K1};
+use bitcoin::secp256k1::{PublicKey, Scalar, SecretKey};
 use bitcoin::Amount;
 use lngap_channel::{FeeLock, Role};
 use lngap_ec_wots::{Attester, EpochTable};
@@ -89,6 +89,7 @@ pub fn fee_lock(id: u32, payer: Role, value: Amount, registry: &Registry, slot: 
 mod tests {
     use super::*;
     use crate::{genesis, Member, PosMiner};
+    use bitcoin::secp256k1::SECP256K1;
     use lngap_factchain::entry_head;
 
     /// The sealed block's scalar sum plus its proposer reveal opens the

@@ -52,7 +52,7 @@ pub struct Attester {
 /// point for "chunk j has value v". One message per epoch, exactly the WOTS
 /// one-time discipline; a second attestation in the same epoch is an
 /// equivocation (see `slash_leaf`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EpochTable {
     pub index: u64,
     pub chunks: usize,

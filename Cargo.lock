@@ -372,6 +372,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-chess-venue"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-chess",
+ "lngap-chess-fc",
+ "lngap-ec-wots",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-pos",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lngap-contract"
 version = "0.1.0"
 dependencies = [
@@ -399,6 +418,7 @@ dependencies = [
  "lngap-script32",
  "rand",
  "secp256k1",
+ "serde",
 ]
 
 [[package]]
@@ -544,6 +564,7 @@ dependencies = [
  "lngap-n4bit",
  "lngap-script32",
  "lngap-tictactoe",
+ "serde",
 ]
 
 [[package]]

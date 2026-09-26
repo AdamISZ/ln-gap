@@ -1,0 +1,24 @@
+[package]
+name = "lngap-chess-venue"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lngap-chess-venue"
+path = "src/main.rs"
+
+[dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-channel = { path = "../../channel" }
+lngap-lamport = { path = "../../lamport" }
+lngap-ec-wots = { path = "../../ec-wots" }
+lngap-factchain = { path = "../factchain" }
+lngap-chess = { path = "../chess" }
+lngap-chess-fc = { path = "../chess-fc" }
+lngap-pos = { path = "../pos" }
+bitcoin.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true

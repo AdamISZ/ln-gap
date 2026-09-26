@@ -29,12 +29,12 @@
 //! members). A silent member costs nothing: inclusion liveness is 1-of-n
 //! per slot.
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{ensure, Result};
 use bitcoin::hashes::{sha256, Hash, HashEngine};
 use bitcoin::key::{Keypair, XOnlyPublicKey};
 use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{Message, SecretKey, SECP256K1};
-use lngap_ec_wots::{Attester, EpochTable, FlagKeys};
+use lngap_ec_wots::{EpochTable, FlagKeys};
 
 use crate::HEADER_CHUNKS;
 
@@ -129,7 +129,7 @@ impl MemberPublic {
 }
 
 /// The member keys.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Roster {
     pub members: Vec<XOnlyPublicKey>,
 }
@@ -157,7 +157,7 @@ impl Roster {
 
 /// One slot's registry entry: the shared content table, and every
 /// member's proposer and flag points for it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SlotEntry {
     pub table: EpochTable,
     pub proposers: Vec<XOnlyPublicKey>,
@@ -168,7 +168,7 @@ pub struct SlotEntry {
 /// against: per slot the shared content table (co-signed by every
 /// member), the proposer points and the flag points of every member;
 /// plus the flag threshold.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
     pub roster: Roster,
     pub threshold: u32,
@@ -235,6 +235,7 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lngap_ec_wots::Attester;
 
     fn members(n: u8) -> Vec<Member> {
         (0..n).map(|i| Member::new([0x30 + i; 32])).collect()

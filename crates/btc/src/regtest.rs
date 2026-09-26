@@ -17,7 +17,8 @@ use bitcoincore_rpc::{Auth, Client, RpcApi};
 use tracing::{debug, info};
 
 pub struct Regtest {
-    child: Child,
+    /// `None` when attached to a node someone else runs ([`Regtest::attach`]).
+    child: Option<Child>,
     pub rpc: Client,
     datadir: PathBuf,
     keep: bool,
@@ -71,9 +72,46 @@ impl Regtest {
     }
 
     pub fn start_with(initial_blocks: u64) -> Result<Regtest> {
+        Regtest::start_inner(initial_blocks, None)
+    }
+
+    /// Start a node on a FIXED datadir (wiped first, kept afterwards): the
+    /// interactive demo's node, which other processes [`attach`] to. The
+    /// RPC port is recorded in `<datadir>/rpcport`.
+    ///
+    /// [`attach`]: Regtest::attach
+    pub fn start_in(datadir: PathBuf, initial_blocks: u64) -> Result<Regtest> {
+        Regtest::start_inner(initial_blocks, Some(datadir))
+    }
+
+    /// Attach to a running node started with [`Regtest::start_in`] (or by
+    /// `tools/explorer.sh`): the RPC port from `<datadir>/rpcport`, the
+    /// cookie from the datadir, the `harness` wallet. Dropping an attached
+    /// handle does not stop the node.
+    pub fn attach(datadir: &std::path::Path) -> Result<Regtest> {
+        let port = std::fs::read_to_string(datadir.join("rpcport")).with_context(|| format!("no rpcport file in {}", datadir.display()))?;
+        let rpc_port: u16 = port.trim().parse().context("rpcport")?;
+        let cookie = datadir.join("regtest").join(".cookie");
+        let url = format!("http://127.0.0.1:{rpc_port}");
+        let rpc = Client::new(&format!("{url}/wallet/harness"), Auth::CookieFile(cookie))?;
+        rpc.get_block_count().with_context(|| format!("no node answering on port {rpc_port}"))?;
+        let mine_to = rpc
+            .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32m))?
+            .require_network(Network::Regtest)?;
+        Ok(Regtest { child: None, rpc, datadir: datadir.to_path_buf(), keep: true, _tmp: None, mine_to })
+    }
+
+    fn start_inner(initial_blocks: u64, fixed: Option<PathBuf>) -> Result<Regtest> {
         let bin = std::env::var("LNGAP_BITCOIND").unwrap_or_else(|_| "bitcoind".into());
-        let keep = std::env::var("LNGAP_KEEP_DATADIR").map(|v| v == "1").unwrap_or(false);
-        let (datadir, tmp) = if keep {
+        let keep = fixed.is_some() || std::env::var("LNGAP_KEEP_DATADIR").map(|v| v == "1").unwrap_or(false);
+        let (datadir, tmp) = if let Some(d) = fixed {
+            stop_node_serving(&d);
+            if d.exists() {
+                std::fs::remove_dir_all(&d).with_context(|| format!("wiping {}", d.display()))?;
+            }
+            std::fs::create_dir_all(&d)?;
+            (d, None)
+        } else if keep {
             let label = std::env::var("LNGAP_RUN_LABEL").unwrap_or_default();
             let base = std::env::current_dir()?.join("regtest-data");
             let d = if label.is_empty() {
@@ -119,6 +157,9 @@ impl Regtest {
             .spawn()
             .with_context(|| format!("spawning {bin}"))?;
         info!(datadir = %datadir.display(), rpc_port, "started bitcoind");
+        if keep {
+            std::fs::write(datadir.join("rpcport"), rpc_port.to_string())?;
+        }
 
         let cookie = datadir.join("regtest").join(".cookie");
         let url = format!("http://127.0.0.1:{rpc_port}");
@@ -141,7 +182,7 @@ impl Regtest {
         let mine_to = rpc
             .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32m))?
             .require_network(Network::Regtest)?;
-        let rt = Regtest { child, rpc, datadir, keep, _tmp: tmp, mine_to };
+        let rt = Regtest { child: Some(child), rpc, datadir, keep, _tmp: tmp, mine_to };
         rt.mine(initial_blocks)?;
         Ok(rt)
     }
@@ -273,16 +314,17 @@ impl Regtest {
 
 impl Drop for Regtest {
     fn drop(&mut self) {
+        let Some(child) = self.child.as_mut() else { return };
         let _ = self.rpc.stop();
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
-            if let Ok(Some(_)) = self.child.try_wait() {
+            if let Ok(Some(_)) = child.try_wait() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = child.kill();
+        let _ = child.wait();
         if self.keep {
             info!(datadir = %self.datadir.display(), "kept regtest datadir");
         }
