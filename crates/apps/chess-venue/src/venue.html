@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LN-GAP venue</title>
+<style>
+body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f4f1ea;color:#1e1e1e}
+header{padding:10px 16px;background:#2b2b2b;color:#eee;display:flex;gap:18px;align-items:baseline}header b{font-size:16px}
+main{padding:14px;display:grid;grid-template-columns:1fr 340px;gap:14px}
+.panel{background:#fff;border:1px solid #ddd;border-radius:6px;padding:10px 12px;margin-bottom:12px}
+.panel h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#777}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:3px 6px;border-bottom:1px solid #eee;text-align:left}
+tr.late td{background:#fff3e0}
+button{font:inherit;padding:5px 9px;border:1px solid #999;border-radius:4px;background:#fafafa;cursor:pointer;margin:2px 4px 2px 0}
+input,select{font:inherit;padding:4px 6px}
+.hint{color:#777;font-size:12px}#out{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap}
+.m{display:inline-block;padding:2px 8px;border-radius:10px;background:#e0f2e9;margin:2px}.m.silent{background:#ffe0e0;text-decoration:line-through}
+</style></head><body>
+<header><b>the venue</b><span id="clock"></span><span id="tick"></span><a href="/dashboard" style="color:#9cf;margin-left:auto">dashboard</a></header>
+<main>
+<div class="panel"><h3>Slots</h3><div class="hint" id="hint"></div><table id="slots"><thead><tr><th>slot</th><th>height</th><th>sealed by</th><th>entry</th><th>flags</th></tr></thead><tbody></tbody></table></div>
+<div>
+ <div class="panel"><h3>Members</h3><div id="members"></div><div class="hint">one shared content key; any member seals any slot (the default sealer prefers slot mod n and skips silent members); flags need <span id="thr"></span></div></div>
+ <div class="panel"><h3>Misbehave</h3>
+  <div>member <input id="mem" size="2" value="2"> <button onclick="cmd('silence '+v('mem'))">silence</button> <button onclick="cmd('wake '+v('mem'))">wake</button></div>
+  <div style="margin-top:6px">slot <input id="slot" size="3"> by member <input id="by" size="2" value="1"> <button onclick="cmd('late '+v('slot')+' '+v('by'))">seal it LATE with the queued entry</button></div>
+  <div class="hint">a late block for a past empty slot: the mover may refute with it; the flags kill the refutation (D50)</div>
+  <div style="margin-top:6px"><button onclick="cmd('mine')">mine a block now</button></div>
+  <div id="out"></div>
+ </div>
+ <div class="panel"><h3>Inbox</h3><div id="inbox" class="hint"></div></div>
+</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);const v=id=>$(id).value.trim();
+async function cmd(c){const r=await (await fetch("/cmd",{method:"POST",body:JSON.stringify({cmd:c})})).json();$("out").textContent=(r.ok?"":"! ")+r.output;poll()}
+async function poll(){let s;try{s=await (await fetch("/state")).json()}catch(e){return}
+ $("clock").textContent="height "+s.height+" · next slot "+s.next_slot+" (b0 = "+s.b0+")";$("tick").textContent=s.ready?("next block in "+s.next_tick_secs+"s"):"waiting for the players";
+ $("hint").textContent=s.n+" members, threshold "+s.threshold;$("thr").textContent=s.threshold+" of "+s.n;
+ const M=$("members");M.innerHTML="";for(let i=0;i<s.n;i++){const d=document.createElement("span");d.className="m"+(s.silent.includes(i)?" silent":"");d.textContent="member "+i;M.appendChild(d)}
+ const T=$("slots").querySelector("tbody");T.innerHTML="";for(const b of s.blocks){const tr=document.createElement("tr");tr.className=b.late?"late":"";tr.innerHTML=`<td>${b.slot}</td><td>${b.height}</td><td>member ${b.proposer}${b.late?" (LATE)":""}</td><td>${b.entry}</td><td>${b.flags==null?"":b.flags+" of "+s.n}</td>`;T.appendChild(tr)}
+ $("inbox").textContent=s.inbox.length?("queued for the next slot: "+s.inbox.join(", ")):"nothing queued";
+}
+poll();setInterval(poll,1000);
+</script></body></html>

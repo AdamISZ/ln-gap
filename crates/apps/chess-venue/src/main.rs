@@ -5,10 +5,16 @@
 //! Three processes share one directory (`--dir`, default `./chess-venue`):
 //!
 //! ```text
-//!   lngap-chess-venue venue [--dir D] [--block-secs 30]   # the node, the roster, the clock
-//!   lngap-chess-venue play user [--dir D]                 # white
-//!   lngap-chess-venue play hub  [--dir D]                 # black
+//!   lngap-chess-venue venue [--dir D] [--block-secs 30] [--web 8080]   # the node, the roster, the clock
+//!   lngap-chess-venue play user [--dir D] [--web 8081]                 # white
+//!   lngap-chess-venue play hub  [--dir D] [--web 8082]                 # black
 //! ```
+//!
+//! With `--web` a process serves a page on that port instead of (the
+//! players) or beside (the venue) its terminal loop: the player's page
+//! has the board, the cheat menu, the dispute buttons and the venue and
+//! chain views; the venue's page has the slot timeline and the
+//! misbehaviour controls, and `/dashboard` frames all three.
 //!
 //! The venue starts a regtest node (datadir `D/node`, kept), mines one
 //! block every `--block-secs` seconds, seals one venue slot per block
@@ -23,6 +29,7 @@
 mod player;
 mod store;
 mod venue;
+mod web;
 
 use std::path::PathBuf;
 
@@ -30,7 +37,7 @@ use anyhow::{bail, Result};
 use lngap_channel::Role;
 
 fn usage() -> ! {
-    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M]\n  lngap-chess-venue play user|hub [--dir D] [--max-depth M]");
+    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--web PORT]\n  lngap-chess-venue play user|hub [--dir D] [--max-depth M] [--web PORT]");
     std::process::exit(2)
 }
 
@@ -39,6 +46,7 @@ fn main() -> Result<()> {
     let mut dir = PathBuf::from("chess-venue");
     let mut block_secs = 30u64;
     let mut max_depth = 20u32;
+    let mut web: Option<u16> = None;
     let mut positional = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -55,6 +63,10 @@ fn main() -> Result<()> {
                 max_depth = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or_else(|| usage());
                 i += 2;
             }
+            "--web" => {
+                web = Some(args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or_else(|| usage()));
+                i += 2;
+            }
             a if a.starts_with("--") => usage(),
             a => {
                 positional.push(a.to_string());
@@ -63,14 +75,14 @@ fn main() -> Result<()> {
         }
     }
     match positional.first().map(String::as_str) {
-        Some("venue") => venue::run(dir, block_secs, max_depth),
+        Some("venue") => venue::run(dir, block_secs, max_depth, web),
         Some("play") => {
             let role = match positional.get(1).map(String::as_str) {
                 Some("user") | Some("white") => Role::User,
                 Some("hub") | Some("black") => Role::Hub,
                 _ => usage(),
             };
-            player::run(dir, role, max_depth)
+            player::run(dir, role, max_depth, web)
         }
         Some(other) => bail!("unknown command {other}"),
         None => usage(),

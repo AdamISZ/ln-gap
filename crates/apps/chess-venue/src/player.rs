@@ -33,6 +33,7 @@ use lngap_pos::ttt::checked_split_witness;
 use lngap_pos::{Registry, SealedBlock};
 
 use crate::store::*;
+use serde::Serialize;
 
 /// An entry's authorship message (D43): the 40 state bytes, then the
 /// move's two bytes (low first).
@@ -92,6 +93,8 @@ pub struct Player {
     /// Slots that sealed an entry that is not a legal continuation (the
     /// disprove family's business), by slot: what was wrong.
     bad_slots: BTreeMap<u32, String>,
+    /// Slots whose late block (the venue's misbehaviour) has been seen.
+    late_slots: std::collections::BTreeSet<u32>,
     // ----- the chain as seen -----
     scanned: u32,
     live: BTreeMap<String, Live>,
@@ -103,6 +106,14 @@ pub struct Player {
 }
 
 impl Player {
+    pub fn role(&self) -> Role {
+        self.me
+    }
+
+    pub fn publish_web_port(&self, port: u16) -> Result<()> {
+        self.store.write(&Store::web(self.me), &serde_json::json!({ "port": port }))
+    }
+
     fn say(&mut self, s: String) {
         println!("  {s}");
         self.log.push(s);
@@ -235,6 +246,7 @@ impl Player {
             state: ChessState::initial(),
             depth: 0,
             bad_slots: BTreeMap::new(),
+            late_slots: Default::default(),
             live: BTreeMap::new(),
             spent: HashMap::new(),
             reveals: BTreeMap::new(),
@@ -246,7 +258,7 @@ impl Player {
 
     /// Read new venue blocks and flags, scan new Bitcoin blocks; print
     /// what changed.
-    fn sync(&mut self) -> Result<()> {
+    pub fn sync(&mut self) -> Result<()> {
         // venue blocks
         let mut slot = self.blocks.keys().next_back().map(|s| s + 1).unwrap_or(1);
         while let Some(b) = self.store.read::<BlockJson>(&Store::block(slot))? {
@@ -254,6 +266,20 @@ impl Player {
             self.on_block(slot, &block)?;
             self.blocks.insert(slot, block);
             slot += 1;
+        }
+        // late blocks (the venue's misbehaviour control): a second block
+        // for an empty slot, replacing it in the mover's view
+        for s in 1..slot {
+            if self.late_slots.contains(&s) {
+                continue;
+            }
+            if let Some(b) = self.store.read::<BlockJson>(&Store::late_block(s))? {
+                let block = b.to_block()?;
+                self.late_slots.insert(s);
+                self.say(format!("venue: a LATE block for slot {s} by member {}: the client names member {}'s equivocation against the on-time empty block; the mover may refute with it, the claimant kills it with the flags", block.proposer, block.proposer));
+                self.on_block(s, &block)?;
+                self.blocks.insert(s, block);
+            }
         }
         // flags
         for s in 1..slot {
@@ -431,56 +457,194 @@ impl Player {
             .collect()
     }
 
-    fn status(&mut self) -> Result<()> {
+    fn mempool_labels(&self) -> Vec<String> {
+        let Ok(pool) = self.rt.mempool() else { return vec![] };
+        self.graph.iter().filter(|p| pool.contains(&p.txid())).map(|p| p.label.clone()).collect()
+    }
+
+    fn status(&mut self) -> Result<String> {
+        let mut out = String::new();
         let h = self.height();
         let slot = self.next_slot();
-        println!("--- {} | height {h} | next venue slot {slot} | game depth {} | side to move: {} ({}) | venue {} members, threshold {}", self.me, self.depth, if self.state.pos.side == lngap_chess::Colour::White { "white" } else { "black" }, instance::mover_at(self.depth + 1), self.registry.n(), self.registry.threshold);
-        println!("{}", self.state.pos);
+        out += &format!("--- {} | height {h} | next venue slot {slot} | game depth {} | side to move: {} ({}) | venue {} members, threshold {}\n", self.me, self.depth, if self.state.pos.side == lngap_chess::Colour::White { "white" } else { "black" }, instance::mover_at(self.depth + 1), self.registry.n(), self.registry.threshold);
+        out += &format!("{}\n", self.state.pos);
         if let Some(t) = lngap_chess::terminal(&self.state.pos) {
-            println!("    terminal: {t:?}");
+            out += &format!("    terminal: {t:?}\n");
         }
-        // graph transactions waiting in the mempool (confirm at the next tick)
-        if let Ok(pool) = self.rt.mempool() {
-            for p in &self.graph {
-                if pool.contains(&p.txid()) {
-                    println!("    in the mempool, confirms at the next block: `{}`", p.label);
-                }
-            }
+        for l in self.mempool_labels() {
+            out += &format!("    in the mempool, confirms at the next block: `{l}`\n");
         }
         for (s, why) in &self.bad_slots {
-            println!("    slot {s}: not a legal move ({why})");
+            out += &format!("    slot {s}: not a legal move ({why})\n");
         }
         for (s, f) in &self.flags {
-            println!("    slot {s}: flagged empty by {} of {K}", f.iter().filter(|x| x.is_some()).count());
+            out += &format!("    slot {s}: flagged empty by {} of {K}\n", f.iter().filter(|x| x.is_some()).count());
         }
-        // what is due
-        let mover = instance::mover_at(self.depth + 1);
-        let claimed = self.live.contains_key(&format!("absent_{}", self.depth + 1));
-        if self.blocks.contains_key(&(self.depth + 1)) && self.depth + 1 < slot && mover != self.me && !claimed {
-            let m = self.mature_at(self.depth + 1);
-            println!("    {} did not move at slot {}: you may `claim` from height {m}{}", mover, self.depth + 1, if h < m { format!(" ({} blocks to go)", m - h) } else { String::new() });
+        for a in self.actions() {
+            if a.enabled {
+                out += &format!("    you may `{}`{}\n", a.name, if a.hint.is_empty() { String::new() } else { format!(": {}", a.hint) });
+            } else if !a.hint.is_empty() {
+                out += &format!("    `{}`: {}\n", a.name, a.hint);
+            }
         }
+        Ok(out.trim_end().to_string())
+    }
+
+    // ============ what can be done now, as data ============
+
+    /// The actions and whether each is available now, with a reason.
+    fn actions(&self) -> Vec<ActionView> {
+        let h = self.height();
+        let slot = self.next_slot();
+        let d = self.depth + 1;
+        let mover = instance::mover_at(d);
+        let terminal = lngap_chess::terminal(&self.state.pos).is_some();
         let delta = self.params.delta;
         let delta2 = self.params.delta + self.params.delta_prime;
-        for (base, d) in self.live_claims() {
-            let who = instance::mover_at(d);
-            if who == self.me {
-                println!("    live claim `{base}` (depth {d}) against you: `refute`{} (the claimant's timeout opens at height {})", if base.starts_with("absent_") && !base.contains("counter") && d >= 2 { " or `counter`" } else { "" }, self.window_open(&base, delta).unwrap_or(0));
-            } else {
-                println!("    your live claim `{base}` (depth {d}): `split` from height {}, unless it is refuted or countered first", self.window_open(&base, delta).unwrap_or(0));
+        let mut v = Vec::new();
+        // move
+        v.push(if terminal {
+            ActionView::no("move", "the game is over")
+        } else if mover != self.me {
+            ActionView::no("move", &format!("{mover} to move (depth {d})"))
+        } else if slot > d {
+            ActionView::no("move", &format!("your slot {d} has passed: you are stalled"))
+        } else if self.mempool_pending_move() {
+            ActionView::no("move", "your move is queued for the next slot")
+        } else {
+            ActionView::ok("move", &format!("your move at depth {d} seals in slot {slot}"))
+        });
+        // claim: the earliest slot of the opponent's that passed with no
+        // TIMELY entry — empty, not a move, or filled only by a late block
+        // (the members' flags stand) — and is not yet claimed
+        let claimable = (1..=d)
+            .filter(|s| instance::mover_at(*s) != self.me && *s < slot)
+            .find(|s| {
+                let untimely = self.blocks.get(s).map(|b| b.entry.is_empty() || self.bad_slots.contains_key(s) || self.late_slots.contains(s)).unwrap_or(true);
+                let claimed = self.live.contains_key(&format!("absent_{s}")) || self.mempool_labels().contains(&format!("absent_{s}"));
+                untimely && !claimed
+            });
+        v.push(match claimable {
+            None if mover == self.me => ActionView::no("claim", &format!("depth {d} is your own move")),
+            None if !(self.blocks.contains_key(&d) && d < slot) => ActionView::no("claim", &format!("{mover}'s slot {d} has not passed")),
+            None => ActionView::no("claim", "nothing to claim: every slot of the opponent's holds a timely move, or is claimed"),
+            Some(s) => {
+                let who = instance::mover_at(s);
+                let why = if self.late_slots.contains(&s) { format!("slot {s} was flagged empty at its deadline; the late block does not count") } else if self.bad_slots.contains_key(&s) { format!("slot {s} holds no valid move") } else { format!("{who} did not move at slot {s}") };
+                if h < self.mature_at(s) {
+                    ActionView::no("claim", &format!("{why}: mineable from height {} ({} blocks to go)", self.mature_at(s), self.mature_at(s) - h)).with_cmd(&format!("claim {s}"))
+                } else {
+                    ActionView::ok("claim", &why).with_cmd(&format!("claim {s}"))
+                }
+            }
+        });
+        // counter / refute: a live claim against me
+        let against_me: Vec<(String, u32)> = self.live_claims().into_iter().filter(|(_, dd)| instance::mover_at(*dd) == self.me).collect();
+        match against_me.first() {
+            Some((base, dd)) => {
+                let can_counter = !base.contains("counter") && *dd >= 2;
+                v.push(if can_counter { ActionView::ok("counter", &format!("`{base}`: the claim was not due (you say the claimant did not move at {})", dd - 1)) } else { ActionView::no("counter", "no counter on a counter, nor at depth 1") });
+                let has_block = self.blocks.get(dd).is_some_and(|b| !b.entry.is_empty());
+                v.push(if has_block { ActionView::ok("refute", &format!("`{base}` (depth {dd}): the venue attested your move at slot {dd}; the claimant's timeout opens at height {}", self.window_open(base, delta).unwrap_or(0))) } else { ActionView::no("refute", &format!("`{base}` (depth {dd}): slot {dd} is empty on the venue — nothing to refute with")) });
+            }
+            None => {
+                v.push(ActionView::no("counter", "no live claim against you"));
+                v.push(ActionView::no("refute", "no live claim against you"));
             }
         }
-        for (base, d) in self.live_refuted() {
-            let who = instance::mover_at(d);
-            let r = format!("{base}/refute");
-            if who == self.me {
-                println!("    your refutation on `{base}` (depth {d}) stands: `split` from height {} (the disprove window closes at {})", self.window_open(&r, delta2).unwrap_or(0), self.window_open(&r, delta).unwrap_or(0));
-            } else {
-                let firing = self.firing(d);
-                println!("    live refutation on `{base}` (depth {d}): `disprove` ({}) or `timely` ({} flags known), from height {}", if firing.is_empty() { "nothing fires natively".to_string() } else { firing.join(", ") }, self.flags.get(&d).map(|f| f.iter().filter(|x| x.is_some()).count()).unwrap_or(0), self.window_open(&r, delta).unwrap_or(0));
+        // disprove / timely: a live refutation against me
+        let refuted_against_me: Vec<(String, u32)> = self.live_refuted().into_iter().filter(|(_, dd)| instance::mover_at(*dd) != self.me).collect();
+        match refuted_against_me.first() {
+            Some((base, dd)) => {
+                let open = self.window_open(&format!("{base}/refute"), delta).unwrap_or(0);
+                let firing = self.firing(*dd);
+                let flags = self.flags.get(dd).map(|f| f.iter().filter(|x| x.is_some()).count()).unwrap_or(0);
+                if h < open {
+                    v.push(ActionView::no("disprove", &format!("`{base}` (depth {dd}): the window opens at height {open} ({} blocks to go); fires: {}", open - h, if firing.is_empty() { "nothing".into() } else { firing.join(", ") })));
+                    v.push(ActionView::no("timely", &format!("the window opens at height {open}; {flags} of {K} flags known")));
+                } else {
+                    v.push(if firing.is_empty() { ActionView::no("disprove", &format!("`{base}` (depth {dd}): the parked move is legal, nothing fires")) } else { ActionView::ok("disprove", &format!("`{base}` (depth {dd}): {}", firing.join(", "))) });
+                    v.push(if flags >= self.registry.threshold as usize { ActionView::ok("timely", &format!("{flags} of {K} members flagged slot {dd} empty at its deadline")) } else { ActionView::no("timely", &format!("{flags} of {K} flags known for slot {dd} (threshold {})", self.registry.threshold)) });
+                }
+            }
+            None => {
+                v.push(ActionView::no("disprove", "no live refutation against you"));
+                v.push(ActionView::no("timely", "no live refutation against you"));
             }
         }
-        Ok(())
+        // split: mine
+        let mut split = ActionView::no("split", "nothing of yours to split");
+        if let Some((base, _dd)) = self.live_refuted().into_iter().find(|(_, dd)| instance::mover_at(*dd) == self.me) {
+            let open = self.window_open(&format!("{base}/refute"), delta2).unwrap_or(0);
+            split = if h >= open { ActionView::ok("split", &format!("your refutation on `{base}` stands: the self-checking split")) } else { ActionView::no("split", &format!("your refutation on `{base}` stands: the split opens at height {open} ({} blocks to go)", open - h)) };
+        } else if let Some((base, _dd)) = self.live_claims().into_iter().find(|(_, dd)| instance::mover_at(*dd) != self.me) {
+            let open = self.window_open(&base, delta).unwrap_or(0);
+            split = if h >= open { ActionView::ok("split", &format!("your claim `{base}` is unanswered: the timeout split")) } else { ActionView::no("split", &format!("your claim `{base}`: the timeout opens at height {open} ({} blocks to go) unless it is refuted or countered", open - h)) };
+        }
+        v.push(split);
+        v
+    }
+
+    fn mempool_pending_move(&self) -> bool {
+        // an entry of mine waiting in the venue's inbox
+        self.store.list(Store::inbox_dir()).unwrap_or_default().iter().any(|p| {
+            std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str::<InboxEntry>(&s).ok()).is_some_and(|e| e.from == self.me.name())
+        })
+    }
+
+    /// Everything the page shows.
+    pub fn snapshot(&mut self) -> Snapshot {
+        let h = self.height();
+        let d = self.depth;
+        let slots: Vec<SlotView> = self
+            .blocks
+            .iter()
+            .map(|(s, b)| {
+                let entry = if b.entry.is_empty() {
+                    "empty".to_string()
+                } else if let Some(why) = self.bad_slots.get(s) {
+                    format!("{}: {} — NOT a move ({why})", instance::mover_at(*s), ChessEntry::decode(&b.entry).map(|e| e.state.mv.to_string()).unwrap_or_else(|_| "?".into()))
+                } else {
+                    format!("{}: {}", instance::mover_at(*s), ChessEntry::decode(&b.entry).map(|e| e.state.mv.to_string()).unwrap_or_else(|_| "?".into()))
+                };
+                SlotView { slot: *s, height: self.vparams.b0 + *s, proposer: b.proposer, entry, ok: !b.entry.is_empty() && !self.bad_slots.contains_key(s), flags: self.flags.get(s).map(|f| f.iter().filter(|x| x.is_some()).count()), late: self.late_slots.contains(s) }
+            })
+            .collect();
+        let live: Vec<LiveView> = self
+            .live
+            .iter()
+            .map(|(label, l)| LiveView { label: label.clone(), height: l.height, spent: self.spent.contains_key(&l.op), value_sat: l.prev.value.to_sat() })
+            .collect();
+        let disproves: Vec<DisproveView> = self.live_refuted().into_iter().find(|(_, dd)| instance::mover_at(*dd) != self.me).map(|(_, dd)| self.list_disproves(dd).into_iter().map(|(name, fires)| DisproveView { name, fires }).collect()).unwrap_or_default();
+        let last_move = (d >= 1).then(|| self.state.mv.to_string());
+        let balance_sat = self.rt.balance_of(&self.pubs[self.me.idx()].payout_spk).map(|a| a.to_sat()).unwrap_or(0);
+        Snapshot {
+            role: self.me.name().into(),
+            height: h,
+            b0: self.vparams.b0,
+            next_slot: self.next_slot(),
+            block_secs: self.vparams.block_secs,
+            depth: d,
+            fen: self.state.pos.to_fen(),
+            to_move: instance::mover_at(d + 1).name().into(),
+            terminal: lngap_chess::terminal(&self.state.pos).map(|t| format!("{t:?}")),
+            last_move,
+            n: self.registry.n(),
+            threshold: self.registry.threshold,
+            slots,
+            live,
+            actions: self.actions(),
+            disproves,
+            mempool: self.mempool_labels(),
+            balance_sat,
+            log: self.log.iter().rev().take(60).rev().cloned().collect(),
+        }
+    }
+
+    /// Legal destination squares from `from` in the current position (for
+    /// click-to-move).
+    pub fn legal_from(&self, from: &str) -> Vec<String> {
+        lngap_chess::legal_moves(&self.state.pos).into_iter().map(|m| m.to_string()).filter(|u| u.starts_with(from)).map(|u| u[2..4].to_string()).collect()
     }
 
     fn firing(&self, d: u32) -> Vec<String> {
@@ -512,23 +676,72 @@ impl Player {
         Ok(())
     }
 
-    /// Play `uci` WITHOUT checking legality: the mechanical successor,
-    /// signed for real — what a cheating mover publishes (the disprove
-    /// family's business).
-    fn cheat_move(&mut self, uci: &str) -> Result<()> {
+    /// Publish `uci` dishonestly, in one of four ways the disprove family
+    /// and the authorship gate answer: `illegal` (the mechanical
+    /// successor, signed — the `chess_*` kinds), `garbage` (a legal move
+    /// with junk preimages — no refutation possible), `malformed` (the
+    /// from-square byte 255 — `chess_malformed`), `wrongdepth` (a legal
+    /// move signed with the NEXT depth's number — `wrong_slot`).
+    fn cheat_move(&mut self, uci: &str, how: &str) -> Result<()> {
         let d = self.depth + 1;
         ensure!(instance::mover_at(d) == self.me, "it is {}'s move (depth {d})", instance::mover_at(d));
         let slot = self.next_slot();
-        ensure!(slot == d, "the next venue slot is {slot} but your move is depth {d}");
+        if how == "late" {
+            ensure!(slot > d, "your slot {d} has not passed yet: `move` it");
+        } else {
+            ensure!(slot == d, "the next venue slot is {slot} but your move is depth {d}");
+        }
         let mv = Move::parse(uci).ok_or_else(|| anyhow!("not a UCI move: {uci}"))?;
-        let mut pos = lngap_chess::certificate::mechanical_successor(&self.state.pos, mv);
-        pos.fullmove = 0;
-        let new = ChessState { pos, mv, depth: d as u8 };
-        let sig = self.ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &entry_msg(&ChessEntry { game_id: GAME_ID, depth: d as u8, mover: self.me.idx() as u8, state: new.clone(), sigs: vec![] })).map_err(|e| anyhow!("signing: {e}"))?;
-        let entry = ChessEntry { game_id: GAME_ID, depth: d as u8, mover: self.me.idx() as u8, state: new, sigs: sig.hashes.clone() };
+        let me = self.me.idx() as u8;
+        let (entry_bytes, what) = match how {
+            "late" => {
+                // a legal move for the slot that passed, queued for a
+                // colluding member to seal late (the venue's control)
+                let mut pos = apply(&self.state.pos, mv).map_err(|v| anyhow!("illegal: {v}"))?;
+                pos.fullmove = 0;
+                let new = ChessState { pos, mv, depth: d as u8 };
+                let sig = self.ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &entry_msg(&ChessEntry { game_id: GAME_ID, depth: d as u8, mover: me, state: new.clone(), sigs: vec![] })).map_err(|e| anyhow!("signing: {e}"))?;
+                (ChessEntry { game_id: GAME_ID, depth: d as u8, mover: me, state: new, sigs: sig.hashes.clone() }.encode(), "LATE: for a slot that has passed — a colluding member must seal it (the venue page's control)")
+            }
+            "illegal" => {
+                let mut pos = lngap_chess::certificate::mechanical_successor(&self.state.pos, mv);
+                pos.fullmove = 0;
+                let new = ChessState { pos, mv, depth: d as u8 };
+                let sig = self.ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &entry_msg(&ChessEntry { game_id: GAME_ID, depth: d as u8, mover: me, state: new.clone(), sigs: vec![] })).map_err(|e| anyhow!("signing: {e}"))?;
+                (ChessEntry { game_id: GAME_ID, depth: d as u8, mover: me, state: new, sigs: sig.hashes.clone() }.encode(), "WITHOUT checking legality (signed)")
+            }
+            "garbage" => {
+                let mut pos = apply(&self.state.pos, mv).map_err(|v| anyhow!("a garbage-signed entry still needs a legal move: {v}"))?;
+                pos.fullmove = 0;
+                let new = ChessState { pos, mv, depth: d as u8 };
+                (ChessEntry { game_id: GAME_ID, depth: d as u8, mover: me, state: new, sigs: vec![[0x11; 20]; 87] }.encode(), "with a GARBAGE signature (opens no key)")
+            }
+            "malformed" => {
+                let mut pos = apply(&self.state.pos, mv).map_err(|v| anyhow!("a malformed entry still starts from a legal move: {v}"))?;
+                pos.fullmove = 0;
+                let new = ChessState { pos, mv, depth: d as u8 };
+                let mut head = chess::head(GAME_ID, d as u8, self.me, &new);
+                head[8 + 36] = 255;
+                let sig = self.ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, d), &chess::auth_message(&head)).map_err(|e| anyhow!("signing: {e}"))?;
+                let mut e = head.to_vec();
+                for h in &sig.hashes {
+                    e.extend_from_slice(h);
+                }
+                (e, "MALFORMED (from-square byte 255, signed)")
+            }
+            "wrongdepth" => {
+                let mut pos = apply(&self.state.pos, mv).map_err(|v| anyhow!("{v}"))?;
+                pos.fullmove = 0;
+                let wrong = (d + 2) as u8; // my next depth: the state key of THAT depth signs it
+                let new = ChessState { pos, mv, depth: wrong };
+                let sig = self.ks.sign_wots(&instance::state_label(CONTRACT_ID, 1, u32::from(wrong)), &entry_msg(&ChessEntry { game_id: GAME_ID, depth: wrong, mover: me, state: new.clone(), sigs: vec![] })).map_err(|e| anyhow!("signing: {e}"))?;
+                (ChessEntry { game_id: GAME_ID, depth: wrong, mover: me, state: new, sigs: sig.hashes.clone() }.encode(), "claiming the WRONG depth (signed with that depth's key)")
+            }
+            other => bail!("unknown cheat `{other}` (illegal | garbage | malformed | wrongdepth | late)"),
+        };
         let name = format!("{}/{}.json", Store::inbox_dir(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos());
-        self.store.write(&name, &InboxEntry { from: self.me.name().into(), entry: hex::encode(entry.encode()) })?;
-        self.say(format!("submitted {uci} for slot {d} WITHOUT checking legality (signed): the venue seals it regardless"));
+        self.store.write(&name, &InboxEntry { from: self.me.name().into(), entry: hex::encode(entry_bytes) })?;
+        self.say(format!("submitted {uci} for slot {d} {what}: the venue seals it regardless"));
         Ok(())
     }
 
@@ -729,10 +942,9 @@ impl Player {
         bail!("nothing of yours to split")
     }
 
-    fn balance(&self) -> Result<()> {
+    fn balance(&self) -> Result<String> {
         let spk = &self.pubs[self.me.idx()].payout_spk;
-        println!("  {}'s payout address holds {} sat", self.me, self.rt.balance_of(spk)?.to_sat());
-        Ok(())
+        Ok(format!("{}'s payout address holds {} sat", self.me, self.rt.balance_of(spk)?.to_sat()))
     }
 }
 
@@ -755,7 +967,7 @@ fn wait_for<T>(mut f: impl FnMut() -> Result<Option<T>>) -> Result<T> {
 const HELP: &str = "commands:
   status | s          the board, the venue, what is due
   move <uci>          play (e.g. `move e2e4`): signed, queued for the next slot
-  cheat <uci>         play without checking legality (what a cheater publishes)
+  cheat <uci> [how]   publish dishonestly: illegal (default) | garbage | malformed | wrongdepth | late
   claim [d]           absence claim: the opponent did not move at depth d
   counter [d]         counter a claim against you: the claim was not due
   refute              answer the live claim against you with the venue's attestation
@@ -768,8 +980,50 @@ const HELP: &str = "commands:
   until <slot>        wait until the next venue slot is <slot>
   quit";
 
-pub fn run(dir: PathBuf, me: Role, max_depth: u32) -> Result<()> {
-    let mut p = Player::open(dir, me, max_depth)?;
+impl Player {
+    /// One command line; the text to show.
+    pub fn exec(&mut self, line: &str) -> Result<String> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        let Some(cmd) = parts.first() else { return Ok(String::new()) };
+        let arg = parts.get(1).map(|s| s.to_string());
+        let arg2 = parts.get(2).map(|s| s.to_string());
+        let before = self.log.len();
+        let r: Result<String> = match *cmd {
+            "help" | "?" => Ok(HELP.to_string()),
+            "status" | "s" => self.status(),
+            "board" | "b" => Ok(format!("{}", self.state.pos)),
+            "move" | "m" => arg.ok_or_else(|| anyhow!("move <uci>")).and_then(|u| self.play_move(&u)).map(|_| String::new()),
+            "cheat" => arg.ok_or_else(|| anyhow!("cheat <uci> [illegal|garbage|malformed|wrongdepth]")).and_then(|u| self.cheat_move(&u, arg2.as_deref().unwrap_or("illegal"))).map(|_| String::new()),
+            "claim" => self.claim(arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
+            "counter" => self.counter(arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
+            "refute" => self.refute().map(|_| String::new()),
+            "disprove" => self.disprove(arg).map(|_| String::new()),
+            "timely" => self.timely().map(|_| String::new()),
+            "split" => self.split().map(|_| String::new()),
+            "balance" => self.balance(),
+            "wait" => {
+                let secs: u64 = arg.and_then(|a| a.parse().ok()).unwrap_or(1);
+                std::thread::sleep(Duration::from_secs(secs));
+                Ok(String::new())
+            }
+            "until" => arg.and_then(|a| a.parse().ok()).ok_or_else(|| anyhow!("until <slot>")).and_then(|s| self.until_slot(s)).map(|_| String::new()),
+            other => Err(anyhow!("unknown command {other} (try `help`)")),
+        };
+        // what the command said through `say` is part of its output
+        let said: Vec<String> = self.log[before..].to_vec();
+        match r {
+            Ok(text) => Ok(if text.is_empty() { said.join("\n") } else { text }),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+pub fn run(dir: PathBuf, me: Role, max_depth: u32, web: Option<u16>) -> Result<()> {
+    let p = Player::open(dir, me, max_depth)?;
+    if let Some(port) = web {
+        return crate::web::serve_player(p, port);
+    }
+    let mut p = p;
     println!("{HELP}");
     let stdin = std::io::stdin();
     let mut line = String::new();
@@ -781,40 +1035,87 @@ pub fn run(dir: PathBuf, me: Role, max_depth: u32) -> Result<()> {
         if stdin.lock().read_line(&mut line)? == 0 {
             break;
         }
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        let Some(cmd) = parts.first() else { continue };
-        let arg = parts.get(1).map(|s| s.to_string());
-        let r = match *cmd {
-            "help" | "?" => {
-                println!("{HELP}");
-                Ok(())
-            }
-            "status" | "s" => p.status(),
-            "board" | "b" => {
-                println!("{}", p.state.pos);
-                Ok(())
-            }
-            "move" | "m" => arg.ok_or_else(|| anyhow!("move <uci>")).and_then(|u| p.play_move(&u)),
-            "cheat" => arg.ok_or_else(|| anyhow!("cheat <uci>")).and_then(|u| p.cheat_move(&u)),
-            "until" => arg.and_then(|a| a.parse().ok()).ok_or_else(|| anyhow!("until <slot>")).and_then(|s| p.until_slot(s)),
-            "claim" => p.claim(arg.and_then(|a| a.parse().ok())),
-            "counter" => p.counter(arg.and_then(|a| a.parse().ok())),
-            "refute" => p.refute(),
-            "disprove" => p.disprove(arg),
-            "timely" => p.timely(),
-            "split" => p.split(),
-            "balance" => p.balance(),
-            "wait" => {
-                let secs: u64 = arg.and_then(|a| a.parse().ok()).unwrap_or(1);
-                std::thread::sleep(Duration::from_secs(secs));
-                Ok(())
-            }
-            "quit" | "exit" => break,
-            other => Err(anyhow!("unknown command {other} (try `help`)")),
-        };
-        if let Err(e) = r {
-            println!("  ! {e:#}");
+        if line.trim() == "quit" || line.trim() == "exit" {
+            break;
+        }
+        match p.exec(&line) {
+            Ok(text) if text.is_empty() => {}
+            Ok(text) => println!("{text}"),
+            Err(e) => println!("  ! {e:#}"),
         }
     }
     Ok(())
+}
+
+// ============ the page's view of the player ============
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ActionView {
+    pub name: String,
+    pub enabled: bool,
+    pub hint: String,
+    /// The exact command the button sends (the name, unless a depth is
+    /// implied).
+    pub cmd: String,
+}
+
+impl ActionView {
+    fn ok(name: &str, hint: &str) -> ActionView {
+        ActionView { name: name.into(), enabled: true, hint: hint.into(), cmd: name.into() }
+    }
+    fn no(name: &str, hint: &str) -> ActionView {
+        ActionView { name: name.into(), enabled: false, hint: hint.into(), cmd: name.into() }
+    }
+    fn with_cmd(mut self, cmd: &str) -> ActionView {
+        self.cmd = cmd.into();
+        self
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SlotView {
+    pub slot: u32,
+    pub height: u32,
+    pub proposer: usize,
+    pub entry: String,
+    pub ok: bool,
+    pub flags: Option<usize>,
+    pub late: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct LiveView {
+    pub label: String,
+    pub height: u32,
+    pub spent: bool,
+    pub value_sat: u64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct DisproveView {
+    pub name: String,
+    pub fires: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct Snapshot {
+    pub role: String,
+    pub height: u32,
+    pub b0: u32,
+    pub next_slot: u32,
+    pub block_secs: u64,
+    pub depth: u32,
+    pub fen: String,
+    pub to_move: String,
+    pub terminal: Option<String>,
+    pub last_move: Option<String>,
+    pub n: usize,
+    pub threshold: u32,
+    pub slots: Vec<SlotView>,
+    pub live: Vec<LiveView>,
+    pub actions: Vec<ActionView>,
+    pub disproves: Vec<DisproveView>,
+    pub mempool: Vec<String>,
+    pub balance_sat: u64,
+    pub log: Vec<String>,
 }

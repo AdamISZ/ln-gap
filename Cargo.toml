@@ -22,6 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.8"
 hex = "0.4"
 tempfile = "3"
+tiny_http = "0.12"
 
 # Dependencies (secp256k1, the hash crates) optimised even in debug builds:
 # the harness is hash- and signature-bound, and secp256k1's C code takes

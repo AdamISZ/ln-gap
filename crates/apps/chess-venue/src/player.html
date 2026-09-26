@@ -1,0 +1,113 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LN-GAP chess on the venue</title>
+<style>
+:root{--bg:#f4f1ea;--fg:#1e1e1e;--light:#e9d9b8;--dark:#a3784f;--sel:#7fb26a;--last:#f2d16b;--panel:#fff;--muted:#777;--ok:#2e7d32;--bad:#b3261e}
+body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+header{padding:10px 16px;background:#2b2b2b;color:#eee;display:flex;gap:18px;align-items:baseline}
+header b{font-size:16px}
+main{display:grid;grid-template-columns:420px 1fr;gap:14px;padding:14px}
+#board{display:grid;grid-template-columns:repeat(8,50px);grid-template-rows:repeat(8,50px);border:2px solid #4a3a2a;width:400px}
+.sq{display:flex;align-items:center;justify-content:center;font-size:36px;cursor:pointer;user-select:none;position:relative}
+.sq.light{background:var(--light)}.sq.dark{background:var(--dark)}
+.sq.sel{outline:3px solid var(--sel);outline-offset:-3px}
+.sq.last{box-shadow:inset 0 0 0 50px rgba(242,209,107,.45)}
+.sq.legal::after{content:"";position:absolute;width:14px;height:14px;border-radius:7px;background:rgba(0,0,0,.28)}
+.sq.legal.cap::after{width:44px;height:44px;border-radius:22px;background:none;border:4px solid rgba(0,0,0,.28)}
+.coord{font-size:10px;color:var(--muted);text-align:center}
+.panel{background:var(--panel);border:1px solid #ddd;border-radius:6px;padding:10px 12px;margin-bottom:12px}
+.panel h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+button{font:inherit;padding:6px 10px;border:1px solid #999;border-radius:4px;background:#fafafa;cursor:pointer;margin:2px 4px 2px 0}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:#2b6cb0;color:#fff;border-color:#2b6cb0}
+select,input{font:inherit;padding:4px 6px;max-width:100%}
+#how{display:block;width:100%;margin-top:4px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{padding:3px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+#log{max-height:260px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap}
+#out{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;min-height:2em;color:#333}
+.hint{color:var(--muted);font-size:12px}
+.pill{display:inline-block;padding:1px 7px;border-radius:9px;background:#eee;font-size:12px;margin-left:6px}
+</style></head>
+<body>
+<header><b id="who">…</b><span id="clock"></span><span id="turn"></span><span id="pot"></span></header>
+<main>
+<div>
+  <div id="board"></div>
+  <div class="panel" style="margin-top:12px">
+    <h3>Your move</h3>
+    <div>click a piece, then a square &nbsp;·&nbsp; or type <input id="uci" size="6" placeholder="e2e4"> <button id="go" class="primary">publish</button></div>
+    <div style="margin-top:6px">publish as
+      <select id="how">
+        <option value="legal">a legal move (checked)</option>
+        <option value="illegal">ILLEGAL: the mechanical successor, signed</option>
+        <option value="garbage">GARBAGE-SIGNED: junk preimages</option>
+        <option value="malformed">MALFORMED: from-square 255, signed</option>
+        <option value="wrongdepth">WRONG DEPTH: signed with the next depth's key</option>
+        <option value="late">LATE: my move for a slot that passed, for a colluding member to seal</option>
+      </select>
+    </div>
+    <div class="hint" id="movehint"></div>
+  </div>
+  <div class="panel">
+    <h3>Dispute</h3>
+    <div id="actions"></div>
+    <div style="margin-top:6px">depth <input id="depth" size="3" placeholder="d"> for claim / counter at another depth &nbsp;·&nbsp; disprove with
+      <select id="leaf"><option value="">the leaf that fires</option></select></div>
+    <div id="out"></div>
+  </div>
+</div>
+<div>
+  <div class="panel"><h3>The venue</h3><div class="hint" id="venuehint"></div><table id="slots"><thead><tr><th>slot</th><th>height</th><th>sealed by</th><th>entry</th><th>flags</th></tr></thead><tbody></tbody></table></div>
+  <div class="panel"><h3>On the chain</h3><div id="mempool" class="hint"></div><table id="live"><thead><tr><th>transaction</th><th>height</th><th>output</th><th></th></tr></thead><tbody></tbody></table></div>
+  <div class="panel"><h3>Log</h3><div id="log"></div></div>
+</div>
+</main>
+<script>
+const glyph={K:"♔",Q:"♕",R:"♖",B:"♗",N:"♘",P:"♙",k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
+const files="abcdefgh";
+let sel=null, legal=[], snap=null;
+const $=id=>document.getElementById(id);
+function sqName(f,r){return files[f]+(r+1)}
+function fenBoard(fen){const rows=fen.split(" ")[0].split("/");const b={};rows.forEach((row,i)=>{let f=0;for(const c of row){if(c>="1"&&c<="8"){f+=+c}else{b[sqName(f,7-i)]=c;f++}}});return b}
+function render(){
+  if(!snap)return;
+  const b=fenBoard(snap.fen);const board=$("board");board.innerHTML="";
+  const last=snap.last_move?[snap.last_move.slice(0,2),snap.last_move.slice(2,4)]:[];
+  const flip=snap.role==="hub";
+  for(let rr=0;rr<8;rr++){for(let ff=0;ff<8;ff++){
+    const r=flip?rr:7-rr, f=flip?7-ff:ff; const n=sqName(f,r);
+    const d=document.createElement("div");
+    d.className="sq "+(((f+r)%2)?"light":"dark")+(sel===n?" sel":"")+(last.includes(n)?" last":"")+(legal.includes(n)?" legal"+(b[n]?" cap":""):"");
+    d.textContent=b[n]?glyph[b[n]]:"";d.dataset.sq=n;d.onclick=()=>click(n,b);board.appendChild(d);
+  }}
+}
+async function click(n,b){
+  if(sel&&legal.includes(n)){const u=sel+n;sel=null;legal=[];render();await cmd(($("how").value==="legal"?"move ":"cheat ")+u+($("how").value==="legal"?"":" "+$("how").value));return}
+  if(b[n]){sel=n;legal=await (await fetch("/legal?from="+n)).json();if($("how").value!=="legal"){legal=[...new Set([...legal,...allSquares()])]}render()}else{sel=null;legal=[];render()}
+}
+function allSquares(){const a=[];for(let f=0;f<8;f++)for(let r=0;r<8;r++)a.push(sqName(f,r));return a}
+async function cmd(c){const r=await (await fetch("/cmd",{method:"POST",body:JSON.stringify({cmd:c})})).json();$("out").textContent=(r.ok?"":"! ")+r.output;await poll();return r}
+$("go").onclick=()=>{const u=$("uci").value.trim();if(!u)return;const how=$("how").value;cmd(how==="legal"?"move "+u:"cheat "+u+" "+how);$("uci").value=""};
+async function poll(){
+  try{snap=await (await fetch("/state")).json()}catch(e){return}
+  $("who").textContent=snap.role==="user"?"you are WHITE (user)":"you are BLACK (hub)";
+  $("clock").textContent="height "+snap.height+" · next venue slot "+snap.next_slot+" · one block per "+snap.block_secs+"s";
+  $("turn").textContent=snap.terminal?("game over: "+snap.terminal):("depth "+snap.depth+" · "+(snap.to_move==="user"?"white":"black")+" to move");
+  $("pot").textContent="payout address: "+snap.balance_sat.toLocaleString()+" sat";
+  render();
+  const mv=snap.actions.find(a=>a.name==="move");$("movehint").textContent=mv?mv.hint:"";$("go").disabled=!(mv&&mv.enabled);
+  const A=$("actions");A.innerHTML="";
+  for(const a of snap.actions){if(a.name==="move")continue;const btn=document.createElement("button");btn.textContent=a.name;btn.disabled=!a.enabled;btn.title=a.hint;
+    btn.onclick=()=>{let c=a.cmd;const d=$("depth").value.trim();if((a.name==="claim"||a.name==="counter")&&d)c=a.name+" "+d;if(a.name==="disprove"&&$("leaf").value)c+=" "+$("leaf").value;cmd(c)};
+    A.appendChild(btn);const h=document.createElement("span");h.className="hint";h.textContent=" "+a.hint;A.appendChild(h);A.appendChild(document.createElement("br"))}
+  const L=$("leaf");const cur=L.value;L.innerHTML='<option value="">the leaf that fires</option>';for(const d of snap.disproves){const o=document.createElement("option");o.value=d.name;o.textContent=(d.fires?"* ":"  ")+d.name;L.appendChild(o)}L.value=cur;
+  $("venuehint").textContent=snap.n+" members sharing one content key, flag threshold "+snap.threshold+" of "+snap.n+"; any member seals any slot";
+  const S=$("slots").querySelector("tbody");S.innerHTML="";for(const s of snap.slots){const tr=document.createElement("tr");tr.className=(s.ok||s.entry==="empty"?"":"bad")+(s.late?" late":"");tr.innerHTML=`<td>${s.slot}</td><td>${s.height}</td><td>member ${s.proposer}${s.late?" (LATE)":""}</td><td>${s.entry}</td><td>${s.flags==null?"":s.flags+" of "+snap.n+" flag it empty"}</td>`;S.appendChild(tr)}
+  $("mempool").textContent=snap.mempool.length?("in the mempool, confirms at the next block: "+snap.mempool.join(", ")):"";
+  const V=$("live").querySelector("tbody");V.innerHTML="";for(const l of snap.live){const tr=document.createElement("tr");tr.innerHTML=`<td><code>${l.label}</code></td><td>${l.height}</td><td>${l.value_sat.toLocaleString()} sat</td><td>${l.spent?"spent":"unspent"}</td>`;V.appendChild(tr)}
+  $("log").textContent=snap.log.join("\n");$("log").scrollTop=$("log").scrollHeight;
+}
+poll();setInterval(poll,2000);
+</script></body></html>

@@ -91,8 +91,14 @@ impl Store {
     pub fn block(slot: u32) -> String {
         format!("venue/blocks/{slot:04}.json")
     }
+    pub fn late_block(slot: u32) -> String {
+        format!("venue/blocks/{slot:04}.late.json")
+    }
     pub fn flags(slot: u32) -> String {
         format!("venue/flags/{slot:04}.json")
+    }
+    pub fn web(r: Role) -> String {
+        format!("players/{}/web.json", r.name())
     }
     pub fn inbox_dir() -> &'static str {
         "venue/inbox"
