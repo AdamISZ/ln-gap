@@ -1,17 +1,15 @@
 //! The PoS venue world: one channel's worth of keystores (for real per-depth
 //! entry signatures), one PoS venue (`lngap_pos::PosMiner` — since D51/D53
-//! a five-member roster sharing one content key, any member sealing any
-//! slot, its registry announced at open), slots driven by the Bitcoin
-//! clock. Step 2 of
-//! POS_FACTCHAIN_PLAN.md (D32).
+//! a five-member roster sharing one content key; since D55 attestations
+//! keyed by (contract, depth), sealed on submission by the designated
+//! member). Step 2 of POS_FACTCHAIN_PLAN.md (D32).
 //!
 //! The world plays a scripted game of tic-tac-toe INTO the venue: each move
-//! becomes the entry of the block sealed at its slot, attested under that
-//! slot's epoch table. There is no contract and no dispute machinery here
-//! yet (steps 3-4): this world proves the venue layer only — moves land as
-//! attested heads at the right slots, anyone verifies the chain against the
-//! published registry, and empty slots still get their (empty) block, the
-//! cadence default.
+//! is submitted and sealed under its depth's content table. There is no
+//! contract and no dispute machinery here: this world proves the venue
+//! layer only — moves land as attested heads at their depths, anyone
+//! verifies them against the published registry, honest members seal only
+//! signed entries, and nothing is sealed when nothing is submitted.
 
 use std::collections::HashMap;
 
@@ -39,11 +37,11 @@ pub const ID_GAME: u32 = 30;
 pub const GAME_ID: u16 = 1;
 /// The venue's content seed (the key every member shares, D53) and the
 /// roster's base seed: member `i` is seeded `VENUE_SEED[0] + i` (five
-/// members; the default sealer prefers `slot mod 5`).
+/// members; the designated sealer is the rotation).
 pub const VENUE_SEED: [u8; 32] = [0x5A; 32];
 pub const N_MEMBERS: u8 = 5;
-/// The registry announced at open covers slots `0..=REGISTRY_SLOTS`.
-pub const REGISTRY_SLOTS: u32 = 32;
+/// The registry announced at open covers depths `0..=MAX_DEPTH`.
+pub const MAX_DEPTH: u32 = 9;
 
 pub fn members() -> Vec<Member> {
     (0..N_MEMBERS).map(|i| Member::new([VENUE_SEED[0] + i; 32])).collect()
@@ -59,11 +57,11 @@ pub struct PosWorld {
     /// table per slot, every member's flag point), what the client
     /// verifies seals against.
     pub registry: Registry,
-    /// Every sealed slot's epoch table, as the venue published it.
+    /// Every sealed depth's content table, as the venue published it.
     pub tables: HashMap<u32, EpochTable>,
-    /// Every sealed block, by slot.
+    /// Every seal, by depth.
     pub sealed: HashMap<u32, SealedBlock>,
-    /// What each sealed slot's block carried (empty for an empty block).
+    /// What each sealed depth's entry was.
     pub blocks: HashMap<u32, Vec<u8>>,
     pub program: TicTacToeFc,
     pub brains: [Brain; 2],
@@ -85,11 +83,9 @@ impl PosWorld {
         init_log();
         let store = ServedData::default();
         let h = Harness::new(label, registry(store.clone()))?;
-        let members = members();
-        let (gen, table0) = lngap_pos::genesis(&lngap_ec_wots::Attester::new(VENUE_SEED), &members[0], 0);
-        let checkpoint = gen.header.digest();
-        let mut miner = PosMiner::new(VENUE_SEED, members, checkpoint, 0);
-        let registry = miner.registry(REGISTRY_SLOTS)?;
+        let mut miner = PosMiner::new(VENUE_SEED, members());
+        let registry = miner.registry(ID_GAME, MAX_DEPTH)?;
+        let checkpoint = [0u8; lngap_n4bit::DIGEST_BYTES];
         let btc_open = h.height();
         let program = TicTacToeFc::new(
             TttFcParams {
@@ -104,10 +100,10 @@ impl PosWorld {
         );
         let mut w = PosWorld {
             miner,
-            client: PosClient::from_checkpoint(0, checkpoint),
+            client: PosClient::new(ID_GAME),
             registry,
-            tables: HashMap::from([(0u32, table0)]),
-            sealed: HashMap::from([(0u32, gen)]),
+            tables: HashMap::new(),
+            sealed: HashMap::new(),
             blocks: HashMap::new(),
             h,
             program,
@@ -120,6 +116,15 @@ impl PosWorld {
             log: Vec::new(),
         };
         w.make_venue_keys()?;
+        // the venue checks authorship before sealing (D55): the entry must
+        // open its mover's per-depth venue key commitments
+        let commits = w.venue_commits.clone();
+        let auth: lngap_pos::Authorship = std::sync::Arc::new(move |d: u32, entry: &[u8]| {
+            let Some(e) = SlotEntry::decode(entry) else { return false };
+            let mover = TicTacToeFc::mover_at(d);
+            commits[mover.idx()].get(d as usize - 1).is_some_and(|c| e.check_sigs(c))
+        });
+        w.miner.register(ID_GAME, MAX_DEPTH, auth).map_err(|e| anyhow!(e))?;
         Ok(w)
     }
 
@@ -144,16 +149,15 @@ impl PosWorld {
     fn say(&mut self, s: String) {
         info!(world = "pos", "{s}");
         self.log.push(format!(
-            "[pos @ {} / slot {}] {s}",
+            "[pos @ {} / depth {}] {s}",
             self.h.height(),
             self.depth
         ));
     }
 
-    /// The slot the venue seals at this step: the Bitcoin block just mined
-    /// (one venue block per Bitcoin block, the harness cadence).
+    /// The depth the next submission is for.
     fn coming_slot(&self) -> u32 {
-        self.h.height() - self.btc_open
+        self.depth + 1
     }
 
     /// The mover's reveal of the state after move `d` (its venue key).
@@ -191,48 +195,29 @@ impl PosWorld {
         Ok(())
     }
 
-    /// Seal the coming slot (with the pending entry, or empty), verify it
-    /// natively as anyone would, and file the registry data.
+    /// Seal the pending entry on submission (D55) by the designated
+    /// member, verify it natively as anyone would, and file the registry
+    /// data; nothing is sealed when nothing is pending.
     fn seal_step(&mut self) -> Result<()> {
         let slot = self.coming_slot();
-        let pending = self.pending.take();
-        if let Some((_, bytes)) = &pending {
-            self.miner.submit(bytes.clone());
-        }
-        let (block, table) = self.miner.seal_next(slot).map_err(|e| anyhow!(e))?;
-        self.client
-            .verify_and_append(&block, &self.registry)
-            .map_err(|e| anyhow!(e))?;
-        let proposer = block.proposer;
-        if let Some((entry, bytes)) = pending {
-            // anyone verifies the entry: content, and the signature against
-            // the mover's venue commitments
-            let mover = TicTacToeFc::mover_at(slot);
-            let decoded = SlotEntry::decode(&bytes).ok_or_else(|| anyhow!("undecodable entry"))?;
-            ensure!(
-                decoded == entry
-                    && decoded.depth == slot as u8
-                    && decoded.mover == mover.idx() as u8
-            );
-            ensure!(
-                decoded.check_sigs(&self.venue_commits[mover.idx()][slot as usize - 1]),
-                "{mover}'s entry at slot {slot} does not open its venue key"
-            );
-            self.board = self
-                .program
-                .transition(&self.board, &decoded.mv, mover)
-                .map_err(|e| anyhow!(e))?;
-            self.depth = slot;
-            self.say(format!(
-                "slot {slot} sealed by member {proposer} with {mover}'s move ({}); attested",
-                self.board.render()
-            ));
-            self.blocks.insert(slot, bytes);
-        } else {
-            self.blocks.insert(slot, Vec::new());
-            self.say(format!("slot {slot} sealed EMPTY by member {proposer} (cadence)"));
-        }
-        self.tables.insert(slot, table);
+        let Some((entry, bytes)) = self.pending.take() else {
+            self.say(format!("nothing submitted for depth {slot}: nothing sealed"));
+            return Ok(());
+        };
+        let sealer = self.miner.default_sealer(ID_GAME, slot).ok_or_else(|| anyhow!("every member is silent"))?;
+        let block = self.miner.seal_entry(ID_GAME, slot, sealer, &bytes).map_err(|e| anyhow!(e))?;
+        self.client.verify_and_append(&block, &self.registry).map_err(|e| anyhow!(e))?;
+        // anyone verifies the entry: content, and the signature against
+        // the mover's venue commitments
+        let mover = TicTacToeFc::mover_at(slot);
+        let decoded = SlotEntry::decode(&bytes).ok_or_else(|| anyhow!("undecodable entry"))?;
+        ensure!(decoded == entry && decoded.depth == slot as u8 && decoded.mover == mover.idx() as u8);
+        ensure!(decoded.check_sigs(&self.venue_commits[mover.idx()][slot as usize - 1]), "{mover}'s entry at depth {slot} does not open its venue key");
+        self.board = self.program.transition(&self.board, &decoded.mv, mover).map_err(|e| anyhow!(e))?;
+        self.depth = slot;
+        self.say(format!("depth {slot} sealed by member {sealer} with {mover}'s move ({}); attested", self.board.render()));
+        self.blocks.insert(slot, bytes);
+        self.tables.insert(slot, self.miner.table(ID_GAME, slot).clone());
         self.sealed.insert(slot, block);
         Ok(())
     }
@@ -255,8 +240,8 @@ impl PosWorld {
         Ok(())
     }
 
-    /// The venue's tip slot.
+    /// The deepest attested depth.
     pub fn tip(&self) -> u32 {
-        self.client.tip_height()
+        self.client.deepest()
     }
 }
