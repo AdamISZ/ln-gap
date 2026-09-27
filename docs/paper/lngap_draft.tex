@@ -1021,6 +1021,29 @@ between two parties. With a public clock ``no timely response in epoch
 $k$'' is a fact, so the provider's \emph{bond} is forfeited for absence,
 not merely its payment withheld, and the whole schedule runs off-chain.
 
+\paragraph{Sia and Filecoin.} The dedicated storage networks do punish
+absence, and they can because each has its own blockchain, which gives
+them the public clock. A Sia host posts collateral in a file contract
+and must submit a storage proof for a randomly chosen segment within a
+proof window at the contract's end; if it misses the window its
+collateral and earned revenue are burned, and the renter recovers only
+its unspent payment~\cite{sia}. A Filecoin storage provider posts pledge
+and deal collateral and must answer a Proof-of-Spacetime challenge for
+every sector every day; a missed proof puts the sector in fault, with a
+daily fee, and persistent faults terminate it and slash the collateral,
+which is largely burned~\cite{filecoin}. Both burn rather than
+compensate, which denies a client and a colluding provider any profit
+from penalties; a construction that pays the customer from the bond, as
+ours can, must weigh the same collusion. And in both, the penalty
+deters but does not recover data: durability comes from erasure-coding
+across many independent providers (Sia's renter software spreads each
+file across dozens of hosts and repairs as they fail), with frequent
+challenges to detect a loss while repair is still possible. The same
+holds here: the contract's role is deterrence and early detection, one
+contract per provider. What we add is the absence-adjudicating clock
+without a blockchain or a token of its own: the venue provides it, and
+settlement stays in bitcoin, in a channel.
+
 \section{A sealed-bid auction}
 \label{sec:auction}
 
@@ -1430,6 +1453,10 @@ committee is drawn and against which its statements can be judged.
 \bibitem{ct} B.~Laurie, A.~Langley and E.~Kasper. Certificate Transparency. RFC~6962, 2013.
 
 \bibitem{algorand} Y.~Gilad, R.~Hemo, S.~Micali, G.~Vlachos and N.~Zeldovich. Algorand: scaling Byzantine agreements for cryptocurrencies. SOSP 2017.
+
+\bibitem{sia} Sia Foundation. About providing storage on Sia. \url{https://docs.sia.tech/provide-storage/about-hosting-on-sia}
+
+\bibitem{filecoin} Filecoin documentation: slashing. \url{https://docs.filecoin.io/storage-providers/filecoin-economics/slashing}; storage deal flow, \url{https://spec.filecoin.io/systems/filecoin_markets/onchain_storage_market/storage_deal_flow/}
 
 \bibitem{bitstream} R.~Linus. BitStream: decentralized file hosting incentivised via Bitcoin payments, 2023. \url{https://robinlinus.com/bitstream.pdf}
 
