@@ -5,7 +5,7 @@
 //! Three processes share one directory (`--dir`, default `./chess-venue`):
 //!
 //! ```text
-//!   lngap-chess-venue venue [--dir D] [--block-secs 30] [--web 8080]   # the node, the roster, the clock
+//!   lngap-chess-venue venue [--dir D] [--block-secs 20] [--ell 90] [--web 8080]   # the node, the roster, the clock
 //!   lngap-chess-venue play user [--dir D] [--web 8081]                 # white
 //!   lngap-chess-venue play hub  [--dir D] [--web 8082]                 # black
 //! ```
@@ -16,11 +16,16 @@
 //! chain views; the venue's page has the slot timeline and the
 //! misbehaviour controls, and `/dashboard` frames all three.
 //!
-//! The venue starts a regtest node (datadir `D/node`, kept), mines one
-//! block every `--block-secs` seconds, seals one venue slot per block
-//! from the entries the players drop in its inbox, publishes every block
-//! and every deadline's flags to `D/venue/`, and funds the contract
-//! output once both players have agreed it. The players exchange their
+//! The venue starts a regtest node (datadir `D/node`, kept) and mines a
+//! block every `--block-secs` seconds, independently of the game (D55).
+//! Move `d` is due at `t0 + d·ell` (`--ell` seconds per move; `t0` fixed
+//! by the contract, `--start-secs` after it is proposed). The venue seals
+//! each entry a player drops in its inbox on arrival, by the member it is
+//! addressed to (the rotation; the mover falls back after `--backoff`
+//! seconds), flags every move whose due time passes with no signed seal,
+//! publishes both to `D/venue/`, and funds and registers the contract
+//! once both players have agreed it. A claim waits for median-time-past
+//! to pass the due time plus `--margin`. The players exchange their
 //! key offers and their graph signatures through `D/players/` and then
 //! drive the game — and its disputes — from a small REPL. Nothing else
 //! connects them: a disprover reads the mover's reveal off the confirmed
@@ -37,14 +42,26 @@ use anyhow::{bail, Result};
 use lngap_channel::Role;
 
 fn usage() -> ! {
-    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--web PORT]\n  lngap-chess-venue play user|hub [--dir D] [--max-depth M] [--web PORT]");
+    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S] [--web PORT]\n  lngap-chess-venue play user|hub [--dir D] [--max-depth M] [--web PORT]");
     std::process::exit(2)
+}
+
+/// The venue's timing (D55), in seconds: per move, the mover's fallback
+/// backoff, the claim margin past a due time, and the setup allowance
+/// from the contract proposal to move 0's time.
+#[derive(Clone, Copy, Debug)]
+pub struct Timing {
+    pub ell: u32,
+    pub backoff: u32,
+    pub margin: u32,
+    pub start_secs: u32,
 }
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut dir = PathBuf::from("chess-venue");
-    let mut block_secs = 30u64;
+    let mut block_secs = 20u64;
+    let mut timing = Timing { ell: 90, backoff: 5, margin: 60, start_secs: 60 };
     let mut max_depth = 20u32;
     let mut web: Option<u16> = None;
     let mut positional = Vec::new();
@@ -63,6 +80,16 @@ fn main() -> Result<()> {
                 max_depth = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or_else(|| usage());
                 i += 2;
             }
+            "--ell" | "--backoff" | "--margin" | "--start-secs" => {
+                let v: u32 = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or_else(|| usage());
+                match args[i].as_str() {
+                    "--ell" => timing.ell = v,
+                    "--backoff" => timing.backoff = v,
+                    "--margin" => timing.margin = v,
+                    _ => timing.start_secs = v,
+                }
+                i += 2;
+            }
             "--web" => {
                 web = Some(args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or_else(|| usage()));
                 i += 2;
@@ -75,7 +102,7 @@ fn main() -> Result<()> {
         }
     }
     match positional.first().map(String::as_str) {
-        Some("venue") => venue::run(dir, block_secs, max_depth, web),
+        Some("venue") => venue::run(dir, block_secs, max_depth, web, timing),
         Some("play") => {
             let role = match positional.get(1).map(String::as_str) {
                 Some("user") | Some("white") => Role::User,

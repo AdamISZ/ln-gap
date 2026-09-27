@@ -45,7 +45,7 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
         <option value="garbage">GARBAGE-SIGNED: junk preimages</option>
         <option value="malformed">MALFORMED: from-square 255, signed</option>
         <option value="wrongdepth">WRONG DEPTH: signed with the next depth's key</option>
-        <option value="late">LATE: my move for a slot that passed, for a colluding member to seal</option>
+        <option value="late">LATE: my move after its due time, for a colluding member to seal</option>
       </select>
     </div>
     <div class="hint" id="movehint"></div>
@@ -59,7 +59,7 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
   </div>
 </div>
 <div>
-  <div class="panel"><h3>The venue</h3><div class="hint" id="venuehint"></div><table id="slots"><thead><tr><th>slot</th><th>height</th><th>sealed by</th><th>entry</th><th>flags</th></tr></thead><tbody></tbody></table></div>
+  <div class="panel"><h3>The venue</h3><div class="hint" id="venuehint"></div><table id="slots"><thead><tr><th>move</th><th>due</th><th>sealed by</th><th>entry</th><th>flags</th></tr></thead><tbody></tbody></table></div>
   <div class="panel"><h3>On the chain</h3><div id="mempool" class="hint"></div><table id="live"><thead><tr><th>transaction</th><th>height</th><th>output</th><th></th></tr></thead><tbody></tbody></table></div>
   <div class="panel"><h3>Log</h3><div id="log"></div></div>
 </div>
@@ -93,7 +93,7 @@ $("go").onclick=()=>{const u=$("uci").value.trim();if(!u)return;const how=$("how
 async function poll(){
   try{snap=await (await fetch("/state")).json()}catch(e){return}
   $("who").textContent=snap.role==="user"?"you are WHITE (user)":"you are BLACK (hub)";
-  $("clock").textContent="height "+snap.height+" · next venue slot "+snap.next_slot+" · one block per "+snap.block_secs+"s";
+  $("clock").textContent="t+"+snap.now+"s · move "+(snap.depth+1)+" due t+"+snap.next_due+"s ("+(snap.next_due-snap.now)+"s) · a move every "+snap.ell+"s · Bitcoin height "+snap.height+", MTP t+"+snap.mtp+"s";
   $("turn").textContent=snap.terminal?("game over: "+snap.terminal):("depth "+snap.depth+" · "+(snap.to_move==="user"?"white":"black")+" to move");
   $("pot").textContent="payout address: "+snap.balance_sat.toLocaleString()+" sat";
   render();
@@ -103,8 +103,8 @@ async function poll(){
     btn.onclick=()=>{let c=a.cmd;const d=$("depth").value.trim();if((a.name==="claim"||a.name==="counter")&&d)c=a.name+" "+d;if(a.name==="disprove"&&$("leaf").value)c+=" "+$("leaf").value;cmd(c)};
     A.appendChild(btn);const h=document.createElement("span");h.className="hint";h.textContent=" "+a.hint;A.appendChild(h);A.appendChild(document.createElement("br"))}
   const L=$("leaf");const cur=L.value;L.innerHTML='<option value="">the leaf that fires</option>';for(const d of snap.disproves){const o=document.createElement("option");o.value=d.name;o.textContent=(d.fires?"* ":"  ")+d.name;L.appendChild(o)}L.value=cur;
-  $("venuehint").textContent=snap.n+" members sharing one content key, flag threshold "+snap.threshold+" of "+snap.n+"; any member seals any slot";
-  const S=$("slots").querySelector("tbody");S.innerHTML="";for(const s of snap.slots){const tr=document.createElement("tr");tr.className=(s.ok||s.entry==="empty"?"":"bad")+(s.late?" late":"");tr.innerHTML=`<td>${s.slot}</td><td>${s.height}</td><td>member ${s.proposer}${s.late?" (LATE)":""}</td><td>${s.entry}</td><td>${s.flags==null?"":s.flags+" of "+snap.n+" flag it empty"}</td>`;S.appendChild(tr)}
+  $("venuehint").textContent=snap.n+" members sharing one content key, flag threshold "+snap.threshold+" of "+snap.n+"; each move goes to its designated sealer (the rotation), the mover falling back after "+snap.backoff+"s; claims "+snap.margin+"s after a due time, against median-time-past";
+  const S=$("slots").querySelector("tbody");S.innerHTML="";for(const s of snap.slots){const tr=document.createElement("tr");tr.className=(s.ok?"":"bad")+(s.late?" late":"");tr.innerHTML=`<td>${s.slot}</td><td>t+${s.due}s</td><td>${s.proposer>1000?"—":"member "+s.proposer}${s.late?" (LATE)":""}</td><td>${s.entry}</td><td>${s.flags==null?"":s.flags+" of "+snap.n+" flagged it"}</td>`;S.appendChild(tr)}
   $("mempool").textContent=snap.mempool.length?("in the mempool, confirms at the next block: "+snap.mempool.join(", ")):"";
   const V=$("live").querySelector("tbody");V.innerHTML="";for(const l of snap.live){const tr=document.createElement("tr");tr.innerHTML=`<td><code>${l.label}</code></td><td>${l.height}</td><td>${l.value_sat.toLocaleString()} sat</td><td>${l.spent?"spent":"unspent"}</td>`;V.appendChild(tr)}
   $("log").textContent=snap.log.join("\n");$("log").scrollTop=$("log").scrollHeight;

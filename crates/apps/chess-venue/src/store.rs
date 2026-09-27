@@ -88,14 +88,25 @@ impl Store {
     pub fn registry() -> &'static str {
         "venue/registry.json"
     }
-    pub fn block(slot: u32) -> String {
-        format!("venue/blocks/{slot:04}.json")
+    /// Member `member`'s seal of depth `d` (D55: keyed by depth, sealed on
+    /// submission; two members may seal the same entry).
+    pub fn seal(d: u32, member: usize) -> String {
+        format!("venue/seals/{d:04}-{member}.json")
     }
-    pub fn late_block(slot: u32) -> String {
-        format!("venue/blocks/{slot:04}.late.json")
+    pub fn seals_dir() -> &'static str {
+        "venue/seals"
     }
-    pub fn flags(slot: u32) -> String {
-        format!("venue/flags/{slot:04}.json")
+    pub fn flags(d: u32) -> String {
+        format!("venue/flags/{d:04}.json")
+    }
+    /// Submissions an honest member would not seal, held for the venue
+    /// page's misbehaviour controls: after the due time (`late`), or not
+    /// signed by the mover (`refused`).
+    pub fn late_dir() -> &'static str {
+        "venue/late"
+    }
+    pub fn refused_dir() -> &'static str {
+        "venue/refused"
     }
     pub fn web(r: Role) -> String {
         format!("players/{}/web.json", r.name())
@@ -125,37 +136,58 @@ pub struct NodeInfo {
     pub datadir: String,
 }
 
+/// The venue's parameters (D55): the clock and the members' rules; the
+/// game's own timetable (t0) is fixed by the contract.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VenueParams {
-    /// The Bitcoin height the slot count starts from: slot `s` seals at
-    /// `b0 + s`; set once the contract is funded.
-    pub b0: u32,
-    pub max_slot: u32,
+    /// Seconds between Bitcoin blocks (independent of the venue).
     pub block_secs: u64,
     pub n: usize,
     pub threshold: u32,
     pub max_depth: u32,
+    /// Seconds per move (`ell`).
+    pub ell: u32,
+    /// The mover's fallback: resubmit to the next member after this many
+    /// seconds without a seal.
+    pub backoff: u32,
+    /// The claim margin `m` past a move's due time (median-time-past).
+    pub margin: u32,
+    /// Seconds from the contract proposal to move 0's time `t0` (setup:
+    /// the graph is built and signed in between).
+    pub start_secs: u32,
 }
 
+/// A seal, as the venue publishes it: the attestation, the proposer
+/// reveal, when it was made, and whether an honest member would have made
+/// it (`late`: after the due time; `rogue`: an entry the mover did not
+/// sign) — the last two only by the venue page's misbehaviour controls.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BlockJson {
-    pub slot: u32,
+    pub depth: u32,
     pub header: String,
     pub entry: String,
     pub secrets: Vec<String>,
     pub proposer: usize,
     pub proposer_secret: String,
+    pub sealed_at: u32,
+    #[serde(default)]
+    pub late: bool,
+    #[serde(default)]
+    pub rogue: bool,
 }
 
 impl BlockJson {
-    pub fn from_block(b: &SealedBlock) -> BlockJson {
+    pub fn from_block(b: &SealedBlock, sealed_at: u32, late: bool, rogue: bool) -> BlockJson {
         BlockJson {
-            slot: b.header.height(),
+            depth: b.header.height(),
             header: hex::encode(b.header.as_bytes()),
             entry: hex::encode(&b.entry),
             secrets: b.attestation.secrets.iter().map(|s| hex::encode(s.secret_bytes())).collect(),
             proposer: b.proposer,
             proposer_secret: hex::encode(b.proposer_secret.secret_bytes()),
+            sealed_at,
+            late,
+            rogue,
         }
     }
 
@@ -163,6 +195,7 @@ impl BlockJson {
         let hb: [u8; 96] = hex::decode(&self.header)?.try_into().map_err(|_| anyhow!("header is 96 bytes"))?;
         let secrets = self.secrets.iter().map(|s| Ok(SecretKey::from_slice(&hex::decode(s)?)?)).collect::<Result<Vec<_>>>()?;
         Ok(SealedBlock {
+            contract: CONTRACT_ID,
             header: Header(hb),
             entry: hex::decode(&self.entry)?,
             attestation: Attestation { secrets },
@@ -172,7 +205,7 @@ impl BlockJson {
     }
 }
 
-/// The members' flag scalars for a slot (index member; `None` = silent).
+/// The members' flag scalars for a depth (index member; `None` = silent).
 pub type FlagsJson = Vec<Option<String>>;
 
 pub fn flags_to_json(f: &[Option<SecretKey>]) -> FlagsJson {
@@ -183,11 +216,20 @@ pub fn flags_from_json(f: &FlagsJson) -> Result<Vec<Option<SecretKey>>> {
     f.iter().map(|s| s.as_ref().map(|h| Ok(SecretKey::from_slice(&hex::decode(h)?)?)).transpose()).collect()
 }
 
-/// A submitted entry, queued for the next slot.
+/// A submitted entry for depth `depth`, addressed to member `to` (the
+/// designated sealer, or the mover's fallback), at unix time `at`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct InboxEntry {
     pub from: String,
+    pub depth: u32,
+    pub to: usize,
     pub entry: String,
+    pub at: u32,
+}
+
+/// Now, in unix seconds.
+pub fn unix_now() -> u32 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(0)
 }
 
 /// A player's public offer: its channel keys and its per-depth contract
@@ -198,11 +240,17 @@ pub struct Offer {
     pub keys: Vec<(u32, PosKeyOffer)>,
 }
 
+/// The contract the user proposes: its output, and its timetable (D55:
+/// move `d` is due at `t0 + d·ell`; claims from the due time plus
+/// `margin`; `settle` from `deadline`, all unix times).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ContractJson {
     pub spk: String,
     pub value: u64,
     pub deadline: u32,
+    pub t0: u32,
+    pub ell: u32,
+    pub margin: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
