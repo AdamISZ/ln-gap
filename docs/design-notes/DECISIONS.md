@@ -2264,6 +2264,8 @@ FL1-FL4, the pos crate, the venue world.
 
 ## D54. The venue keeps wall-clock time; only the claim window reads Bitcoin's clock
 
+[Superseded in part by D55 (2026-09-27): there are no venue slots; content is keyed by (contract, depth) and timeliness is per-contract flags. The clock parts below — wall-clock deadlines, the median-time-past claim window with margin `m`, the signet cut — stand.]
+
 Date: 2026-09-26. Context: the clock discussion following D53 (what
 the venue borrows from Bitcoin: the clock, the order between slots,
 finality through dispute windows); the decision to run the PoC's final
@@ -2342,6 +2344,162 @@ by mining. None of it touches the graph.
 contract's window. The venue's clock is now the members' shared wall
 clock, and Bitcoin's role narrows to what only it can do: bound when a
 claim may be made, order the slow path, and settle it.
+
+## D55. Attest what, flag when: content keyed by (contract, depth), timeliness by per-contract flags; no slots
+
+Date: 2026-09-27. Context: preparing D54's wall-clock work — the
+sealing protocol once Bitcoin blocks no longer serialize it (who seals,
+who seals empty, honest collisions), the in-slot staggered schedule
+considered and found fragile, and the observation that one move per
+venue slot cannot serve many contracts with different timings. DESIGN,
+agreed with the user; nothing built. Supersedes D54's slot parts, keeps
+its clock parts.
+
+**The observation.** Lockstep (move `d` must appear in slot `d`) exists
+because the refutation pins slot `d`'s content table as script
+constants. But the contract never needed the venue's slot. It needs two
+facts: WHAT — this head is the venue-attested entry for depth `d` of
+this contract; and WHEN — it was published by this contract's deadline
+`T_d`. One slot index served both. Separate them.
+
+**Decision.**
+- CONTENT is keyed by `(c, d)`, contract and depth, not by slot. At
+  registration the venue publishes, for contract `c`, one shared content
+  table per depth `d = 1..M` (the D53 shared key; nonces derived from
+  `(c, d, chunk, value)`) and each member's proposer point and flag point
+  per depth; every member co-signs the per-contract registry, as
+  announcements are co-signed today. Sealing is attesting the `(c, d)`
+  entry under its own table, whenever it arrives; the venue's blocks, if
+  it keeps any, are bundles of such attestations at a cadence of its
+  choosing, with prev-links for its own bookkeeping only.
+- TIME is the flags alone: member `i` reveals `f_{i,(c,d)}` iff at `T_d`
+  it holds no attested, MOVER-SIGNED entry for `(c, d)`. `not_timely` is
+  unchanged. `T_d` is per contract and judged on members' wall clocks
+  (D54); the deadline rule is the venue's business per contract and can
+  be anything members can evaluate — a fixed schedule `t_0 + d·ℓ`, a
+  per-move allowance from the previous entry's attestation, or a chess
+  clock with a total per player.
+- There are no slots, no schedule, no empty blocks (reversing D47's
+  "every slot is attested", which predates the flags) and no global
+  order that any contract reads.
+
+**What changes in the contract: nothing structural.** Every leaf keeps
+its shape; the disprove family, `not_timely`, `equiv`, the splits, the
+fee lock (`T = C_h + P_{i,(c,d)}`) and the pre-signing counts are
+untouched. Three things change: (1) the refutation's constants are the
+`(c, d-1)` and `(c, d)` tables instead of slots `d-1` and `d` — same
+bytes, re-indexed; (2) `absent_d`, `exhibit_d` and through them the
+counter's dueness carry a median-time-past CLTV at the earliest possible
+deadline plus D54's margin `m` (D54's change), and `settle`'s deadline
+becomes a time as well, so no leaf needs a block-rate estimate; (3) the
+registry is pinned per contract rather than per slot range, same shape.
+A claim made before the mover's actual deadline is answered by the
+mover's timely entry, and R of the refuted open state pays the mover
+(the claimant forfeits), so a loose lower bound on the claim CLTV is
+self-policing.
+
+**Venue rules.**
+- Members seal only entries the mover signed. The per-contract registry
+  carries the movers' state public keys per depth (about 1.7 KB per depth
+  for chess) so members check authorship before sealing. Sealing a head
+  without a valid mover signature is objectively provable (the head, the
+  missing signature, the sealer's proposer reveal) and is grounds for
+  ejection (D48).
+- Each `(c, d)` has a DESIGNATED sealer by round robin,
+  `p(c, d) = (h(c) + d) mod n` with `h` a hash of the contract id (so
+  contracts spread their load), not the mover's hub: a player should not
+  have to route every fee, and every sealing decision, through its
+  opponent. The mover submits to `p(c, d)` with the fee lock to
+  `p(c, d)`'s proposer point; if no attestation for `(c, d)` has
+  appeared after a backoff `b`, it resubmits to the next member in the
+  rotation with a fresh lock, and so on while its allowance lasts
+  (1-of-n liveness, one fallback per `b`). Members seal only entries
+  submitted to them: collisions then arise only from the mover's own
+  resubmissions (the same head, harmless). The rule is advisory: whether
+  a member "had seen" another's seal is unprovable, so violating it is
+  never grounds for ejection. `b` covers propagation and a member's
+  response, not the game: about 30 s for real deployments (15 s
+  acceptable, under 10 s too aggressive), a few seconds on regtest. The
+  mover's effective submission deadline is `T_d − k·b` for the `k`
+  attempts it wants to leave room for; the player UI shows that, not
+  `T_d`.
+- Sealing is NOT contingent on the fee arriving. The lock is the
+  member's reward, routed by whatever path the payer has (in the PoC,
+  the payer's channel with its hub, the hub forwarding to the member
+  under the same point); a designated member seals a valid mover-signed
+  entry submitted to it whether or not the payment has settled, so a hub
+  refusing to forward cannot censor its own opponent. A member refusing
+  to seal is censorship, unprovable, and answered by the rotation and the
+  franchise as before.
+- Contract identifiers are globally unique (derived from something
+  unique, e.g. the funding outpoint; the venue refuses duplicates): two
+  contracts sharing an id would share tables, and their different heads
+  would read as equivocation.
+- Registration is paid (M tables of curve arithmetic, about 100 ms and
+  50 KB each), or anyone can make the venue compute tables for fake
+  contracts.
+
+**Collisions, classified** (two seals for one `(c, d)`):
+- same head, two sealers: the same attestation byte for byte (shared
+  key, deterministic nonces); only the proposer reveals differ. Harmless;
+  a refutation names either. Cost: the non-payee sealer is unpaid.
+- two different heads, both mover-signed: the MOVER's equivocation, both
+  public on the venue; the claimant spends `equiv`. The members are
+  blameless.
+- a head the mover did not sign: inert in the contract (the authorship
+  gate), excluded from the flag semantics, and provably the sealer's
+  fault (above).
+- the mover's head sealed after `T_d`: flags, `not_timely`, as D50.
+No fork-choice is needed: every case is identical, the mover's fault,
+provably a member's fault, or late. D53's deferred collided-slot rule is
+closed for bilateral contracts.
+
+**What it cleans up (bilateral contracts).** D54's slot-alignment
+problems vanish: block-height slots, the in-slot staggered schedule,
+empty blocks, collided slots. Lockstep goes: each contract has its own
+deadline rule, independent of every other contract on the venue. Many
+contracts share one venue with no set-valued slots, no Merkle root
+inside the attestation and no merge rule. For the single-contract PoC
+the change is nearly free — slot = depth already, so the `(c, d)` tables
+ARE today's slot tables; the work is the per-contract deadline, sealing
+on arrival, the authorship check at sealing, and D54's time locks.
+
+**What it does not do (shared facts).** The cleanup rests on one fact:
+each `(c, d)` table has exactly one legitimate content, the mover's
+signed move, so no collision ever needs a canonical choice. Shared facts
+break that. An auction phase has many writers, and its fact is a SET
+("all timely bids") read by many contracts; a registry's fact is a
+history of transfers. Keyed attestation still helps — per-(auction,
+bidder, phase) tables give each writer a one-content key, and flags give
+per-writer timeliness — but it needs the writers known at registration,
+and completeness ("these are all the bids"), uniqueness across the
+reading contracts and ordering between writers are not provided by
+anything here. Those remain the shared-fact problem: canonicity is
+economic, with the accepted limitation that one franchise is measured
+against every contract relying on the fact.
+
+**What it costs.** Members learn each contract's identifier and
+timetable (never its content), and the movers' hubs submit the moves.
+Venue work and registry data are per contract instead of shared per
+slot. Flagging scales with open contracts: one scalar per member per
+`(c, d)` that passes its deadline empty.
+
+**Kept from D54.** Wall-clock deadlines judged by members' clocks;
+Bitcoin's clock read only for the claim window, by a median-time-past
+CLTV with margin `m` (a parameter: small for regtest and signet, the
+hostile value documented); relative windows in blocks; the signet cut
+as a later, separate phase.
+
+**Order of work.** (1) btc: an absolute-time CLTV (`Builder`,
+`Timelock`, `check_timelock`, which today rejects time-based
+`nLockTime`). (2) pos: the registry and `PosMiner` keyed by `(c, d)`,
+sealing on arrival with the authorship check, flags against per-contract
+deadlines, `claim_from` returning a time. (3) harness: worlds on a mock
+wall clock (`setmocktime`, enough blocks per time jump for
+median-time-past to follow); PS/PC/FL outcomes unchanged. (4)
+chess-venue: `t_0` and a per-move allowance in place of `b0` and
+`block_secs`, blocks mined at an independent rate. (5) docs:
+SCENARIOS.md regenerated, the paper's venue section.
 
 ## TODO
 
