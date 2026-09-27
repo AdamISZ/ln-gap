@@ -2501,6 +2501,44 @@ chess-venue: `t_0` and a per-move allowance in place of `b0` and
 `block_secs`, blocks mined at an independent rate. (5) docs:
 SCENARIOS.md regenerated, the paper's venue section.
 
+**Built (2026-09-27).** Implemented as planned (D55_PLAN.md, local),
+in five steps, each green:
+- btc: a CLTV value from 500,000,000 on is a unix time, as consensus
+  reads nLockTime (`Builder::cltv`, `Timelock`, `check_timelock`, which
+  now rejects a height/time mismatch either way); `Regtest::mtp`,
+  `set_mock_time`, `advance_mtp_to`, `make_time_final` — BIP113 finality
+  is STRICT (`nLockTime < MTP`), so a claim with lock `T` mines once MTP
+  has passed `T`.
+- pos: `key_index(c, d) = (c << 32) | d` in the existing u64 table index
+  (content tables, proposer and flag keys); `PosMiner` registers contracts
+  with an `Authorship` check and seals on submission (`seal_entry`,
+  honest; `seal_unchecked`, a rogue's); `rotation(c, d, n)` and
+  `default_sealer` skipping silent members; the header's `prev` is zero,
+  so two members sealing one entry produce byte-identical headers and
+  attestations; `PosClient` per contract, `Observation::{New, Known,
+  Equivocation}` by HEAD; `Registry` and announcements per contract;
+  `GameClock { t0, ell, margin }`, `due(d)`, `claim_from(d)` a time, the
+  settle deadline a time; `PosInstance::authorship()` (the signature only,
+  never well-formedness — a malformed signed entry is the contract's
+  `chess_malformed` business, D45).
+- harness: the worlds keep a wall clock; a stall seals nothing; flags at
+  due times; claims wait on median-time-past. PS9/PC8 are now "honest
+  members refuse, a rogue seals"; PS10/PC10 "nothing attested at the
+  stalled depth"; PS12/PC13 "the late seal is the only one, the flags
+  kill it"; PS13/PC14 "the designated sealer is silent, the next in the
+  rotation seals". Outcomes, balances and every measured size unchanged;
+  pre-signed counts 166 / 129 unchanged.
+- chess-venue: the contract carries its timetable; the venue registers
+  the contract and seals on arrival, holds late and unsigned submissions
+  for its `late` / `rogue` controls, flags at due times, mines on its own
+  clock; the player falls back along the rotation. Driven over HTTP: an
+  illegal move claimed, refuted and disproved; a stall flagged, sealed
+  late by a colluding member, refuted and killed by `not_timely`.
+
+On regtest a claim opens about six block intervals after its lock (MTP
+trails the clock); with 10 s blocks, ~50 s. On signet it is about an
+hour, which is the argument for a small `m` there.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

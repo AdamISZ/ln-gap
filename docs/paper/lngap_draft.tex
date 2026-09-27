@@ -137,7 +137,7 @@ The following diagram (Figure~\ref{fig:highlevel}) shows at a high-level how thi
 \node[box] (rev) at (-6,-2.3) {\textbf{Revocation}\\ an old state was published: counterparty takes all};
 \node[box] (set) at (-3,-2.3) {\textbf{Settle}\\ the agreed outcome, or the default after the deadline};
 \node[box] (eqv) at (0,-2.3) {\textbf{Equivocation}\\ the mover signed two moves: claimant takes all};
-\node[box=30mm, thick] (clm) at (3.8,-2.3) {\textbf{Claim}\\ ``no legal move was published in slot $d$''};
+\node[box=30mm, thick] (clm) at (3.8,-2.3) {\textbf{Claim}\\ ``no legal move $d$ was published by its due time''};
 \foreach \n in {rev,set,eqv,clm} \draw[->] (C.south) -- (\n.north);
 
 \node[box=33mm, thick] (ref) at (1.5,-5.0) {\textbf{Refute}\\ the mover shows his move and the venue's attestation of it};
@@ -145,12 +145,12 @@ The following diagram (Figure~\ref{fig:highlevel}) shows at a high-level how thi
 \draw[->] (clm.south) -- (ref.north);
 \draw[->] (clm.south) -- (to1.north);
 
-\node[box=27mm] (nt) at (-1.8,-7.8) {\textbf{Not timely}\\ a majority of validators flagged the slot empty at its deadline: claimant wins};
+\node[box=27mm] (nt) at (-1.8,-7.8) {\textbf{Not timely}\\ a majority of validators flagged move $d$ as unpublished at its due time: claimant wins};
 \node[box] (dis) at (1.5,-7.8) {\textbf{Disprove}\\ the move breaks a rule: claimant wins};
 \node[box] (to2) at (4.6,-7.8) {\textbf{Timeout}\\ no disproof: the claim failed, mover wins};
 \foreach \n in {nt,dis,to2} \draw[->] (ref.south) -- (\n.north);
 
-\node[ven, text width=33mm] (V) at (-5.4,-5.0) {\textbf{Venue}\\ publishes entries in slots; attests (1 of $n$) what was published; flags (majority) what was not};
+\node[ven, text width=33mm] (V) at (-5.4,-5.0) {\textbf{Venue}\\ attests (1 of $n$) each move as it is published; flags (majority) a move not published by its due time};
 \draw[->, densely dashed] (V.east |- ref.west) -- node[above, font=\scriptsize] {attestation} (ref.west);
 \draw[->, densely dashed] (V.south) |- node[pos=0.75, above, font=\scriptsize] {flags} (nt.west);
 \end{tikzpicture}
@@ -223,7 +223,7 @@ Each player attests to a move choice, of course; but there's a subtlety that aff
 The subtlety is that the court sees nothing but what the dispute puts in
 front of it. When the claimant disputes a move, the only facts available
 in Script are the venue's attestations of two consecutive entries: the
-one at the disputed slot and the one before it. So the attested state
+one at the disputed depth and the one before it. So the attested state
 must be \emph{self-sufficient}: everything the rules need in order to
 judge a move must be recoverable from the pair $(S, S')$ plus the move
 itself, with no appeal to the rest of the game's history. For
@@ -234,12 +234,12 @@ that need the whole history (threefold repetition) unless a digest of
 that history is itself part of the state.
 
 Once the state is self-sufficient, the natural condensation follows: an
-entry need carry only $(m, S', t)$, since the previous slot's entry
+entry need carry only $(m, S', t)$, since the previous depth's entry
 already carries $S$. The court reads both entries out and judges the
 triple $(S, m, S')$. This is the form we use: each entry's \emph{head}
 (48 bytes) holds the new state, the move and the status, the region the
 mover signs; the entry carries the mover's one-time signature over that
-region beside the head; and a dispute reads out the heads at slots $d-1$
+region beside the head; and a dispute reads out the heads at depths $d-1$
 and $d$. The mover's signature matters as much as the venue's: a venue
 attestation proves an entry was \emph{published}, the mover's one-time
 signature proves the mover \emph{made} it, and a refutation needs both,
@@ -247,13 +247,13 @@ or anyone could answer a claim with any junk the venue happened to
 seal.
 
 What the court needs from the venue is therefore exactly three kinds of
-statement per slot, and nothing about the game:
+statement per move of each contract, and nothing about the game:
 \begin{enumerate}
-\item \emph{this} entry was published in slot $d$ (a positive
-  attestation, by whichever member sealed the slot);
-\item the member who sealed slot $d$ was member $i$ (so that it can be
+\item \emph{this} entry is move $d$ of contract $c$ (a positive
+  attestation, by whichever member sealed it);
+\item the member who sealed it was member $i$ (so that it can be
   paid, and blamed);
-\item slot $d$ carried no entry at its deadline (a negative statement,
+\item move $d$ was not published by its due time (a negative statement,
   by a majority of members).
 \end{enumerate}
 Section~\ref{sec:venue} describes how the venue produces these, and
@@ -262,84 +262,100 @@ Section~\ref{sec:graph} how a Bitcoin script consumes them.
 \section{The venue}
 \label{sec:venue}
 
-The venue is a set of $n$ bonded members that publish entries in
-numbered \emph{slots}. It is not a blockchain in the usual sense: it has
-no coin, executes nothing, and maintains no state beyond the record of
-what was published in each slot. It is closer to a schedule of one-time
-attesters than to a chain.
+The venue is a set of $n$ bonded members that attest the moves of the
+contracts registered with it. It is not a blockchain: it has no coin,
+executes nothing, keeps no global order and no sequence of slots. It
+answers, per move of each contract, the two questions a dispute asks:
+\emph{what} was published, and \emph{whether it was published in time}.
+The two answers come from different mechanisms.
 
-\subsection{Slots and the clock}
+\subsection{What: attestations keyed by contract and move}
 
-Slot $d$ has a deadline $T_d = t_0 + d\ell$, where $t_0$ is fixed at the
-contract's open and $\ell$ is the venue's slot length (seconds to
-minutes). Move $d$ of a game must appear in slot $d$. The venue keeps
-wall-clock time: members judge ``empty by $T_d$'' against their own
-clocks, which need agree only to within ordinary clock skew. Bitcoin's
-clock is read in exactly one place, the earliest time an absence claim
-for slot $d$ may be broadcast, which is an absolute timelock at
-$T_d + m$ against median-time-past, with a margin $m$ covering the lag
-of median-time-past and a miner's freedom to skew timestamps. All other
-windows in a dispute are relative timelocks, where block granularity
-only slows a resolution.\footnote{The proof-of-concept counts slots in
-Bitcoin blocks (slot $d$ is sealed at height $b_0 + d$), and the scripts
-in Section~\ref{sec:graph} are written that way; replacing the height
-$b_0 + d + 1 + g$ by the time $T_d + m$ changes one timelock per leaf
-and nothing else.} This is the whole point of having a venue: the
-per-move clock runs at the venue's pace, and Bitcoin's clock measures
+A contract $c$ registers with the venue for moves $d = 1..M$, and the
+venue publishes, for every $(c, d)$, a \emph{content table}: under the
+venue's \emph{content key}, a Schnorr key $X$ that every member holds,
+one anticipation point $A_{(c,d),j,v}$ per header chunk $j$ and nibble
+value $v$. Sealing move $d$ of contract $c$ is attesting its entry under
+that table: revealing the discrete logs of the points the entry's
+header selects. The attestation is an EC-OTS; Section~\ref{sec:graph:math}
+gives the construction. Its property for our purposes is that a Bitcoin
+script can check, one \op{CHECKSIG} per chunk, that the venue attested a
+particular value at a particular position, with no signature
+verification over arbitrary messages. Because the table is keyed by the
+move and not by any schedule of the venue's, many contracts share one
+venue, each with its own timing.
+
+Because the content key is shared, \emph{any} member can seal any move.
+Each move has a \emph{designated} sealer by rotation,
+$p(c,d) = (h(c) + d) \bmod n$ with $h$ a hash of the contract's
+identifier; the mover submits its signed entry to that member and, if no
+seal appears within a backoff $b$ (seconds, covering propagation), to the
+next member in the rotation, and so on. Inclusion therefore needs only
+one honest, live member within the move's time (``1 of $n$ liveness'').
+A shared key cannot say who used it, so each member also holds, per
+move, a \emph{proposer} key $P_{i,(c,d)} = p_{i,(c,d)}G$ and reveals
+$p_{i,(c,d)}$ in the seal it makes. Every refutation on Bitcoin names the
+member whose seal it relies on (Section~\ref{sec:graph:claim}).
+
+Honest members seal only entries the mover signed: the contract's
+registration carries the movers' per-move state keys, and a member
+checks the signature (never the move's legality, which is the disprove
+family's business). A member that seals an unsigned entry is caught by
+the entry itself, and ejected; the seal is inert in any contract, since
+a refutation must carry the mover's signature.
+
+Two seals of the same move are therefore one of four things: the same
+entry sealed by two members (byte-identical attestations: the shared
+key and the per-value nonces are deterministic); two different entries
+both signed by the mover (the \emph{mover's} equivocation, answered by
+the contract's \texttt{equiv} leaf); an unsigned entry (the sealer's
+fault, provable); or a seal made after the due time (next). None needs
+a canonical choice between them, so the venue needs no fork-choice rule.
+
+\subsection{When: due times and flags}
+
+Each contract fixes its timetable at open: move $d$ is due at
+$T_d = t_0 + d\ell$ (seconds per move $\ell$; other rules, up to a chess
+clock, are possible, since only the members read them). Members judge
+``due'' against their own clocks, which need agree only to within
+ordinary clock skew. The negative statement is a one-bit signature: each
+member holds, per move, a \emph{flag} key $F_{i,(c,d)} = f_{i,(c,d)}G$
+and reveals $f_{i,(c,d)}$ if at $T_d$ it held no attested, mover-signed
+entry for the move. A flag is a single point whose secret is revealed or
+not, so a script counts flags with \op{CHECKSIGADD} at the cost of one key
+per member. A refutation relying on a seal that $t$ members flagged is
+killed by the \texttt{not\_timely} leaf. The threshold is a bare
+majority, $t = \lceil (n+1)/2 \rceil$: a flag is one-sided (false
+absence costs $t$ named flaggers; a late seal left standing costs its
+sealer plus the silence of $n - t + 1$ honest members), and the two
+failure costs balance at the majority.
+
+This is what makes timeliness enforceable against a colluding member.
+Honest members do not seal a move after its due time; a member that
+does, for a stalling player, produces a perfectly valid attestation,
+and without flags a refutation built on it would defeat an honest
+absence claim. With flags, the honest majority's on-time statement
+``move $d$ was not published'' outweighs the late seal.
+
+Bitcoin's clock is read in one place: the earliest time an absence claim
+for move $d$ may be broadcast, an absolute timelock at $T_d + m$ against
+median-time-past, the margin $m$ covering the lag of median-time-past
+and a miner's freedom to skew timestamps. All other windows in a dispute
+are relative timelocks, where block granularity only slows a resolution.
+The per-move clock runs at the venue's pace; Bitcoin's clock measures
 only the $O(1)$ dispute about it.
-
-\subsection{Publishing: one content key, sealed by any member}
-
-A player publishes by sending its entry to any member. The member
-\emph{seals} the slot: it produces a block whose 96-byte header carries
-the entry's head, and attests the header with the venue's \emph{content
-key}, a Schnorr key $X$ that every member holds. The attestation is an
-EC-OTS: for every slot $s$, header chunk $j$ and nibble value $v$, the
-venue has published in advance an \emph{anticipation point}
-$A_{s,j,v}$, and sealing a header with nibbles $v_0 \ldots v_{191}$
-reveals the discrete logs $a_{s,j,v_j}$ of the selected points.
-Section~\ref{sec:graph:math} gives the construction. Its property for
-our purposes is that a Bitcoin script can check, one \op{CHECKSIG} per
-chunk, that the venue attested a particular value at a particular
-position, with no signature verification over arbitrary messages.
-
-Because the content key is shared, \emph{any} member can seal \emph{any}
-slot; a member that is silent is simply skipped. Inclusion therefore
-needs only one honest, live member per slot (``1 of $n$ liveness''). A
-shared key cannot say who used it, so each member also holds, per slot,
-a \emph{proposer} key $P_{i,s} = p_{i,s}G$ and reveals $p_{i,s}$ in the
-block it seals. Every refutation on Bitcoin names the member whose block
-it relies on (Section~\ref{sec:graph:claim}).
-
-\subsection{Absence: the flag}
-
-The negative statement is a one-bit signature. Each member holds, per
-slot, a \emph{flag} key $F_{i,s} = f_{i,s}G$ and reveals $f_{i,s}$ if
-slot $s$ carried no entry at $T_s$. A flag is not an attestation of
-content; it is a single point whose secret is revealed or not, so a
-script counts flags with \op{CHECKSIGADD} at the cost of one key per
-member. A refutation relying on a block that $t$ members flagged as
-empty at its deadline is killed by the \texttt{not\_timely} leaf. The
-threshold is a bare majority, $t = \lceil (n+1)/2 \rceil$: a flag is
-one-sided (false emptiness costs $t$ named flaggers; a late block left
-standing costs the proposer plus the silence of $n - t + 1$ honest
-members), and the two failure costs balance at the majority.
-
-This is what makes timeliness enforceable against a colluding member. A
-member that seals a stalling player's move \emph{after} the deadline
-produces a perfectly valid attestation, and without flags a refutation
-built on it would defeat an honest absence claim. With flags, the honest
-majority's on-time statement ``slot $d$ was empty'' outweighs the late
-block, and names its sealer.
 
 \subsection{The registry}
 
 Everything a contract needs from the venue is fixed at open. The
-\emph{registry} lists the members, their proposer and flag points for
-every slot, and the content tables, each co-signed by every member. A
-contract pins the registry by root. Members never see contracts: they
+contract's \emph{registry} lists the members, their proposer and flag
+points for every move, and the content tables, each co-signed by every
+member; the contract pins it by root. Members see a contract's
+identifier, timetable and movers' state keys, never its content: they
 publish points in advance and scalars when they seal or flag, and
-whoever disputes uses them.
+whoever disputes uses them. Contract identifiers must be unique on a
+venue (two contracts sharing one would share tables), and registration
+is paid, since it costs the venue a table's curve arithmetic per move.
 
 \subsection{Incentives}
 
@@ -348,14 +364,16 @@ atomically, with a point-locked payment inside the mover's channel. The
 lock point is $T = C_h + P_{i,s}$, the sum of the content points the
 mover's head selects and the intended sealer's proposer point; its
 discrete log is revealed exactly when member $i$ seals exactly that
-head in slot $s$ (Section~\ref{sec:graph:fee}). Publication and payment
+head as that move (Section~\ref{sec:graph:fee}). Sealing is not
+contingent on the fee arriving: the lock is the member's reward, so a
+payer's route (here, through the opponent) cannot be used to censor. Publication and payment
 are one event, as a preimage and a payment are one event in Lightning.
 
 \paragraph{Bonds.} Each member locks bitcoin in a timelocked output on
 Bitcoin for the duration of its membership. The lock is a sacrifice of
 time value, not a slashable deposit in the baseline design: a member
-caught contradicting itself (two blocks at one slot; a lock completed
-without the matching block; a backfill against its own flags) is
+caught contradicting itself (an unsigned seal; a lock completed
+without the matching seal; a seal against its own flag) is
 ejected, losing its future fee stream while its lock sits out its term.
 A venue may additionally attach evidence leaves to the bond, spendable
 by anyone holding a proof of equivocation; without covenants such a
@@ -392,10 +410,11 @@ holds a payment key $P_\U$, $P_\Hb$, and every 2-of-2 leaf below is
 (or \op{NUMEQUALVERIFY} when the leaf continues), with the witness
 carrying $\sigma_\Hb$ then $\sigma_\U$. Timelocks: $\tsd$ is the
 channel's \texttt{to\_self\_delay}, $\dl$ the challenge window and
-$\dlp$ the additional delay on prover-favourable paths; $b_0$ is the
-Bitcoin height the venue's slot count starts from and $g$ a grace
-period, so a depth-$d$ absence claim is admissible from height
-$b_0 + d + 1 + g$.
+$\dlp$ the additional delay on prover-favourable paths; move $d$ is due
+at $T_d = t_0 + d\ell$ and a depth-$d$ absence claim is admissible once
+median-time-past has passed $T_d + m$ (an absolute, time-based
+\op{CLTV}). We write $s$ for the venue's key index of move $d$ of this
+contract, $s = (c, d)$ (\S\ref{sec:venue}).
 
 \subsection{Keys and venue data fixed at open}
 \label{sec:graph:keys}
@@ -419,8 +438,8 @@ party is the \emph{claimant} $c(d)$):
   (claimant): Lamport keys over the $2$-bit outcome code $X \in \{\text{UserWins},
   \text{HubWins}, \text{Draw}\}$.
 \end{itemize}
-From the venue's registry the draft pins, per slot $s$ (slot $s$ is
-where move $d=s$ must appear):
+From the venue's registry for this contract the draft pins, per move
+$d$ (key index $s = (c, d)$):
 \begin{itemize}
 \item the \emph{content table} $A_{s,j,v}$, $j \in 0..191$, $v \in
   0..15$: one anticipation point per header chunk per nibble value, all
@@ -464,8 +483,8 @@ The game output's tree is
 \begin{lstlisting}[style=script]
 settle:     (*\push{\mathrm{deadline}}*) OP_CLTV OP_DROP  (*\push{\tsd}*) OP_CSV OP_DROP
             2-of-2
-absent_d:   (*\push{b_0+d+1+g}*) OP_CLTV OP_DROP  2-of-2-VERIFY  OP_1
-exhibit_d:  (*\push{b_0+d+1+g}*) OP_CLTV OP_DROP  2-of-2-VERIFY  (*proposer fragment*)
+absent_d:   (*\push{T_d+m}*) OP_CLTV OP_DROP  2-of-2-VERIFY  OP_1
+exhibit_d:  (*\push{T_d+m}*) OP_CLTV OP_DROP  2-of-2-VERIFY  (*proposer fragment*)
             (*two-head readout tied to $K^{\mathrm{ref}}_d$, gated on "terminal"*)
 equiv_d:    2-of-2-VERIFY  WOTS-VERIFY((*$K^{\mathrm{st}}_d$*))  (*park digits*)
             WOTS-VERIFY((*$K^{\mathrm{st}}_d$*))  (*restore*)
@@ -474,7 +493,7 @@ equiv_d:    2-of-2-VERIFY  WOTS-VERIFY((*$K^{\mathrm{st}}_d$*))  (*park digits*)
 \texttt{settle} pays $R(\text{empty board})$ after the contract's
 deadline and is the fallback when nobody claims. \texttt{absent}$_d$ is
 the claimant's \emph{thin absence claim}: ``the mover published no valid
-move at slot $d$''. It asserts nothing about venue content, which is
+move $d$ by its due time''. It asserts nothing about venue content, which is
 what keeps it two hundred bytes; the venue enters only if the mover
 answers. \texttt{exhibit}$_d$ (tic-tac-toe only; chess needs none,
 because a mated side simply has no move to refute with) lets the mover
@@ -581,7 +600,7 @@ not pre-signed: the claimant builds it at dispute time, copies the
 mover's WOTS reveal from the confirmed refutation's witness, signs with
 its own key, and takes the pot. \texttt{not\_timely} is the timeliness
 disprove (\S\ref{sec:graph:math}): it counts signatures under the
-members' flag points and kills a refutation whose slot $t$ members
+members' flag points and kills a refutation whose move $t$ members
 flagged as empty at its deadline. The mover's \texttt{split}$_X$ is
 \emph{self-checking}: unlike the claim output's timeout split, it must
 also re-park the pair and prove in script that $R(\text{parked new
@@ -681,20 +700,20 @@ milliseconds.
 
 \paragraph{The content attestation.}
 The venue's content key is a Schnorr key $X = x G$ shared by its
-members. For slot $s$, chunk $j$ and value $v$ the venue derives a
+members. For key index $s = (c, d)$, chunk $j$ and value $v$ the venue derives a
 per-statement nonce $r_{s,j,v}$ and publishes the anticipation point
 \[
   A_{s,j,v} \;=\; R_{s,j,v} + e_{s,j,v}\,X,
   \qquad R_{s,j,v} = r_{s,j,v}\,G,\quad
   e_{s,j,v} = H(R_{s,j,v},\,X,\,s\,\|\,j\,\|\,v).
 \]
-Sealing a header $\mathbf{h}$ with nibbles $v_0..v_{191}$ at slot $s$
+Sealing a header $\mathbf{h}$ with nibbles $v_0..v_{191}$ as move $s$
 means revealing, for every $j$, the scalar
 \[
   a_{s,j,v_j} \;=\; r_{s,j,v_j} + e_{s,j,v_j}\,x,
   \qquad a_{s,j,v_j}\,G = A_{s,j,v_j},
 \]
-that is, a Schnorr signature on the statement ``chunk $j$ of slot $s$
+that is, a Schnorr signature on the statement ``chunk $j$ of move $s$
 is $v_j$'' whose value is its own verification key. Scripts never
 verify these signatures; they verify possession of them. The mover
 proving that the venue attested $h_d$ signs the refutation transaction
@@ -707,14 +726,14 @@ and is the object the flags and the proposer bit attribute.
 \paragraph{The proposer bit and the flag.}
 Content is a $96$-nibble message and costs a table; a statement with no
 content costs one point. Each member $i$ therefore holds two one-bit
-keys per slot, $P_{i,s} = p_{i,s} G$ (``I sealed slot $s$'') and
-$F_{i,s} = f_{i,s} G$ (``slot $s$ carried no entry at its deadline''),
+keys per move, $P_{i,s} = p_{i,s} G$ (``I sealed move $s$'') and
+$F_{i,s} = f_{i,s} G$ (``move $s$ was not published by its due time''),
 and reveals the scalar when the statement holds: $p_{i,s}$ in the block
 it seals, $f_{i,s}$ as data. A revealed scalar is again a private key,
 so the disputing party signs its \emph{own} transaction with it. In
 \texttt{refute} the proposer fragment selects $P_{i,d}$ by a witness
 index and demands a signature under it, so every refutation names the
-member that sealed the slot. In \texttt{not\_timely} the claimant
+member that sealed the move. In \texttt{not\_timely} the claimant
 signs under any $t$ of the $F_{i,d}$ and leaves the rest of the
 witness slots empty; \op{CHECKSIGADD} counts, an empty signature adds
 zero, and the leaf passes iff at least $t$ members flagged. Members
@@ -799,11 +818,11 @@ is answered by ejection rather than by script.
 \node[tx, below right=8mm and 2mm of L] (to) {timeout $\to$ payer\\{\scriptsize after expiry}};
 \draw[->] (L.south) -- (claim.north);
 \draw[->] (L.south) -- (to.north);
-\node[tx, densely dashed, left=22mm of claim, align=left, font=\scriptsize] (venue) {member $i$ seals slot $s$:\\reveals $a_{s,j,v_j}$ (all $j$) and $p_{i,s}$};
+\node[tx, densely dashed, left=22mm of claim, align=left, font=\scriptsize] (venue) {member $i$ seals move $s$:\\reveals $a_{s,j,v_j}$ (all $j$) and $p_{i,s}$};
 \draw[->, densely dashed] (venue.east) -- node[above, font=\scriptsize, fill=white, inner sep=1pt] {$t = c_h + p_{i,s}$} (claim.west);
 \end{tikzpicture}
 \caption{The fee lock output. The venue's attestation of exactly the
-payer's head at slot $s$ by member $i$ reveals the scalar that completes
+payer's head as move $s$ by member $i$ reveals the scalar that completes
 the payer's pre-signature; nothing else does.}
 \label{fig:fee}
 \end{figure}
@@ -865,11 +884,11 @@ Figure~\ref{fig:highlevel}:
   depth limit $M$, the registry root, and the one-time keys per depth.
   They sign the new commitment and the graph of Section~\ref{sec:graph}.
 \item[Honest play.] Each move is an entry published on the venue in its
-  slot, with its fee paid through the fee lock, and an ordinary channel
+  time, with its fee paid through the fee lock, and an ordinary channel
   update between the players. At the end, the loser folds: the channel
   is updated to the result and the contract output disappears. Nothing
   reaches Bitcoin.
-\item[A stall.] The mover publishes nothing in slot $d$. After $T_d+m$
+\item[A stall.] The mover publishes nothing for move $d$. After $T_d+m$
   the claimant broadcasts the absence claim, then after $\delta$ the
   timeout split. Two small transactions, under $400$ vB, at any depth.
 \item[A false stall claim.] The mover did publish. He answers with the
@@ -882,7 +901,7 @@ Figure~\ref{fig:highlevel}:
   re-commitment from the confirmed refutation's witness and spends the
   one disprove leaf the move violates.
 \item[A late move.] A member colluding with the mover sealed his move
-  after $T_d$. The honest majority flagged slot $d$ as empty at $T_d$;
+  after $T_d$. The honest majority flagged move $d$ at $T_d$;
   the claimant spends \texttt{not\_timely} with $t$ flags.
 \item[Equivocation by a player.] The mover signed two different moves at
   depth $d$ (for instance, one to the venue and another to the
@@ -918,7 +937,7 @@ publication, and uniqueness (one chain, one spend per output). Because
 they arrive together they are easily conflated. Off-chain they separate:
 \begin{itemize}
 \item \textbf{A public clock} is what a two-party game needs. The
-  venue's per-slot record must be \emph{decided} (the flag majority), but
+  venue's per-move record must be \emph{decided} (the flag majority), but
   no reader other than the two players ever consults it, so nothing is
   gained by one player being shown a different record than the other: the
   players' own one-time keys already forbid them from signing two
@@ -942,10 +961,10 @@ record in a single-use output chain) therefore gives uniqueness to
 \emph{clients} running nodes, but not to contracts.
 
 For contracts, uniqueness of a shared fact is economic: two attestations
-at one slot are an unambiguous, attributable equivocation by the venue,
+for one fact are an unambiguous, attributable equivocation by the venue,
 whichever of them was anchored, and the condition of
 Section~\ref{sec:venue} must hold with $G$ the value extractable from
-\emph{all} contracts relying on the slot. For a two-party game $G$ is one
+\emph{all} contracts relying on the fact. For a two-party game $G$ is one
 pot. For a shared fact it is an aggregate, measured against the
 franchise of the members who equivocate. We take this as the limitation
 of the system for shared facts: they are secure up to a value set by the
@@ -966,7 +985,7 @@ the provider's bond $B$. The data is handed over off-chain.
 
 \paragraph{Each epoch is two moves.} The customer publishes a challenge,
 an index $i$, on the venue. The provider must publish chunk $c_i$ with
-its Merkle path to $R$ in the next slot. The fee for the epoch is paid in
+its Merkle path to $R$ by the next due time. The fee for the epoch is paid in
 the channel as usual; the bond stays locked.
 
 \paragraph{Disputes are the game's disputes.} A missing response is an
@@ -1012,13 +1031,17 @@ and all of them settle on one shared fact: the set of bids published on
 time.
 
 \paragraph{Phases.} Bidders publish commitments
-$H(\mathit{bid}\,\|\,\mathit{salt}\,\|\,\mathit{key})$ by a commit slot
-$s_c$ and reveal them by a reveal slot $s_r$. A bidder locks
+$H(\mathit{bid}\,\|\,\mathit{salt}\,\|\,\mathit{key})$ by a commit time
+$T_c$ and reveal them by a reveal time $T_r$. A bidder locks
 $L_i \ge \mathit{bid}_i$ in its contract, over-locking by a random amount
 so that $\Hb$ learns nothing before the reveals. An unrevealed
-commitment forfeits a deposit $\pi$. Venue slots carry a \emph{set} of
-entries for this: the attested head is a Merkle root, and an entry is
-exhibited by its path.
+commitment forfeits a deposit $\pi$. On the keyed venue each bidder's
+commitment and reveal are entries under their own keys, one table per
+(auction, bidder, phase), so each has exactly one legitimate content and
+per-bidder timeliness comes from the flags as for a game; this needs the
+bidders known at registration. What the venue does not provide is the
+\emph{set}: that these are all the bids, and that every reading contract
+sees the same ones.
 
 \paragraph{The outcome is a pointer claim.} Settlement is claimed as
 ``winner $w$ at price $p$, where $p$ is bid $k$'', not computed. The
@@ -1051,10 +1074,10 @@ on timeout.
 venue could show the seller's contract a high price and the winner's a
 low one, at the hub's expense. That is the limitation of
 Section~\ref{sec:beyond}, and here it is benign: the value at stake is
-bounded by the auction and known when its slots are published, so the
-fee for the closing slot can be sized to it.
+bounded by the auction and known when its phases are registered, so the
+fees for its attestations can be sized to it.
 
-\paragraph{What is still to build.} Set-valued slots, the pointer-claim
+\paragraph{What is still to build.} Per-bidder registration, the pointer-claim
 graph, and settlement at a variable price (either a grid of pre-signed
 splits, one per price bucket, or payouts decomposed into binary-weighted
 outputs).
@@ -1069,8 +1092,8 @@ The assumptions fall into five classes:
   (one-time signatures, Schnorr, SHA-256) and Script.
 \item \textbf{Lightning's}: a party watches the chain and responds within
   its windows; fees for pre-signed transactions can be bumped.
-\item \textbf{1 of $n$}: at least one member is honest and live during
-  the relevant slot.
+\item \textbf{1 of $n$}: at least one member is honest and live before
+  the relevant due time.
 \item \textbf{Majority}: fewer than $t$ members collude.
 \item \textbf{Economic}: misbehaviour is attributable and costs more than
   it gains; bounded by the condition of Section~\ref{sec:venue}.
@@ -1092,7 +1115,8 @@ a false absence claim & refutation with the venue's attestation & 1 of $n$ (some
 censorship of a mover (no member seals) & nothing in Script; fee income, member independence & 1 of $n$ \\
 a late seal colluding with the mover & \texttt{not\_timely}: $t$ flags & majority \\
 false flags against a timely move & none in Script; flaggers named, ejected & majority; economic \\
-two blocks at one slot & proposer named; ejection; optional burn & economic ($G$: one pot) \\
+an unsigned seal & provable from the seal; ejection & economic \\
+two different signed moves at one depth & \texttt{equiv} leaf (the mover's fault) & cryptographic \\
 fee lock completed without sealing & self-contradiction against the venue's record; ejection & economic \\
 the venue halting & none: see below & --- \\
 a shared fact shown differently to different contracts & attribution; ejection; optional burn & economic ($G$: aggregate) \\
@@ -1115,7 +1139,7 @@ venue.
 
 \paragraph{Censorship.} A mover whose entry no member will seal loses by
 absence. This is theft-shaped, not merely a delay, and nothing in Script
-prevents it. It requires every member to refuse for the whole slot, and
+prevents it. It requires every member to refuse until the move is due, and
 so is defended by the independence of the members (operators,
 jurisdictions, hosts) and by the fees each forgoes; bonds, which punish
 only self-contradiction, do not reach it. A forced-inclusion path
@@ -1124,7 +1148,7 @@ possible backstop.
 
 \paragraph{The majority.} Flags are the only place the design needs a
 threshold, and it is there for \emph{order}, not for stake: two blocks
-by two members (``slot $d$ is empty'', ``slot $d$ holds this move'')
+by two members (``move $d$ was not published'', ``here is move $d$'')
 cannot be ordered by any third fact, so canonical timing needs agreement
 among the members, or an external clock. A colluding majority can kill
 an honest mover's refutation with false flags; the flags are signatures,
@@ -1135,7 +1159,7 @@ whom to pursue.
 be published, and an absence claim against whoever is on move succeeds.
 In the present design a dead venue therefore decides games against the
 player on move. Requiring the claimant to show the flags (the positive
-statement ``slot $d$ was empty'') \emph{in the claim itself} would turn
+statement ``move $d$ was not published'') \emph{in the claim itself} would turn
 this into a liveness failure (no flags, no claim; the contract settles by
 its default at the deadline), at the price of letting a colluding
 majority protect a staller by withholding flags. The choice is between
@@ -1146,7 +1170,7 @@ defend what is attributable. For two-party contracts the gain from any
 venue misbehaviour is at most one pot, and a venue whose members' fee
 franchise exceeds the largest pot in flight has no reason to misbehave.
 For shared facts the gain is the sum over all contracts relying on a
-slot, and the same franchise must cover it. We state this as the
+fact, and the same franchise must cover it. We state this as the
 limitation of the system rather than engineer around it: the only ways
 to remove it are verifying the venue's chain in Script (SPV, impractical)
 or turning the fact into Bitcoin outputs that each contract spends,
@@ -1176,7 +1200,7 @@ Section~\ref{sec:storage}.
 
 Lightning cannot adjudicate silence, and that single gap is what keeps
 games, service agreements and auctions off it. A venue that publishes
-in slots, attests what it published with signatures a Bitcoin script can
+each move as it is published, attests it with signatures a Bitcoin script can
 read, and flags by majority what it did not, closes the gap with
 $O(1)$ transactions per dispute and no change to Bitcoin. Content stays
 cryptographic; time becomes a 1-of-$n$ and majority fact about a bonded,
