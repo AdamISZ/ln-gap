@@ -1032,9 +1032,17 @@ and deal collateral and must answer a Proof-of-Spacetime challenge for
 every sector every day; a missed proof puts the sector in fault, with a
 daily fee, and persistent faults terminate it and slash the collateral,
 which is largely burned~\cite{filecoin}. Both burn rather than
-compensate, which denies a client and a colluding provider any profit
-from penalties; a construction that pays the customer from the bond, as
-ours can, must weigh the same collusion. And in both, the penalty
+compensate. In Filecoin the reason is a third party: stored data earns
+storage power and block rewards, so a client and provider who could
+profit from penalties together would be taking from the network. A
+bilateral contract has no third party to defraud, and paying the
+customer from the bond is sound. What it does create, as Sia's design
+anticipates, is the customer's interest in the provider failing, by
+disrupting its connectivity or by colluding with the venue to suppress
+its responses; the second is the venue-majority attack of
+Sections~\ref{sec:security} and~\ref{sec:accountable}, and the first is
+answered by the provider's freedom to submit to any member, and to
+publish on Bitcoin in distress. And in both, the penalty
 deters but does not recover data: durability comes from erasure-coding
 across many independent providers (Sia's renter software spreads each
 file across dozens of hosts and repairs as they fail), with frequent
