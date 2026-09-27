@@ -211,6 +211,41 @@ impl Regtest {
         Ok(())
     }
 
+    /// Median-time-past of the tip: what a time-based CLTV is checked
+    /// against (the median of the last eleven block timestamps).
+    pub fn mtp(&self) -> Result<u32> {
+        let v: serde_json::Value = self.rpc.call("getblockchaininfo", &[])?;
+        v["mediantime"].as_u64().map(|t| t as u32).ok_or_else(|| anyhow!("getblockchaininfo: no mediantime"))
+    }
+
+    /// The node's clock: a unix time from now on (0 restores the real
+    /// clock). New blocks are stamped `max(mock time, MTP + 1)`.
+    pub fn set_mock_time(&self, t: u32) -> Result<()> {
+        let _: serde_json::Value = self.rpc.call("setmocktime", &[serde_json::json!(t)])?;
+        Ok(())
+    }
+
+    /// Set the node's clock to `t` and mine until median-time-past reaches
+    /// it (about six blocks after a jump: the median of eleven timestamps).
+    /// Returns the blocks mined. Mines nothing if MTP is already there.
+    pub fn advance_mtp_to(&self, t: u32) -> Result<u32> {
+        self.set_mock_time(t)?;
+        let mut n = 0;
+        while self.mtp()? < t {
+            self.mine(1)?;
+            n += 1;
+            ensure_lt(n, 64)?;
+        }
+        Ok(n)
+    }
+
+    /// Advance until a transaction with time lock `lock` is final: BIP113
+    /// finality is STRICT, `nLockTime < MTP`, so MTP must pass `lock` (a
+    /// height lock, by contrast, is final in the block at that height).
+    pub fn make_time_final(&self, lock: u32) -> Result<u32> {
+        self.advance_mtp_to(lock + 1)
+    }
+
     /// Pay `amount` to `spk` from the harness wallet and confirm it in one block.
     pub fn fund(&self, spk: &Script, amount: Amount) -> Result<(OutPoint, TxOut)> {
         let addr = Address::from_script(spk, Network::Regtest)?;
@@ -366,4 +401,11 @@ impl Regtest {
     pub fn mine_with_check(&self, tx: &Transaction) -> std::result::Result<u32, String> {
         self.mine_with(std::slice::from_ref(tx)).map_err(|e| format!("{e:#}"))
     }
+}
+
+fn ensure_lt(n: u32, max: u32) -> Result<()> {
+    if n >= max {
+        bail!("median-time-past did not advance after {n} blocks");
+    }
+    Ok(())
 }

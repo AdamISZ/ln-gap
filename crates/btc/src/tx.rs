@@ -6,8 +6,13 @@ use bitcoin::{absolute, transaction::Version, Amount, OutPoint, Sequence, Transa
 /// The fixed fee every pre-signed transaction in the PoC pays.
 pub const FIXED_FEE: Amount = Amount::from_sat(1_000);
 
+/// Absolute locks from here on are unix times, below it heights.
+pub const LOCK_TIME_THRESHOLD: u32 = 500_000_000;
+
 /// Timelock requirements a leaf imposes on the transaction that spends through it.
 /// Deadlines are absolute (`cltv`), challenge windows are relative (`csv`).
+/// An absolute lock below [`LOCK_TIME_THRESHOLD`] is a height, from it a
+/// unix time read against median-time-past, as consensus reads nLockTime.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Timelock {
     pub cltv: Option<u32>,
@@ -37,7 +42,7 @@ impl Timelock {
     /// The `nLockTime` a transaction spending this leaf must carry.
     pub fn locktime(&self) -> absolute::LockTime {
         match self.cltv {
-            Some(h) => absolute::LockTime::from_height(h).expect("height"),
+            Some(v) => absolute::LockTime::from_consensus(v),
             None => absolute::LockTime::ZERO,
         }
     }
@@ -76,13 +81,13 @@ pub fn build_spend(prev: OutPoint, leaf_timelock: &Timelock, outputs: Vec<TxOut>
 pub fn check_timelock(tx: &Transaction, input: usize, req: &Timelock) -> Result<()> {
     let txin = tx.input.get(input).ok_or_else(|| anyhow::anyhow!("no input {input}"))?;
     if let Some(h) = req.cltv {
-        match tx.lock_time {
-            absolute::LockTime::Blocks(b) => ensure!(
-                b.to_consensus_u32() >= h,
-                "nLockTime {} < leaf CLTV {h}",
-                b.to_consensus_u32()
-            ),
-            absolute::LockTime::Seconds(_) => bail!("leaf CLTV is height-based; tx uses time"),
+        let have = tx.lock_time.to_consensus_u32();
+        match (tx.lock_time, h >= LOCK_TIME_THRESHOLD) {
+            (absolute::LockTime::Blocks(_), false) | (absolute::LockTime::Seconds(_), true) => {
+                ensure!(have >= h, "nLockTime {have} < leaf CLTV {h}")
+            }
+            (absolute::LockTime::Blocks(_), true) => bail!("leaf CLTV is time-based; tx uses a height"),
+            (absolute::LockTime::Seconds(_), false) => bail!("leaf CLTV is height-based; tx uses time"),
         }
         ensure!(txin.sequence != Sequence::MAX, "CLTV needs nSequence != 0xffffffff");
     }
@@ -132,5 +137,23 @@ mod tests {
         let tx = build_spend(OutPoint::null(), &Timelock::csv(6), out());
         assert!(check_timelock(&tx, 0, &Timelock::NONE).is_err());
         assert!(check_timelock(&tx, 0, &Timelock::csv(7)).is_err());
+    }
+
+    /// A time lock (>= 500,000,000) is carried as a time nLockTime; heights
+    /// and times never satisfy each other.
+    #[test]
+    fn time_locks() {
+        let t = 1_800_000_000;
+        for tl in [Timelock::cltv(t), Timelock::both(t, 6)] {
+            let tx = build_spend(OutPoint::null(), &tl, out());
+            assert!(matches!(tx.lock_time, absolute::LockTime::Seconds(_)));
+            check_timelock(&tx, 0, &tl).unwrap();
+        }
+        let early = build_spend(OutPoint::null(), &Timelock::cltv(t - 1), out());
+        assert!(check_timelock(&early, 0, &Timelock::cltv(t)).is_err());
+        let height = build_spend(OutPoint::null(), &Timelock::cltv(300), out());
+        assert!(check_timelock(&height, 0, &Timelock::cltv(t)).unwrap_err().to_string().contains("time-based"));
+        let time = build_spend(OutPoint::null(), &Timelock::cltv(t), out());
+        assert!(check_timelock(&time, 0, &Timelock::cltv(300)).unwrap_err().to_string().contains("height-based"));
     }
 }

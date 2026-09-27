@@ -89,3 +89,37 @@ fn spend_through_sig_cltv_and_csv_leaves() {
         eprintln!("leaf {name}: script {s} bytes, control block {cb} bytes");
     }
 }
+
+/// A time-based CLTV (D55): the spend is rejected while median-time-past
+/// is short of the lock and accepted once the node's clock (mock time) and
+/// enough blocks have carried MTP past it.
+#[test]
+fn spend_through_time_cltv_leaf() {
+    let rt = Regtest::start().unwrap();
+    let alice = Seed::from_label("alice").keypair("t");
+    let a = xonly(&alice);
+    let now = rt.mtp().unwrap();
+    let lock = now + 3_600; // an hour past the tip's MTP
+    let tree = TapTree::new(vec![Leaf::new("a_after_time", Builder::new().cltv(lock).checksig(&a).into_script(), Timelock::cltv(lock))]).unwrap();
+    let value = Amount::from_sat(50_000);
+    let out = vec![TxOut { value: value - FIXED_FEE, script_pubkey: sink() }];
+    let (op, prevout) = rt.fund(&tree.script_pubkey(), value).unwrap();
+    let leaf = tree.leaf("a_after_time").unwrap();
+    let mut tx = build_spend(op, &leaf.timelock, out);
+    assert!(matches!(tx.lock_time, bitcoin::absolute::LockTime::Seconds(_)));
+    check_timelock(&tx, 0, &leaf.timelock).unwrap();
+    let sig = sign_tapscript(&alice, &tx, 0, std::slice::from_ref(&prevout), &leaf.script).unwrap();
+    let mut w = WitnessStack::new();
+    w.push(sig.as_ref().to_vec());
+    tx.input[0].witness = w.build(&leaf.script, &tree.control_block("a_after_time").unwrap());
+    assert!(rt.test_accept(&tx).is_err(), "MTP is an hour short of the lock");
+    // move the clock to just short of the lock: still rejected
+    rt.advance_mtp_to(lock - 60).unwrap();
+    assert!(rt.test_accept(&tx).is_err(), "MTP a minute short");
+    // MTP exactly at the lock: still non-final (BIP113 is strict)
+    rt.advance_mtp_to(lock).unwrap();
+    assert_eq!(rt.mtp().unwrap(), lock);
+    assert!(rt.test_accept(&tx).is_err(), "nLockTime must be BELOW median-time-past");
+    rt.make_time_final(lock).unwrap();
+    rt.send_and_confirm(&tx).unwrap();
+}

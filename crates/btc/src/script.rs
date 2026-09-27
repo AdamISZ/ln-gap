@@ -20,8 +20,10 @@ pub trait BuilderExt: Sized {
     fn two_of_two(self, a: &XOnlyPublicKey, b: &XOnlyPublicKey) -> Self;
     /// Same as [`two_of_two`] but `OP_NUMEQUALVERIFY`, for leaves that continue.
     fn two_of_two_verify(self, a: &XOnlyPublicKey, b: &XOnlyPublicKey) -> Self;
-    /// `<height> OP_CHECKLOCKTIMEVERIFY OP_DROP`
-    fn cltv(self, height: u32) -> Self;
+    /// `<lock> OP_CHECKLOCKTIMEVERIFY OP_DROP`: `lock` is a height below
+    /// 500,000,000 and a unix time (read against median-time-past) from it,
+    /// exactly as consensus reads nLockTime (D55).
+    fn cltv(self, lock: u32) -> Self;
     /// `<blocks> OP_CHECKSEQUENCEVERIFY OP_DROP`
     fn csv(self, blocks: u16) -> Self;
     /// `OP_HASH160 <h> OP_EQUALVERIFY` — consumes one witness element.
@@ -55,8 +57,8 @@ impl BuilderExt for Builder {
             .push_int(2)
             .push_opcode(OP_NUMEQUALVERIFY)
     }
-    fn cltv(self, height: u32) -> Self {
-        let lt = absolute::LockTime::from_height(height).expect("height < 500_000_000");
+    fn cltv(self, lock: u32) -> Self {
+        let lt = absolute::LockTime::from_consensus(lock);
         self.push_lock_time(lt).push_opcode(OP_CLTV).push_opcode(OP_DROP)
     }
     fn csv(self, blocks: u16) -> Self {
