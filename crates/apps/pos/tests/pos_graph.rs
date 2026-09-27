@@ -42,12 +42,11 @@ use lngap_contract::Contract;
 use lngap_factchain::slot::SlotEntry;
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsSig};
-use lngap_ec_wots::Attester;
 use lngap_pos::graph::proposer_witness;
-use lngap_pos::instance::{self, PosInstance};
+use lngap_pos::instance::{self, GameClock, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
-use lngap_pos::{Member, PosMiner, Registry, SealedBlock};
+use lngap_pos::{Authorship, Member, PosMiner, Registry, SealedBlock};
 use lngap_tictactoe::{Board, TicTacToe};
 
 const SEED: [u8; 32] = [7u8; 32];
@@ -75,29 +74,27 @@ fn members() -> Vec<Member> {
 /// signed announcements: the scheduled member's table per slot, every
 /// member's flag point).
 fn registry() -> Registry {
-    let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
-    PosMiner::new(SEED, members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
+    PosMiner::new(SEED, members()).registry(CONTRACT_ID, MAX_DEPTH).unwrap()
 }
 
-/// The venue: the blocks sealed so far, by slot.
+/// The venue: the entries sealed so far, by depth (D55: keyed by
+/// (contract, depth), sealed on submission, no empty seals).
 struct Venue {
     miner: PosMiner,
     sealed: std::collections::HashMap<u32, SealedBlock>,
 }
 
 impl Venue {
-    fn new() -> Venue {
-        let (gen, _table0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
-        Venue {
-            miner: PosMiner::new(SEED, members(), gen.header.digest(), 0),
-            sealed: std::collections::HashMap::new(),
-        }
+    fn new(auth: Authorship) -> Venue {
+        let mut miner = PosMiner::new(SEED, members());
+        miner.register(CONTRACT_ID, MAX_DEPTH, auth).unwrap();
+        Venue { miner, sealed: std::collections::HashMap::new() }
     }
-    /// Seal `slot` carrying `mv` played from `board` by its mover (the
-    /// venue is a dumb sequencer: an illegal move seals just the same; the
-    /// entry claims the naive overwrite), SIGNED with the mover's state key
-    /// over the claimed state (D41: the refute/exhibit leaves check it).
-    /// Returns the claimed new board.
+    /// Seal depth `slot` carrying `mv` played from `board` by its mover (the
+    /// venue checks authorship, never legality: an illegal move seals just
+    /// the same; the entry claims the naive overwrite), SIGNED with the
+    /// mover's state key over the claimed state (D41: the refute/exhibit
+    /// leaves check it). Returns the claimed new board.
     fn seal_move(&mut self, slot: u32, board: &Board, mv: u8, ks: &mut KeyStore) -> Board {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap_or_else(|_| {
@@ -115,15 +112,16 @@ impl Venue {
             state: state_u32(&new),
             sigs: sig.hashes.clone(),
         };
-        self.miner.submit(entry.encode());
-        let (block, table) = self.miner.seal_next(slot).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
+        let sealer = self.miner.default_sealer(CONTRACT_ID, slot).unwrap();
+        let block = self.miner.seal_entry(CONTRACT_ID, slot, sealer, &entry.encode()).unwrap();
+        assert!(block.verify_seal(self.miner.table(CONTRACT_ID, slot)).is_ok());
         self.sealed.insert(slot, block);
         new
     }
-    /// Seal `slot` with a legal-looking but GARBAGE-SIGNED entry (the
-    /// D41/PS9 case): the sigs region is junk. The venue attests existence,
-    /// never validity — it seals anyway.
+    /// A ROGUE member seals depth `slot` with a legal-looking but
+    /// GARBAGE-SIGNED entry (the D41/PS9 case): the sigs region is junk.
+    /// An honest member refuses it (D55); the rogue's seal is attested
+    /// anyway, provable misbehaviour and inert in the contract.
     fn seal_move_junk(&mut self, slot: u32, board: &Board, mv: u8) {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap();
@@ -135,15 +133,10 @@ impl Venue {
             state: state_u32(&new),
             sigs: vec![[0x11; 20]; STATE_DIGITS],
         };
-        self.miner.submit(entry.encode());
-        let (block, table) = self.miner.seal_next(slot).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
-        self.sealed.insert(slot, block);
-    }
-    /// Seal `slot` empty (the mover stalls).
-    fn seal_empty(&mut self, slot: u32) {
-        let (block, table) = self.miner.seal_next(slot).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
+        let bytes = entry.encode();
+        assert!(self.miner.seal_entry(CONTRACT_ID, slot, 0, &bytes).unwrap_err().contains("refuses"), "an honest member refuses an unsigned entry");
+        let block = self.miner.seal_unchecked(CONTRACT_ID, slot, 1, &bytes).unwrap();
+        assert!(block.verify_seal(self.miner.table(CONTRACT_ID, slot)).is_ok());
         self.sealed.insert(slot, block);
     }
     fn head(&self, slot: u32) -> [u8; 48] {
@@ -166,7 +159,7 @@ impl Game {
     /// The draft: both sides generate their per-depth keys under the
     /// standard labels, exchange the public offers, and build the SAME
     /// instance (checked: both trees agree, exhibits included).
-    fn open(btc_open: u32, deadline: u32, value: Amount, registry: &Registry) -> Game {
+    fn open(clock: GameClock, deadline: u32, value: Amount, registry: &Registry) -> Game {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("pos4b/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("pos4b/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("pos4b/user-ks"));
@@ -179,8 +172,8 @@ impl Game {
         // the venue's registry (D51): the scheduled member's table per
         // slot and every member's flag point, threshold the majority (3
         // of 5) — pinned at open
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u, registry.clone()).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h, registry.clone()).unwrap();
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, clock, keys_u, registry.clone()).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, clock, keys_h, registry.clone()).unwrap();
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let g = Game {
@@ -267,7 +260,7 @@ impl Path {
         let tree = g.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
         let graph = g.inst.graph(&ctx, c_op, &c_prev).unwrap();
-        Path { venue: Venue::new(), graph, board: Board::empty(), pair_sig: None }
+        Path { venue: Venue::new(g.inst.authorship()), graph, board: Board::empty(), pair_sig: None }
     }
 
     /// Broadcast the pre-signed absence claim at depth `d`; return A's
@@ -537,6 +530,17 @@ fn run(rt: &Regtest, p: &PresignedTx, w: Vec<Vec<u8>>) -> Transaction {
 }
 
 /// The skeleton with the witness attached but NOT broadcast (for negatives).
+/// A game clock starting at the node's median-time-past: a move a
+/// minute, claims a minute after each move's due time (D55).
+fn clock(rt: &Regtest) -> GameClock {
+    GameClock { t0: rt.mtp().unwrap(), ell: 60, margin: 60 }
+}
+
+/// The settle deadline: well after every claim window.
+fn deadline(rt: &Regtest) -> u32 {
+    rt.mtp().unwrap() + 100_000
+}
+
 fn dry(p: &PresignedTx, w: Vec<Vec<u8>>) -> Transaction {
     let mut tx = p.tx.clone();
     tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
@@ -551,8 +555,7 @@ fn wired_pos_graph() {
 
     // ================= path A: an illegal (occupied-cell) move is killed ==
     {
-        let g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
-        let mut g = g;
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         assert_eq!(path.graph.len(), 166, "the wired graph: settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43) + 8 x (counter, refute, 3 + 3 splits) (D44)");
         // slot 1: user's legal X@4; slot 2: hub plays the OCCUPIED cell 4
@@ -562,6 +565,7 @@ fn wired_pos_graph() {
         seal_move(&mut path, &mut g, 2, 4);
         // past the claim window and the broadcaster's to_self_delay
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         let (_a_op, _a_prev) = path.claim(&rt, &g, D);
         let (p_op, p_prev) = path.refute(&rt, &mut g, D);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -581,13 +585,14 @@ fn wired_pos_graph() {
 
     // ================= path B: a legal refutation stands =================
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 2, 0); // legal: O@0
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         let (_a_op, _a_prev) = path.claim(&rt, &g, D);
         let (p_op, p_prev) = path.refute(&rt, &mut g, D);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -608,13 +613,14 @@ fn wired_pos_graph() {
 
     // ================= path C: a real stall pays the claimant ============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
-        path.venue.seal_empty(2); // hub stalls
+        // the hub stalls: nothing is sealed at depth 2 (D55: no empty seals)
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         let (_a_op, _a_prev) = path.claim(&rt, &g, D);
         // no refutation exists for an empty slot; the timeout split pays
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -625,11 +631,11 @@ fn wired_pos_graph() {
 
     // ================= path D: the depth-1 single-head form ==============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4); // legal opening
-        rt.mine(2).unwrap(); // past claim_from(1)
+        rt.make_time_final(g.inst.claim_from(1)).unwrap(); // past claim_from(1)
         let (_a_op, _a_prev) = path.claim(&rt, &g, 1); // hub claims absence
         let (p_op, p_prev) = path.refute(&rt, &mut g, 1);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -647,7 +653,7 @@ fn wired_pos_graph() {
 
     // ============ path E: the terminal exhibit pays the winner (D37) ====
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         // the winning line: X@0, O@3, X@1, O@4, X@2 — the top row,
         // terminal at depth 5 with the user the last mover
@@ -664,8 +670,7 @@ fn wired_pos_graph() {
         );
         // past the window, the winner exhibits: the parked pair is the
         // attested terminal tuple
-        let need = g.inst.claim_from(5).saturating_sub(rt.height().unwrap()) + 1;
-        rt.mine(u64::from(need)).unwrap();
+        rt.make_time_final(g.inst.claim_from(5)).unwrap();
         let (e_op, e_prev) = path.exhibit(&rt, &mut g, 5);
         // no disprove fires on the legal terminal move
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -685,7 +690,7 @@ fn wired_pos_graph() {
 
     // ============ path F: the gate rejects open states; a draw pays =====
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         // the drawn line XOX/XOO/OXX: 0,1,3,4,2 then 5,7,6,8
         for (i, mv) in [0u8, 1, 3, 4, 2].into_iter().enumerate() {
@@ -696,8 +701,7 @@ fn wired_pos_graph() {
         // the gate: the exhibit leaf rejects an OPEN parked state even
         // though the readout and both signatures are honest — no mid-game
         // self-claim
-        let need = g.inst.claim_from(5).saturating_sub(rt.height().unwrap()) + 1;
-        rt.mine(u64::from(need)).unwrap();
+        rt.make_time_final(g.inst.claim_from(5)).unwrap();
         let w = path.exhibit_witness(&mut g, 5);
         let bad = dry(skel(&path.graph, "exhibit_5"), w);
         assert!(rt.test_accept(&bad).is_err(), "the status gate must reject an open state");
@@ -708,8 +712,7 @@ fn wired_pos_graph() {
             seal_move(&mut path, &mut g, 6 + i as u32, mv);
         }
         assert!(TicTacToe.turn(&path.board).is_none(), "the line must be a draw at depth 9");
-        let need = g.inst.claim_from(9).saturating_sub(rt.height().unwrap()) + 1;
-        rt.mine(u64::from(need)).unwrap();
+        rt.make_time_final(g.inst.claim_from(9)).unwrap();
         let (e_op, e_prev) = path.exhibit(&rt, &mut g, 9);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         for leaf in ["disprove_wrong_slot", "disprove_status_mismatch", "disprove_board_mismatch_8"] {
@@ -724,7 +727,7 @@ fn wired_pos_graph() {
 
     // ============ path G: a garbage-signed attested entry is not a move ==
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4); // X@4, really signed
@@ -733,6 +736,7 @@ fn wired_pos_graph() {
         // region is junk (the PS9 hole, D40 — closed by D41)
         path.venue.seal_move_junk(2, &path.board, 0);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         let (_a_op, _a_prev) = path.claim(&rt, &g, 2);
         // the hub declines to adopt the junk (its key never signed that
         // state): a refutation carrying the entry's own junk preimages
@@ -756,18 +760,14 @@ fn wired_pos_graph() {
         // secret nobody holds — with the D42 tied readout the tie IS the
         // point selection. (This is the sim_refute mismatched-recommitment
         // negative, testable only with real sigs — the sim stubs CHECKSIG.)
-        let mut g = Game::open(
-            rt.height().unwrap() + 1,
-            rt.height().unwrap() + 400,
-            value,
-            &registry,
-        );
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 1, 4);
         rt.mine(1).unwrap();
         seal_move(&mut path, &mut g, 2, 0);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         path.claim(&rt, &g, D);
         let p = skel(&path.graph, "absent_2/refute");
         let a_prev = p.prevouts[0].clone();

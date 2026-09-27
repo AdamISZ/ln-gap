@@ -45,10 +45,11 @@ fn sink() -> ScriptBuf {
     .script_pubkey()
 }
 
-/// A slot-1 block whose entry's head carries the move `mv`.
+/// A depth-1 seal whose entry's head carries the move `mv` (contract 1;
+/// the fixture's signature is junk, so a venue that accepts anything).
 fn sealed_move(mv: u8) -> (SealedBlock, EpochTable) {
-    let (gen, _t0) = lngap_pos::genesis(&lngap_ec_wots::Attester::new(SEED), &lngap_pos::Member::new(SEED), 0);
-    let mut miner = PosMiner::single(SEED, gen.header.digest(), 0);
+    let mut miner = PosMiner::single(SEED);
+    miner.register(1, 1, std::sync::Arc::new(|_, _| true)).unwrap();
     let entry = SlotEntry {
         game_id: 1,
         depth: 1,
@@ -57,8 +58,9 @@ fn sealed_move(mv: u8) -> (SealedBlock, EpochTable) {
         state: FIXTURE_STATE,
         sigs: vec![[0x11; 20]; 21],
     };
-    miner.submit(entry.encode());
-    miner.seal_next(1).unwrap()
+    let block = miner.seal_entry(1, 1, 0, &entry.encode()).unwrap();
+    let table = miner.table(1, 1).clone();
+    (block, table)
 }
 
 struct Funded {

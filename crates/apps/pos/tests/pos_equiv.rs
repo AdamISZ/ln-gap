@@ -32,13 +32,11 @@ use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PresignedTx, Role};
 use lngap_contract::Contract;
 use lngap_factchain::slot::{SlotEntry, STATE_BITS};
-use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsSig;
-use lngap_ec_wots::Attester;
-use lngap_pos::instance::{self, PosInstance};
+use lngap_pos::instance::{self, GameClock, PosInstance};
 use lngap_pos::refute;
-use lngap_pos::{Member, PosClient, PosMiner, Registry, SealedBlock};
+use lngap_pos::{Authorship, Member, PosClient, PosMiner, Registry, SealedBlock};
 use lngap_tictactoe::{Board, TicTacToe};
 
 /// The venue's attester seed (the single key standing in for the FROST
@@ -71,10 +69,9 @@ fn members() -> Vec<Member> {
     (0..N_MEMBERS).map(|i| Member::new([SEED[0] + i; 32])).collect()
 }
 
-/// The venue's registry, published at contract open.
+/// The venue's registry for the contract, published at open.
 fn registry() -> Registry {
-    let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
-    PosMiner::new(SEED, members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
+    PosMiner::new(SEED, members()).registry(CONTRACT_ID, MAX_DEPTH).unwrap()
 }
 
 /// The venue, sealing entries with REAL state signatures (unlike the
@@ -85,13 +82,15 @@ struct Venue {
 }
 
 impl Venue {
-    fn new() -> (Venue, lngap_n4bit::Digest) {
-        let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
-        let g = gen.header.digest();
-        (Venue { miner: PosMiner::new(SEED, members(), g, 0), sealed: Default::default() }, g)
+    /// The venue with the contract registered under its authorship check.
+    fn new(auth: Authorship) -> Venue {
+        let mut miner = PosMiner::new(SEED, members());
+        miner.register(CONTRACT_ID, MAX_DEPTH, auth).unwrap();
+        Venue { miner, sealed: Default::default() }
     }
-    /// Seal `slot` carrying `mv` from `board`, signed with the mover's real
-    /// state-key signature from `ks`. Returns the new board and the sig.
+    /// Seal depth `slot` carrying `mv` from `board`, signed with the mover's
+    /// real state-key signature from `ks`, by the designated member.
+    /// Returns the new board and the sig.
     fn seal_move_signed(&mut self, slot: u32, board: &Board, mv: u8, ks: &mut KeyStore) -> (Board, WotsSig) {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap();
@@ -104,16 +103,18 @@ impl Venue {
             state: state_u32(&new),
             sigs: sig.hashes.clone(),
         };
-        self.miner.submit(entry.encode());
-        let (block, table) = self.miner.seal_next(slot).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
+        let sealer = self.miner.default_sealer(CONTRACT_ID, slot).unwrap();
+        let block = self.miner.seal_entry(CONTRACT_ID, slot, sealer, &entry.encode()).unwrap();
+        assert!(block.verify_seal(self.miner.table(CONTRACT_ID, slot)).is_ok());
         self.sealed.insert(slot, block);
         (new, sig)
     }
-    /// The equivocation: a SECOND sealed block at `slot`, same parent,
-    /// carrying a conflicting move whose signature was reproduced by hand
-    /// (the honest keystore refuses to produce it). Returns the block.
-    fn fork_move(&self, slot: u32, parent: &lngap_n4bit::Digest, board: &Board, mv: u8, sig: &WotsSig, registry: &Registry) -> SealedBlock {
+    /// The mover's equivocation: a SECOND seal at depth `slot` carrying a
+    /// conflicting move whose signature was reproduced by hand (the honest
+    /// keystore refuses to produce it). Member 1 seals it HONESTLY — it is
+    /// validly signed by the mover (D55: the equivocation is the mover's,
+    /// the members are blameless). Returns the seal.
+    fn fork_move(&mut self, slot: u32, board: &Board, mv: u8, sig: &WotsSig) -> SealedBlock {
         let mover = instance::mover_at(slot);
         let new = TicTacToe.transition(board, &mv, mover).unwrap();
         let entry = SlotEntry {
@@ -125,9 +126,7 @@ impl Venue {
             sigs: sig.hashes.clone(),
         }
         .encode();
-        let header = Header::new(parent, &entry_root(&entry), &entry_head(&entry), slot);
-        let attestation = self.miner.content().attest(registry.table(slot), header.as_bytes());
-        SealedBlock { header, entry, attestation, proposer: 1, proposer_secret: self.miner.proposer_secret(1, slot) }
+        self.miner.seal_entry(CONTRACT_ID, slot, 1, &entry).expect("a validly signed entry: an honest member seals it")
     }
 }
 
@@ -154,7 +153,7 @@ struct Game {
 }
 
 impl Game {
-    fn open(btc_open: u32, deadline: u32, value: Amount, registry: &Registry) -> Game {
+    fn open(clock: GameClock, deadline: u32, value: Amount, registry: &Registry) -> Game {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("pos6/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("pos6/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("pos6/user-ks"));
@@ -164,8 +163,8 @@ impl Game {
         let keys_u = instance::collect_keys(&offer_u, &offer_h, MAX_DEPTH).unwrap();
         let keys_h = instance::collect_keys(&offer_h, &offer_u, MAX_DEPTH).unwrap();
         assert_eq!(keys_u, keys_h, "the merged key sets must agree");
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_u, registry.clone()).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, btc_open, 1, keys_h, registry.clone()).unwrap();
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, clock, keys_u, registry.clone()).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, clock, keys_h, registry.clone()).unwrap();
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
         let g = Game { user, hub, user_ks, hub_ks, params, pubs, inst: inst_u };
@@ -219,7 +218,9 @@ fn player_equivocation_leaf() {
 
     // ============ path U: the user double-plays depth 1 (no csv) ============
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let t0 = rt.mtp().unwrap();
+        let clock = GameClock { t0, ell: 60, margin: 60 };
+        let mut g = Game::open(clock, t0 + 100_000, value, &registry);
         let ctx = g.ctx();
         let tree = g.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
@@ -229,9 +230,8 @@ fn player_equivocation_leaf() {
             166,
             "settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43) + 8 x (counter, refute, 3 + 3 splits) (D44)"
         );
-        let (venue, gen_digest) = Venue::new();
-        let mut venue = venue;
-        let mut client = PosClient::from_checkpoint(0, gen_digest);
+        let mut venue = Venue::new(g.inst.authorship());
+        let mut client = PosClient::new(CONTRACT_ID);
         // the honest depth-1 move, signed for real: X@4
         rt.mine(1).unwrap();
         let (_board_a, sig_a) = venue.seal_move_signed(1, &Board::empty(), 4, &mut g.user_ks);
@@ -244,10 +244,10 @@ fn player_equivocation_leaf() {
             "the honest keystore refuses to equivocate"
         );
         let sig_b = adversarial_state_sig("pos6/user-ks", 1, &entry_msg(state_u32(&board_b)));
-        let fork = venue.fork_move(1, &gen_digest, &Board::empty(), 0, &sig_b, &registry);
+        let fork = venue.fork_move(1, &Board::empty(), 0, &sig_b);
         assert!(
             matches!(client.observe(&fork, &registry), Ok(lngap_pos::Observation::Equivocation(_))),
-            "the second sealed block at slot 1 is the equivocation"
+            "a second, different signed head at depth 1 is the (mover's) equivocation"
         );
         let p = skel(&graph, "equiv_1");
         // the payout is pinned to the VICTIM (the hub) at setup
@@ -290,14 +290,15 @@ fn player_equivocation_leaf() {
 
     // ============ path H: the hub double-plays depth 2 (csv branch) =========
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let t0 = rt.mtp().unwrap();
+        let clock = GameClock { t0, ell: 60, margin: 60 };
+        let mut g = Game::open(clock, t0 + 100_000, value, &registry);
         let ctx = g.ctx();
         let tree = g.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
         let graph = g.inst.graph(&ctx, c_op, &c_prev).unwrap();
-        let (venue, gen_digest) = Venue::new();
-        let mut venue = venue;
-        let mut client = PosClient::from_checkpoint(0, gen_digest);
+        let mut venue = Venue::new(g.inst.authorship());
+        let mut client = PosClient::new(CONTRACT_ID);
         // slot 1: the user's honest X@4; slot 2: the hub's honest O@0
         rt.mine(1).unwrap();
         let (board1, _) = venue.seal_move_signed(1, &Board::empty(), 4, &mut g.user_ks);
@@ -312,11 +313,10 @@ fn player_equivocation_leaf() {
             "the honest keystore refuses to equivocate"
         );
         let sig_b = adversarial_state_sig("pos6/hub-ks", 2, &entry_msg(state_u32(&board_b)));
-        let parent = venue.sealed[&1].header.digest();
-        let fork = venue.fork_move(2, &parent, &board1, 1, &sig_b, &registry);
+        let fork = venue.fork_move(2, &board1, 1, &sig_b);
         assert!(
             matches!(client.observe(&fork, &registry), Ok(lngap_pos::Observation::Equivocation(_))),
-            "the second sealed block at slot 2 is the equivocation"
+            "a second, different signed head at depth 2 is the (mover's) equivocation"
         );
         let p = skel(&graph, "equiv_2");
         assert_eq!(p.tx.output[0].script_pubkey, g.payout_spk_of(Role::User), "the exhibit pays the non-mover");

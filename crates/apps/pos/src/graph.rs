@@ -1,15 +1,15 @@
 //! The wired PoS absence-claim graph (POS_FACTCHAIN_PLAN.md step 4b; D34's
 //! leaf family, wired per depth, with D35's two-head refutation).
 //!
-//! Per depth `d` (the slot the mover should have published at), with the
-//! claimant the non-mover:
+//! Per depth `d` (the mover's move `d`, D55: attested under the contract's
+//! depth-`d` table), with the claimant the non-mover:
 //!
 //! - on the contract output: `absent_d`, the claimant's absence claim,
-//!   spendable once `claim_from` (the Bitcoin height after the mover's slot
-//!   window) has passed (CLTV) — 2-of-2, so the claim transaction is
+//!   spendable once `claim_from` (D55: a unix time, the move's due time
+//!   plus the margin, against median-time-past) has passed (CLTV) — 2-of-2, so the claim transaction is
 //!   pre-signed at setup and its output is pinned to the claim tree;
 //! - the claim output's tree: the mover's refutation (the D33 leaf at
-//!   depth 1, the D35 two-head leaf from depth 2 — the slots' epoch tables
+//!   depth 1, the D35 two-head leaf from depth 2 — the depths' content tables
 //!   as script constants) racing the claimant's timeout splits (CSV =
 //!   `delta`, gated by the claimant's code reveal);
 //! - the refutation output's tree: the claimant's disprove family over the
@@ -27,12 +27,12 @@
 //! carries no code reveal for a `code_mismatch` leaf to judge.
 //!
 //! The timeliness flag (D50, NON_INCLUSION_THRESHOLD.md). A refutation
-//! proves the venue attested slot `d`'s head, never WHEN: a proposer
+//! proves the venue attested depth `d`'s head, never WHEN: a proposer
 //! colluding with the mover can attest his signed move after the deadline
 //! and refute an honest claim. So the refuted tree carries one more
-//! claimant leaf, `not_timely`: `k` validator flag points for slot `d` as
+//! claimant leaf, `not_timely`: `k` validator flag points for depth `d` as
 //! script constants, counted by CHECKSIGADD against a threshold `t`. A
-//! validator that saw the slot pass its deadline empty published its flag
+//! validator that held no signed entry for the depth at its deadline published its flag
 //! secret; the claimant signs its own spend under any `t` of them and the
 //! refutation dies. Rule (D50): the refutation dies on `t` flags — the
 //! rogue-`t` residual (false emptiness against a timely move) falls on the

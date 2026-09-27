@@ -3,7 +3,7 @@
 //! and exchanged at the draft, and the pre-signed graph over the D34/D35
 //! leaf family.
 //!
-//! Per depth `d` (the slot the mover should have published at):
+//! Per depth `d` (the mover's move `d`, due at `t0 + d·ell`, D55):
 //!
 //! - `refute`: the MOVER's Winternitz key — 96 bytes (the two-head pair
 //!   `head(d-1) || head(d)`, D35) from depth 2, 48 bytes (the single head)
@@ -25,11 +25,13 @@
 //! build the same [`PosInstance`] — the graph's script pubkeys agree iff
 //! the merged key sets agree.
 //!
-//! From D50 the refuted tree also carries `not_timely`: slot `d`'s
-//! member flag points, counted against the majority threshold. Since D51
-//! the instance holds the venue's [`Registry`] pinned at open: per slot
-//! the scheduled member's announced epoch table (the refute leaves'
-//! constants) and every member's flag point.
+//! From D50 the refuted tree also carries `not_timely`: depth `d`'s
+//! member flag points, counted against the majority threshold. The
+//! instance holds the venue's [`Registry`] for this contract, pinned at
+//! open (D51, D53, D55): per depth the shared content table (the refute
+//! leaves' constants), every member's proposer point and flag point. The
+//! claim windows are median-time-past times (D55): `claim_from(d)` is the
+//! move's due time plus the margin.
 //!
 //! The disprove spends are NOT pre-signed: they are the claimant's own
 //! runtime transactions (their witness is the refutation's reveal, unknown
@@ -202,38 +204,57 @@ pub fn collect_keys(mine: &[(u32, PosKeyOffer)], theirs: &[(u32, PosKeyOffer)], 
     Ok(out)
 }
 
+/// A game's clock (D55): move `d` is due at `t0 + d·ell`; its claim is
+/// valid from the due time plus `margin`. All unix seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GameClock {
+    pub t0: u32,
+    pub ell: u32,
+    pub margin: u32,
+}
+
 /// A PoS absence-claim game instance: the tuple both parties build after
 /// the key exchange.
 #[derive(Clone, Debug)]
 pub struct PosInstance {
     pub id: u32,
     pub value: Amount,
+    /// The contract's `settle` deadline: a unix time (D55; a median-time-
+    /// past CLTV), after every depth's claim window.
     pub deadline: u32,
     pub game_id: u16,
     /// The game whose disprove family and authorship mapping the graph
     /// runs (graph.rs's dispatch).
     pub game: Game,
-    /// The Bitcoin height the venue's slot count starts from: slot `d`
-    /// seals at `btc_open + d` (one venue block per Bitcoin block).
-    pub btc_open: u32,
-    /// Blocks after slot `d`'s seal before a depth-`d` claim may be made.
-    pub grace: u32,
+    /// The game's clock (D55): move `d` is due at `t0 + d·ell` (unix
+    /// seconds), judged by the venue's members on their clocks.
+    pub t0: u32,
+    /// Seconds per move.
+    pub ell: u32,
+    /// The claim margin `m` (D54): a depth-`d` claim is valid from
+    /// `deadline(d) + margin` against median-time-past.
+    pub margin: u32,
     /// Index `d - 1`.
     pub keys: Vec<PosDepthKeys>,
     pub outcomes: Vec<Outcome>,
-    /// The venue's registry as pinned at open (D51, D53): per slot the
-    /// shared content table (the refute leaves' constants), every member's
-    /// proposer point (the refute leaves' proposer fragment) and flag point
-    /// (the `not_timely` leaf's, D50), and the flag threshold (the
-    /// majority, D50 amended).
+    /// The venue's registry for THIS contract as pinned at open (D51, D53,
+    /// D55): per depth the shared content table (the refute leaves'
+    /// constants), every member's proposer point (the refute leaves'
+    /// proposer fragment) and flag point (the `not_timely` leaf's, D50),
+    /// and the flag threshold (the majority, D50 amended).
     pub registry: Registry,
 }
 
 impl PosInstance {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(id: u32, value: Amount, deadline: u32, game_id: u16, game: Game, btc_open: u32, grace: u32, keys: Vec<PosDepthKeys>, registry: Registry) -> Result<PosInstance> {
+    pub fn new(id: u32, value: Amount, deadline: u32, game_id: u16, game: Game, clock: GameClock, keys: Vec<PosDepthKeys>, registry: Registry) -> Result<PosInstance> {
         ensure!(!keys.is_empty(), "no depths");
-        ensure!(registry.max_slot() as usize >= keys.len(), "the registry covers slots 0..={} but the game has {} depths", registry.max_slot(), keys.len());
+        ensure!(registry.contract == id, "the registry is contract {}'s, not {id}'s", registry.contract);
+        ensure!(registry.max_depth() as usize >= keys.len(), "the registry covers depths 0..={} but the game has {} depths", registry.max_depth(), keys.len());
+        ensure!(clock.t0 >= lngap_btc::tx::LOCK_TIME_THRESHOLD, "t0 {} is not a unix time", clock.t0);
+        let GameClock { t0, ell, margin } = clock;
+        let last_claim = t0 + keys.len() as u32 * ell + margin;
+        ensure!(deadline > last_claim, "the settle deadline {deadline} must follow the last claim time {last_claim}");
         ensure!(1 <= registry.threshold && registry.threshold as usize <= registry.n(), "flag threshold {} must be within 1..={}", registry.threshold, registry.n());
         for (i, k) in keys.iter().enumerate() {
             let d = i as u32 + 1;
@@ -247,16 +268,61 @@ impl PosInstance {
         // HubWins 1 / Draw 2); chess's Draw split can never fire on this
         // graph (chess.rs's resolution fragment).
         let outcomes = Contract::outcomes(&TicTacToe);
-        Ok(PosInstance { id, value, deadline, game_id, game, btc_open, grace, keys, outcomes, registry })
+        Ok(PosInstance { id, value, deadline, game_id, game, t0, ell, margin, keys, outcomes, registry })
     }
 
     pub fn max_depth(&self) -> u32 {
         self.keys.len() as u32
     }
 
-    /// The Bitcoin height from which a depth-`d` claim may be made.
+    /// When move `d` is due (unix seconds): the members flag `(c, d)` if
+    /// they hold no signed entry for it by then.
+    pub fn due(&self, d: u32) -> u32 {
+        self.t0 + d * self.ell
+    }
+
+    /// The time (unix seconds, against median-time-past) from which a
+    /// depth-`d` claim may be made: the move's due time plus the margin.
+    /// A transaction with this lock is final once MTP passes it (BIP113).
     pub fn claim_from(&self, d: u32) -> u32 {
-        self.btc_open + d + 1 + self.grace
+        self.due(d) + self.margin
+    }
+
+    /// The venue-side authorship check for this contract (D55): an entry
+    /// for depth `d` is sealable iff it carries the depth-`d` mover's
+    /// state-key signature over its head's signed region (the same message
+    /// the contract's authorship fragment checks). Registered with the
+    /// venue; honest members seal nothing else.
+    pub fn authorship(&self) -> crate::Authorship {
+        let keys: Vec<WotsPublic> = self.keys.iter().map(|k| k.state.clone()).collect();
+        let game = self.game;
+        std::sync::Arc::new(move |d: u32, entry: &[u8]| {
+            let Some(pk) = d.checked_sub(1).and_then(|i| keys.get(i as usize)) else { return false };
+            let head = lngap_factchain::entry_head(entry);
+            let (msg, sigs) = match game {
+                Game::Ttt => match lngap_factchain::slot::SlotEntry::decode(entry) {
+                    Some(e) => (crate::ttt::auth_message(&head), e.sigs),
+                    None => return false,
+                },
+                // the signature only, never the state's well-formedness (a
+                // malformed signed entry is the mover's, judged by the
+                // contract's chess_malformed leaf, D45): 48 content bytes,
+                // then the 20-byte elements
+                Game::Chess => {
+                    if entry.len() < 48 || !(entry.len() - 48).is_multiple_of(20) {
+                        return false;
+                    }
+                    let sigs: Vec<[u8; 20]> = entry[48..].chunks(20).map(|c| c.try_into().expect("20 bytes")).collect();
+                    (crate::chess::auth_message(&head), sigs)
+                }
+            };
+            crate::refute::check_entry_sig(pk, &msg, &sigs)
+        })
+    }
+
+    /// The clock the instance was built with.
+    pub fn clock(&self) -> GameClock {
+        GameClock { t0: self.t0, ell: self.ell, margin: self.margin }
     }
 
     pub fn layout(&self, d: u32) -> Layout {
@@ -302,8 +368,8 @@ impl PosInstance {
 
     /// The claim output's tree at depth `d`, with the counter leaf from
     /// depth 2 (D44). The refutation leaf embeds the head chunks' points
-    /// of the registry's shared tables for slots `d - 1` and `d`, and
-    /// slot `d`'s member proposer points (D53).
+    /// of the registry's shared tables for depths `d - 1` and `d`, and
+    /// depth `d`'s member proposer points (D53).
     pub fn claim_tree(&self, ctx: &CommitCtx, d: u32) -> Result<TapTree> {
         self.claim_tree_with(ctx, d, d >= 2)
     }
@@ -322,7 +388,7 @@ impl PosInstance {
     }
 
     /// The refutation output's tree at depth `d`: the disprove family, the
-    /// `not_timely` leaf over slot `d`'s flag points (D50), the checked
+    /// `not_timely` leaf over depth `d`'s flag points (D50), the checked
     /// splits. (The tic-tac-toe exhibit output's tree is this tree too, so
     /// a late terminal exhibit dies the same way.)
     pub fn refuted_tree(&self, ctx: &CommitCtx, d: u32) -> Result<TapTree> {

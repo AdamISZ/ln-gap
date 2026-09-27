@@ -60,6 +60,7 @@ pub struct EpochTable {
 }
 
 /// An attestation: one revealed scalar per chunk.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Attestation {
     pub secrets: Vec<SecretKey>,
 }

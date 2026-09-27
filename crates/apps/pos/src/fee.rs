@@ -3,7 +3,7 @@
 //! reveals.
 //!
 //! The head a mover will publish selects one anticipation point per head
-//! chunk under the slot's shared content table; their sum `C_h` has the
+//! chunk under the `(contract, depth)` shared content table (D55); their sum `C_h` has the
 //! log `c_h`, the sum of the scalars an attestation of exactly that head
 //! reveals. With ONE content key shared by the members (D53) every member
 //! can compute `c_h` in advance, so the lock also names its payee: the
@@ -45,10 +45,10 @@ pub fn content_secret(block: &SealedBlock) -> SecretKey {
 
 /// `c_h` computed from the shared content key without sealing anything
 /// (what any member can do under D53 — the rogue fee claim's material).
-pub fn content_secret_of(content: &Attester, slot: u32, head: &[u8; HEAD_BYTES]) -> SecretKey {
+pub fn content_secret_of(content: &Attester, contract: u32, d: u32, head: &[u8; HEAD_BYTES]) -> SecretKey {
     let mut acc: Option<SecretKey> = None;
     for (k, j) in head_chunks().enumerate() {
-        let s = content.chunk_secret(u64::from(slot), j, lngap_ec_wots::chunk_value(head, k));
+        let s = content.chunk_secret(crate::key_index(contract, d), j, lngap_ec_wots::chunk_value(head, k));
         acc = Some(match acc {
             None => s,
             Some(a) => a.add_tweak(&Scalar::from_be_bytes(s.secret_bytes()).expect("in range")).expect("nonzero"),
@@ -57,11 +57,12 @@ pub fn content_secret_of(content: &Attester, slot: u32, head: &[u8; HEAD_BYTES])
     acc.expect("head chunks")
 }
 
-/// The lock point `T = C_h + P_{i,s}`: the head's content sum under
-/// `registry`'s table for `slot` plus member `i`'s proposer point.
-pub fn lock_point(registry: &Registry, slot: u32, head: &[u8; HEAD_BYTES], member: usize) -> PublicKey {
-    let p = PublicKey::from_x_only_public_key(registry.proposers(slot)[member], Parity::Even);
-    content_point(registry.table(slot), head).combine(&p).expect("not the identity")
+/// The lock point `T = C_h + P_{i,(c,d)}`: the head's content sum under
+/// the contract `registry`'s table for depth `d` plus member `i`'s
+/// proposer point.
+pub fn lock_point(registry: &Registry, d: u32, head: &[u8; HEAD_BYTES], member: usize) -> PublicKey {
+    let p = PublicKey::from_x_only_public_key(registry.proposers(d)[member], Parity::Even);
+    content_point(registry.table(d), head).combine(&p).expect("not the identity")
 }
 
 /// The lock secret `t = c_h + p_{i,s}` a sealed block reveals: its
@@ -72,60 +73,57 @@ pub fn lock_secret(block: &SealedBlock) -> SecretKey {
 
 /// A fee lock of `value` from `payer` to the counterparty — member
 /// `member`'s node, the intended proposer — for the attestation of
-/// `head` at `slot`, refundable from `expiry`.
+/// `head` at depth `d` of the registry's contract, refundable from
+/// `expiry`.
 #[allow(clippy::too_many_arguments)]
-pub fn fee_lock(id: u32, payer: Role, value: Amount, registry: &Registry, slot: u32, head: &[u8; HEAD_BYTES], member: usize, expiry: u32) -> FeeLock {
+pub fn fee_lock(id: u32, payer: Role, value: Amount, registry: &Registry, d: u32, head: &[u8; HEAD_BYTES], member: usize, expiry: u32) -> FeeLock {
     FeeLock {
         id,
         payer,
         value,
-        lock: lock_point(registry, slot, head, member),
+        lock: lock_point(registry, d, head, member),
         expiry,
-        memo: format!("head {} at slot {slot}, sealed by member {member}", hex::encode(&head[..8])),
+        memo: format!("head {} at depth {d} of contract {}, sealed by member {member}", hex::encode(&head[..8]), registry.contract),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{genesis, Member, PosMiner};
+    use crate::{Member, PosMiner};
     use bitcoin::secp256k1::SECP256K1;
     use lngap_factchain::entry_head;
+    use std::sync::Arc;
 
-    /// The sealed block's scalar sum plus its proposer reveal opens the
-    /// lock of ITS head to ITS proposer, and only that.
+    /// The seal's scalar sum plus its proposer reveal opens the lock of
+    /// ITS head to ITS proposer, and only that.
     #[test]
     fn attestation_by_the_named_member_opens_the_lock() {
         const CONTENT: [u8; 32] = [0x39; 32];
+        const C: u32 = 5;
         let members: Vec<Member> = (0..5u8).map(|i| Member::new([0x40 + i; 32])).collect();
-        let (gen, _) = genesis(&Attester::new(CONTENT), &members[0], 0);
-        let mut miner = PosMiner::new(CONTENT, members, gen.header.digest(), 0);
-        let registry = miner.registry(8).unwrap();
-        let entry = b"the mover's entry at slot 3".to_vec();
+        let mut miner = PosMiner::new(CONTENT, members);
+        miner.register(C, 8, Arc::new(|_, _| true)).unwrap();
+        let registry = miner.registry(C, 8).unwrap();
+        let entry = b"the mover's entry at depth 3".to_vec();
         let head = entry_head(&entry);
         // the mover pays member 3's node
         let lock = fee_lock(7, Role::User, Amount::from_sat(5_000), &registry, 3, &head, 3, 100);
-        miner.seal_next(1).unwrap();
-        miner.seal_next(2).unwrap();
-        miner.submit(entry.clone());
-        let (block, table) = miner.seal_by(3, 3).unwrap();
-        assert_eq!(&table, registry.table(3));
+        let block = miner.seal_entry(C, 3, 3, &entry).unwrap();
+        assert_eq!(miner.table(C, 3), registry.table(3));
         let t = lock_secret(&block);
         assert!(lock.opens(&t), "member 3's attestation of exactly this head opens the lock");
         assert_eq!(PublicKey::from_secret_key(SECP256K1, &t), lock_point(&registry, 3, &head, 3));
         // the content secret alone (any member can compute it) does not
         assert!(!lock.opens(&content_secret(&block)));
-        assert_eq!(content_secret_of(miner.content(), 3, &head), content_secret(&block), "the shared key computes c_h without sealing");
+        assert_eq!(content_secret_of(miner.content(), C, 3, &head), content_secret(&block), "the shared key computes c_h without sealing");
         // another member sealing the same head: the same content secret,
         // ITS proposer scalar — a different lock
-        let other = SealedBlock { proposer: 1, proposer_secret: miner.proposer_secret(1, 3), ..block };
+        let other = miner.seal_entry(C, 3, 1, &entry).unwrap();
         assert!(!lock.opens(&lock_secret(&other)));
         assert!(fee_lock(8, Role::User, Amount::from_sat(1), &registry, 3, &head, 1, 100).opens(&lock_secret(&other)));
         // a different head by member 3: a different content secret
-        let entry_b = b"a different entry".to_vec();
-        let header = lngap_factchain::Header::new(&other.header.prev(), &lngap_factchain::entry_root(&entry_b), &entry_head(&entry_b), 3);
-        let attestation = miner.content().attest(&table, header.as_bytes());
-        let block_b = SealedBlock { header, entry: entry_b, attestation, proposer: 3, proposer_secret: miner.proposer_secret(3, 3) };
+        let block_b = miner.seal_entry(C, 3, 3, b"a different entry").unwrap();
         assert!(!lock.opens(&lock_secret(&block_b)));
     }
 }

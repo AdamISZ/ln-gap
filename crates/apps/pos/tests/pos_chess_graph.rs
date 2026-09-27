@@ -60,16 +60,14 @@ use lngap_chess::certificate::find_kind;
 use lngap_chess::leaf::{exhibit_values, Kind};
 use lngap_chess::{apply, Move};
 use lngap_chess_fc::{ChessEntry, ChessState};
-use lngap_factchain::{entry_head, entry_root, Header};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsSig};
 use lngap_pos::chess;
-use lngap_ec_wots::Attester;
 use lngap_pos::graph::{not_timely_witness, proposer_witness};
-use lngap_pos::instance::{self, Game as WhichGame, PosInstance};
+use lngap_pos::instance::{self, GameClock, Game as WhichGame, PosInstance};
 use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
-use lngap_pos::{Member, PosMiner, Registry, SealedBlock};
+use lngap_pos::{Authorship, Member, PosMiner, Registry, SealedBlock};
 
 const SEED: [u8; 32] = [7u8; 32];
 const GAME_ID: u16 = 1;
@@ -103,8 +101,7 @@ fn entry_msg(e: &ChessEntry) -> Vec<u8> {
 /// announcements — the scheduled member's table per slot, every member's
 /// flag point.
 fn registry() -> Registry {
-    let (gen, _t0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
-    PosMiner::new(SEED, members(), gen.header.digest(), 0).registry(MAX_DEPTH).unwrap()
+    PosMiner::new(SEED, members()).registry(CONTRACT_ID, MAX_DEPTH).unwrap()
 }
 
 /// Play `uci` from `s` (natively), if legal.
@@ -124,24 +121,24 @@ fn pretend(s: &ChessState, uci: &str) -> ChessState {
     ChessState { pos, mv, depth: s.depth + 1 }
 }
 
-/// The venue: the blocks sealed so far, by slot.
+/// The venue: the entries sealed so far, by depth (D55: keyed by
+/// (contract, depth), sealed on submission, no empty seals).
 struct Venue {
     miner: PosMiner,
     sealed: std::collections::HashMap<u32, SealedBlock>,
 }
 
 impl Venue {
-    fn new() -> Venue {
-        let (gen, _table0) = lngap_pos::genesis(&Attester::new(SEED), &members()[0], 0);
-        Venue {
-            miner: PosMiner::new(SEED, members(), gen.header.digest(), 0),
-            sealed: std::collections::HashMap::new(),
-        }
+    fn new(auth: Authorship) -> Venue {
+        let mut miner = PosMiner::new(SEED, members());
+        miner.register(CONTRACT_ID, MAX_DEPTH, auth).unwrap();
+        Venue { miner, sealed: std::collections::HashMap::new() }
     }
-    /// Seal `slot` with the entry for `state` (after move `state.depth`)
-    /// SIGNED with the mover's state key over the signed region (D41: the
-    /// refute leaves check it). The venue is a dumb sequencer: an illegal
-    /// move seals just the same.
+    /// Seal depth `slot` with the entry for `state` (after move
+    /// `state.depth`) SIGNED with the mover's state key over the signed
+    /// region (D41: the refute leaves check it), by the designated member.
+    /// The venue checks authorship, never legality: an illegal move seals
+    /// just the same.
     fn seal_move(&mut self, slot: u32, state: &ChessState, ks: &mut KeyStore) {
         assert_eq!(u32::from(state.depth), slot);
         let mover = instance::mover_at(slot);
@@ -158,14 +155,15 @@ impl Venue {
             state: state.clone(),
             sigs: sig.hashes.clone(),
         };
-        self.miner.submit(entry.encode());
-        let (block, table) = self.miner.seal_next(slot).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
+        let sealer = self.miner.default_sealer(CONTRACT_ID, slot).unwrap();
+        let block = self.miner.seal_entry(CONTRACT_ID, slot, sealer, &entry.encode()).unwrap();
+        assert!(block.verify_seal(self.miner.table(CONTRACT_ID, slot)).is_ok());
         self.sealed.insert(slot, block);
     }
-    /// Seal `slot` with a legal-looking but GARBAGE-SIGNED entry (the
-    /// D41/PS9 case): the sigs region is junk. The venue attests
-    /// existence, never validity — it seals anyway.
+    /// A ROGUE member seals depth `slot` with a legal-looking but
+    /// GARBAGE-SIGNED entry (the D41/PS9 case): the sigs region is junk.
+    /// An honest member refuses it (D55); the rogue seal is attested,
+    /// provable misbehaviour and inert in the contract.
     fn seal_move_junk(&mut self, slot: u32, state: &ChessState) {
         let mover = instance::mover_at(slot);
         let entry = ChessEntry {
@@ -175,22 +173,28 @@ impl Venue {
             state: state.clone(),
             sigs: vec![[0x11; 20]; STATE_DIGITS],
         };
-        self.miner.submit(entry.encode());
-        let (block, table) = self.miner.seal_next(slot).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
+        let bytes = entry.encode();
+        assert!(self.miner.seal_entry(CONTRACT_ID, slot, 0, &bytes).unwrap_err().contains("refuses"), "an honest member refuses an unsigned entry");
+        let block = self.miner.seal_unchecked(CONTRACT_ID, slot, 1, &bytes).unwrap();
+        assert!(block.verify_seal(self.miner.table(CONTRACT_ID, slot)).is_ok());
         self.sealed.insert(slot, block);
     }
-    /// A colluding member seals `slot` AGAIN, late, with the mover's
-    /// signed move (D50's late-attestation fixture): a second header at
-    /// the slot, attested under the slot's shared table and tagged with
-    /// the member's proposer scalar (D53) — exactly as the equivocation
-    /// fixture forges — replacing the on-time empty block in the venue's
-    /// record as far as the mover's refutation is concerned.
-    /// (The on-time block is the pair evidence against it; the flags the
-    /// validators published at the deadline are what the contract counts.)
+    /// A ROGUE member seals an EMPTY entry at depth `slot` (the zero head;
+    /// D55 has no empty seals, so only a rogue produces one).
+    fn seal_empty_rogue(&mut self, slot: u32) {
+        let block = self.miner.seal_unchecked(CONTRACT_ID, slot, 1, &[]).unwrap();
+        assert_eq!(block.head(), [0u8; 48]);
+        self.sealed.insert(slot, block);
+    }
+    /// A colluding member seals the mover's signed move at depth `slot`
+    /// LATE, after its due time passed with nothing sealed (D50's
+    /// late-attestation fixture under D55): the attestation is genuine and
+    /// the entry validly signed, so the seal itself is unremarkable; the
+    /// flags the members published at the deadline are what the contract
+    /// counts.
     fn seal_late(&mut self, slot: u32, state: &ChessState, ks: &mut KeyStore) {
         assert_eq!(u32::from(state.depth), slot);
-        assert!(self.sealed[&slot].entry.is_empty(), "the on-time block at slot {slot} was empty");
+        assert!(!self.sealed.contains_key(&slot), "nothing was sealed at depth {slot} on time");
         let mover = instance::mover_at(slot);
         let sig = ks
             .sign_wots(
@@ -199,20 +203,10 @@ impl Venue {
             )
             .unwrap();
         let entry = ChessEntry { game_id: GAME_ID, depth: slot as u8, mover: mover.idx() as u8, state: state.clone(), sigs: sig.hashes.clone() }.encode();
-        let parent = self.sealed[&slot].header.prev();
-        let header = Header::new(&parent, &entry_root(&entry), &entry_head(&entry), slot);
-        let table = self.miner.table(slot).clone();
-        let attestation = self.miner.content().attest(&table, header.as_bytes());
         // the colluding member: member 1 (any member could; it is named)
-        let late = SealedBlock { header, entry, attestation, proposer: 1, proposer_secret: self.miner.proposer_secret(1, slot) };
-        assert!(late.verify_seal(&table).is_ok());
+        let late = self.miner.seal_entry(CONTRACT_ID, slot, 1, &entry).unwrap();
+        assert!(late.verify_seal(self.miner.table(CONTRACT_ID, slot)).is_ok());
         self.sealed.insert(slot, late);
-    }
-    /// Seal `slot` empty (the mover stalls).
-    fn seal_empty(&mut self, slot: u32) {
-        let (block, table) = self.miner.seal_next(slot).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
-        self.sealed.insert(slot, block);
     }
     fn head(&self, slot: u32) -> [u8; 48] {
         self.sealed[&slot].header.head()
@@ -234,7 +228,7 @@ impl Game {
     /// The draft: both sides generate their per-depth keys under the
     /// standard labels (the chess game selects the 336-bit state keys),
     /// exchange the public offers, and build the SAME instance.
-    fn open(btc_open: u32, deadline: u32, value: Amount, registry: &Registry) -> Game {
+    fn open(clock: GameClock, deadline: u32, value: Amount, registry: &Registry) -> Game {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("posc/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("posc/hub"));
         let mut user_ks = KeyStore::new(Seed::from_label("posc/user-ks"));
@@ -247,8 +241,8 @@ impl Game {
         // the registry (D51): the scheduled member's table per slot and
         // every member's flag point (D50), pinned at open
         assert_eq!(registry.threshold, T, "the PoC threshold is the majority");
-        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_u, registry.clone()).unwrap();
-        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, btc_open, 1, keys_h, registry.clone()).unwrap();
+        let inst_u = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, clock, keys_u, registry.clone()).unwrap();
+        let inst_h = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, WhichGame::Chess, clock, keys_h, registry.clone()).unwrap();
         let params = ChannelParams {
             presign_fee: Amount::from_sat(60_000), // the venue readout must be fee-covered: the chess pair refute is ~53 kvB; the 1k-sat regtest placeholder is below the relay floor for it (D42)
             ..ChannelParams::regtest(Amount::from_sat(400_000))
@@ -343,7 +337,7 @@ impl Path {
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), g.inst.value).unwrap();
         let graph = g.inst.graph(&ctx, c_op, &c_prev).unwrap();
         Path {
-            venue: Venue::new(),
+            venue: Venue::new(g.inst.authorship()),
             graph,
             state: ChessState::initial(),
             pair_sig: None,
@@ -632,6 +626,17 @@ fn run(rt: &Regtest, p: &PresignedTx, w: Vec<Vec<u8>>) -> Transaction {
 }
 
 /// The skeleton with the witness attached but NOT broadcast (for negatives).
+/// A game clock starting at the node's median-time-past: a move a
+/// minute, claims a minute after each move's due time (D55).
+fn clock(rt: &Regtest) -> GameClock {
+    GameClock { t0: rt.mtp().unwrap(), ell: 60, margin: 60 }
+}
+
+/// The settle deadline: well after every claim window.
+fn deadline(rt: &Regtest) -> u32 {
+    rt.mtp().unwrap() + 100_000
+}
+
 fn dry(p: &PresignedTx, w: Vec<Vec<u8>>) -> Transaction {
     let mut tx = p.tx.clone();
     tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
@@ -648,7 +653,7 @@ fn wired_pos_chess_graph() {
 
     // ====== path A: an illegal move (a bishop jumps a pawn) is killed ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         assert_eq!(
             path.graph.len(),
@@ -663,6 +668,7 @@ fn wired_pos_chess_graph() {
         rt.mine(1).unwrap();
         path.seal(&mut g, 2, "c8e6", false);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         let (_a_op, _a_prev) = path.claim(&rt, &g, D);
         let (p_op, p_prev) = path.refute(&rt, &mut g, D);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -685,13 +691,14 @@ fn wired_pos_chess_graph() {
 
     // ====== path B: a legal refutation stands ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
         path.seal(&mut g, 2, "e7e5", true);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         path.claim(&rt, &g, D);
         let (p_op, p_prev) = path.refute(&rt, &mut g, D);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -722,13 +729,14 @@ fn wired_pos_chess_graph() {
 
     // ====== path C: no publication — the timeout split pays ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
-        path.venue.seal_empty(2);
+        // the hub does not publish at depth 2: nothing is sealed (D55: no empty seals)
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         path.claim(&rt, &g, D);
         // too early: the timeout split must wait out delta
         let w = path.timeout_witness(&mut g, D, 0);
@@ -741,11 +749,12 @@ fn wired_pos_chess_graph() {
 
     // ====== path D: the depth-1 single-head form ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(1)).unwrap();
         path.claim(&rt, &g, 1);
         let (p_op, p_prev) = path.refute(&rt, &mut g, 1);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -762,7 +771,7 @@ fn wired_pos_chess_graph() {
 
     // ====== path E: fool's mate — the absence path IS the terminal path ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         // 1. f3 e5 2. g4 Qh4#
         for (slot, uci) in [(1, "f2f3"), (2, "e7e5"), (3, "g2g4"), (4, "d8h4")] {
@@ -772,9 +781,9 @@ fn wired_pos_chess_graph() {
         assert!(lngap_chess::terminal(&path.state.pos).is_some(), "the fixture must be terminal");
         // E1: the mated user has no move at depth 5; slot 5 seals empty;
         // hub's absence claim pays by timeout with code HubWins
-        rt.mine(1).unwrap();
-        path.venue.seal_empty(5);
+        // nothing is sealed at depth 5 (D55: no empty seals)
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(5)).unwrap();
         path.claim(&rt, &g, 5);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         let w = path.timeout_witness(&mut g, 5, 1);
@@ -785,7 +794,7 @@ fn wired_pos_chess_graph() {
         // E2: same game, but the mated user ANSWERS with an illegal g4g5
         // (the king still attacked): the refutation parks it and hub's
         // chess_kingattacked disprove — a TWO-ELEMENT exhibit — takes it
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         for (slot, uci) in [(1, "f2f3"), (2, "e7e5"), (3, "g2g4"), (4, "d8h4")] {
             rt.mine(1).unwrap();
@@ -794,6 +803,7 @@ fn wired_pos_chess_graph() {
         rt.mine(1).unwrap();
         path.seal(&mut g, 5, "g4g5", false);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(5)).unwrap();
         path.claim(&rt, &g, 5);
         let (p_op, p_prev) = path.refute(&rt, &mut g, 5);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -808,13 +818,15 @@ fn wired_pos_chess_graph() {
         // not move at 3" — vacuously true: the user's turn never came).
         // Before D44 this raced the user's honest `absent_2` on CLTV order
         // alone and the staller's timeout split could take the pot.
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
-        path.venue.seal_empty(2);
+        // a ROGUE member seals an EMPTY entry at depth 2 (the zero head)
+        path.venue.seal_empty_rogue(2);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(3)).unwrap();
         path.claim(&rt, &g, 3); // the staller's vacuous claim
         // the user counters: "you did not move at 2"
         let (c_op, c_prev) = path.counter(&rt, &g, 3);
@@ -834,13 +846,14 @@ fn wired_pos_chess_graph() {
     {
         // the same attack, the staller declining the hopeless refutation:
         // the user's timeout split off the counter output pays after delta
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
-        path.venue.seal_empty(2);
+        // the hub stalls at depth 2: nothing is sealed
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(3)).unwrap();
         path.claim(&rt, &g, 3);
         path.counter(&rt, &g, 3);
         let before = rt.balance_of(&g.user.public().payout_spk).unwrap();
@@ -860,15 +873,16 @@ fn wired_pos_chess_graph() {
         // not move at 2" — false): the hub refutes on the counter output
         // with the (1, 2) pair readout, nothing disproves it, and the
         // hub's self-checking split pays R(parked) = HubWins
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
         rt.mine(1).unwrap();
         path.seal(&mut g, 2, "e7e5", true);
         rt.mine(1).unwrap();
-        path.venue.seal_empty(3);
+        // the user stalls at 3: nothing is sealed
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(3)).unwrap();
         path.claim(&rt, &g, 3);
         path.counter(&rt, &g, 3);
         let (p_op, p_prev) = path.refute_under(&rt, &mut g, 2, "absent_3/counter");
@@ -893,7 +907,7 @@ fn wired_pos_chess_graph() {
         // cannot decode it, and every kind leaf's board read errors on
         // it — before D45 the parked state was un-disprovable and the
         // hub's checked split took the pot
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
@@ -908,12 +922,15 @@ fn wired_pos_chess_graph() {
         for h in &sig.hashes {
             entry.extend_from_slice(h);
         }
-        path.venue.miner.submit(entry);
-        let (block, table) = path.venue.miner.seal_next(2).unwrap();
-        assert!(block.verify_seal(&table).is_ok());
+        // signed by the hub: an honest member seals it (authorship, never
+        // well-formedness, D55)
+        let sealer = path.venue.miner.default_sealer(CONTRACT_ID, 2).unwrap();
+        let block = path.venue.miner.seal_entry(CONTRACT_ID, 2, sealer, &entry).unwrap();
+        assert!(block.verify_seal(path.venue.miner.table(CONTRACT_ID, 2)).is_ok());
         assert_eq!(block.header.head(), head);
         path.venue.sealed.insert(2, block);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         path.claim(&rt, &g, D);
         let (p_op, p_prev) = path.refute(&rt, &mut g, D);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
@@ -931,7 +948,7 @@ fn wired_pos_chess_graph() {
 
     // ====== path G: a garbage-signed entry admits no refutation ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
@@ -940,6 +957,7 @@ fn wired_pos_chess_graph() {
         let junk_state = play(&path.state, "e7e5").unwrap();
         path.venue.seal_move_junk(2, &junk_state);
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         path.claim(&rt, &g, D);
         let junk_refute = path.refute_with_junk(&mut g, D);
         assert!(rt.test_accept(&junk_refute).is_err(), "a garbage-signed entry must admit no refutation");
@@ -952,17 +970,15 @@ fn wired_pos_chess_graph() {
 
     // ====== path I: a LATE attestation is killed by the timeliness flags (D50) ======
     {
-        let mut g = Game::open(rt.height().unwrap() + 1, rt.height().unwrap() + 400, value, &registry);
+        let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
         let mut path = Path::open(&rt, &g);
         rt.mine(1).unwrap();
         path.seal(&mut g, 1, "e2e4", true);
-        // slot 2 seals EMPTY on time: the hub did not publish
-        rt.mine(1).unwrap();
-        path.venue.seal_empty(2);
+        // the hub does not publish at depth 2: nothing is sealed on time
         // the slot's deadline passes; every validator saw it empty and
         // publishes its flag scalar (out of band — the claimant collects)
         rt.mine(1).unwrap();
-        let scalars: Vec<Option<SecretKey>> = path.venue.miner.flag(2);
+        let scalars: Vec<Option<SecretKey>> = path.venue.miner.flag(CONTRACT_ID, 2);
         assert!(scalars.iter().all(Option::is_some), "every member flags");
         // the colluding proposer now seals the hub's e7e5 at slot 2, LATE
         let late = play(&path.state, "e7e5").unwrap();
@@ -970,6 +986,7 @@ fn wired_pos_chess_graph() {
         path.state = late;
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
         let before = rt.balance_of(&g.user.public().payout_spk).unwrap();
+        rt.make_time_final(g.inst.claim_from(D)).unwrap();
         path.claim(&rt, &g, D);
         // the refutation reads the late block out: the attestation is
         // real, the move is legal, no disprove of the tuple fires...
