@@ -197,7 +197,7 @@ What you need:
 
 \begin{itemize}
 \item \textbf{Liveness} : can never be promised, just like in a proof of work chain, but if \emph{any} member of the validator can enter your publication in a slot, then some approximate ``1 of $n$ liveness'' can be claimed, and this is an acceptable security model.
-\item \textbf{A large enough quorum}: Credibility of the above as well as what follows, requires some relatively large, heterogeneous and ideally permissionless-entry set of validators. This naturally leads to thinking of FROST-style thresholds, with O(1) publication, but (see next entry) that is not actually viable and so we go with a trick to make thresholds of 50 of 100 be viable. Even figures 10 times higher than that are \emph{theoretically} possible, but in practice we would not go much higher.
+\item \textbf{A large enough quorum}: Credibility of the above as well as what follows, requires some relatively large, heterogeneous and ideally permissionless-entry set of validators. This naturally leads to thinking of FROST-style thresholds, with O(1) publication, but (see next entry) that is not actually viable and so we go with a trick to make thresholds of 50 of 100 be viable. Even figures 10 times higher than that are \emph{theoretically} possible, but in practice we would not go much higher.\footnote{Section~\ref{sec:accountable} returns to this: a large, dynamic set need not be verified in Script at all, if its role is to make a small, Script-legible committee accountable.}
 \item \textbf{Fraud is attributable}: this is the reason why a naive FROST-style threshold is unworkable: by its nature, such a threshold signature cannot reveal which members of the validator set committed the fraud. And punishing the entire set of such members when only a threshold have committed the fraud, is clearly unworkable. To make fraud attribution feasible we use what we call a ``one-bit signature'':  $t$ of $n$ OP\_CHECKSIGADD operations can prove that a binary true/false was attested to. More on that in a moment.
 \item \textbf{Positve incentives in bitcoin}: this is possible in a more general ``sidechain'' model (pay fees to move around coins on the sidechain), but this is not a sidechain, nor any kind of blockchain: the only consensus maintained on the ledger is the canonical history of publications; the semantics of the publications are none of its business. Here we have validators post bonds on bitcoin (timelocked coins) and receive fees for its publication efforts, atomically with those publications, over Lightning channels, using adaptors. This incentivizes honest participation and disincentivizes fraud or dishonesty.
 \end{itemize}
@@ -1114,7 +1114,8 @@ a stall & absence claim and timeout & Lightning's \\
 a false absence claim & refutation with the venue's attestation & 1 of $n$ (some member sealed the move) \\
 censorship of a mover (no member seals) & nothing in Script; fee income, member independence & 1 of $n$ \\
 a late seal colluding with the mover & \texttt{not\_timely}: $t$ flags & majority \\
-false flags against a timely move & none in Script; flaggers named, ejected & majority; economic \\
+false flags against a timely move & none in Script; flaggers named; provable only with an audit layer (\S\ref{sec:accountable}) & majority; economic \\
+a committee majority lying about time & none in Script; publicly judgeable with an audit layer (\S\ref{sec:accountable}) & majority; economic \\
 an unsigned seal & provable from the seal; ejection & economic \\
 two different signed moves at one depth & \texttt{equiv} leaf (the mover's fault) & cryptographic \\
 fee lock completed without sealing & self-contradiction against the venue's record; ejection & economic \\
@@ -1142,9 +1143,9 @@ absence. This is theft-shaped, not merely a delay, and nothing in Script
 prevents it. It requires every member to refuse until the move is due, and
 so is defended by the independence of the members (operators,
 jurisdictions, hosts) and by the fees each forgoes; bonds, which punish
-only self-contradiction, do not reach it. A forced-inclusion path
-through Bitcoin (an \texttt{OP\_RETURN} the venue must honour) is a
-possible backstop.
+only self-contradiction, do not reach it. Publishing the entry on
+Bitcoin makes such a refusal publicly visible
+(Section~\ref{sec:accountable}).
 
 \paragraph{The majority.} Flags are the only place the design needs a
 threshold, and it is there for \emph{order}, not for stake: two blocks
@@ -1153,7 +1154,9 @@ cannot be ordered by any third fact, so canonical timing needs agreement
 among the members, or an external clock. A colluding majority can kill
 an honest mover's refutation with false flags; the flags are signatures,
 so the colluders are named, and the residual falls on a party who knows
-whom to pursue.
+whom to pursue. Naming is not proof, however: whether a move was
+published in time cannot be shown to a third party.
+Section~\ref{sec:accountable} describes how to make it so.
 
 \paragraph{Venue failure.} If the venue stops altogether, nothing can
 be published, and an absence claim against whoever is on move succeeds.
@@ -1175,7 +1178,183 @@ limitation of the system rather than engineer around it: the only ways
 to remove it are verifying the venue's chain in Script (SPV, impractical)
 or turning the fact into Bitcoin outputs that each contract spends,
 which works only for facts of a few bits fixed in structure long in
-advance.
+advance. A third course accepts the limit but makes misbehaviour
+publicly verifiable: accountability rather than enforcement
+(Section~\ref{sec:accountable}).
+
+\section{Towards an accountable venue}
+\label{sec:accountable}
+
+This section describes an extension that is not yet implemented. It
+addresses the one threat of Section~\ref{sec:security} that the design
+leaves to economics alone: a colluding majority of the venue.
+
+\subsection{The threshold adversary}
+
+A majority of the members can take the pot of any contract, in either
+direction. By \emph{false flags}, $t$ members declare an honest mover's
+timely move unpublished and \texttt{not\_timely} kills its refutation.
+By a \emph{late seal with suppressed flags}, one member seals a stalling
+mover's move after its due time while $n - t + 1$ members withhold their
+flags, so the late refutation stands. The majority threshold balances
+the two, each needing about half of the members. This resembles a
+majority attack on a proof-of-work chain, with three differences. The
+venue's attackers are named (every flag and every seal carries a
+member's key), where a miner is anonymous. Their cost is sunk (a
+timelocked bond, a franchise of future fees), where hash power can be
+rented for the attack. And the attack can target a single contract,
+silently, where a reorganisation is public.
+
+What makes the attack hard to punish is not anonymity but the nature of
+the fact decided. Whether a move reached the members in time is exactly
+the kind of fact that no third party can check: the impossibility of
+Section~\ref{sec:beyond}, which the venue resolved for the two players,
+reappears among the members, and is resolved by vote. A timeliness lie
+by a majority is therefore attributable (we know who flagged) but not
+falsifiable (nobody can show the flag was false). Punishment by ejection
+needs an objective basis, and there is none.
+
+\subsection{Publishing on Bitcoin}
+
+A mover who fears the venue can publish its entry on Bitcoin, in an
+\texttt{OP\_RETURN}, confirmed with median-time-past before the move's
+due time. This proves nothing to Script, but it removes the excuse:
+if members are required to watch for the venue's tagged entries on
+Bitcoin, flagging a move that Bitcoin shows as published is a lie that
+anyone with a node can see. Optional posting protects only the mover,
+against false flags; absence has no witness when posting is optional. If
+posting is \emph{mandatory}, absence becomes checkable too (no tagged
+entry for the move before its due time), and both attacks become
+publicly verifiable. But mandatory posting puts every move on Bitcoin in
+the honest case, which is what ForceMove avoids: the dispute stays
+$O(1)$, but the honest game pays per move, and the cadence must allow
+for confirmation times and fee spikes. It is a niche mode for slow,
+high-value games, not a default. It shows, however, that the venue's
+honesty \emph{can} be made publicly checkable; the question is where the
+record should live.
+
+\subsection{A third layer}
+
+The record need not live on Bitcoin, and it need not be verified in
+Script. Its only purpose is to let observers judge the venue after the
+fact, and observers can verify far more than a script can. This suggests
+three layers (Figure~\ref{fig:layers}):
+
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright\arraybackslash}p{27mm}>{\raggedright\arraybackslash}p{50mm}>{\raggedright\arraybackslash}p{27mm}>{\raggedright\arraybackslash}p{30mm}}
+\toprule
+layer & role & verified by & constraint \\
+\midrule
+Bitcoin & money; the dispute's clock; rare anchoring of the audit layer & Script, everyone & slow, expensive \\
+venue committee & per-contract attestations and flags, legible to Script & Script & small: tens to about a hundred members, one-bit statements \\
+audit layer & the public record of what was published, and when & observers only & none from Script: large, dynamic \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Every entry is published to the audit layer as it is made, cheaply and
+quickly; the audit layer commits its history to Bitcoin periodically
+(an \texttt{OP\_RETURN} per hour, say, for all contracts at once), which
+fixes it against rewriting at an amortised cost. A committee majority
+that flags a move the audit layer shows as published, or lets stand a
+seal the audit layer shows as late, is then caught in either direction,
+without per-move Bitcoin cost. The pattern is familiar: a small
+committee that a constrained verifier can check, attesting to a larger
+system that full observers check, as Ethereum's sync committees do for
+light clients~\cite{synccommittee}; and a public log whose timeliness
+rests on many independent witnesses and on anchoring, as in
+witness-cosigned transparency logs~\cite{ct} and
+OpenTimestamps~\cite{ots}. Script never verifies the audit layer, so the
+limit Script places on quorum size no longer limits the size of the
+trusted set; it limits only each contract's committee.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  lay/.style={draw, rounded corners=3pt, align=center, inner sep=5pt, text width=#1},
+  lay/.default=44mm,
+  >={Stealth[length=5pt]},
+]
+\node[lay=52mm, fill=black!4] (A) at (0,3.6) {\textbf{Audit layer}\\ large, dynamic pool; the public record of every entry and its time};
+\node[lay, fill=blue!4] (V) at (-3.4,0.9) {\textbf{Venue committee}\\ sampled from the pool per contract; attestations and flags};
+\node[lay, fill=orange!8] (B) at (3.4,0.9) {\textbf{Bitcoin}\\ money, disputes, the claim clock};
+\node[lay=40mm, draw=black!40, text=black!70] (C) at (0,-1.6) {\textbf{Contract} (in a channel)};
+\draw[->] (V.south) -- node[pos=0.45, left=3pt, font=\scriptsize, align=right] {signatures\\ read in Script} (C.north west);
+\draw[->] (C.north east) -- node[pos=0.55, right=3pt, font=\scriptsize] {disputes} (B.south);
+\draw[->, densely dashed] ([xshift=-10mm]A.south) -- node[pos=0.5, left=4pt, font=\scriptsize] {samples, audits} (V.north);
+\draw[->, densely dashed] ([xshift=10mm]A.south) -- node[pos=0.5, right=4pt, font=\scriptsize] {periodic anchor} (B.north);
+\end{tikzpicture}
+\caption{Three layers. Only the solid arrows are checked in Script; the
+audit layer makes the committee's statements publicly judgeable after
+the fact.}
+\label{fig:layers}
+\end{figure}
+
+\subsection{Committees drawn from a pool}
+
+The audit layer's participants form a natural pool: long-lived, bonded,
+and large. Each contract's committee can be drawn from it at random,
+with randomness to which both players contribute (commit, then reveal),
+optionally after each side has struck members it distrusts. An
+adversary controlling a fraction $f$ of the pool then controls a
+majority of a committee of a hundred with a probability that is
+negligible while $f$ is well below one half: the attack needs a large
+share of the pool, not of one committee. The per-contract cost is small,
+since the content key is shared by the whole pool and only the one-bit
+proposer and flag points are per member.
+
+A natural alternative does not work: letting each player choose half of
+the committee. Suppose Alice is the mover at some depth, with $n = 100$
+and flag threshold $t$. If Bob's fifty are his sybils, they must not be
+able to kill Alice's timely refutation by flagging it, so $t \ge 51$. If
+instead Alice's fifty are hers, and she moves late with a colluding
+sealer while her fifty withhold their flags, Bob's fifty honest flags
+must suffice to kill the late refutation, so $t \le 50$. No threshold
+satisfies both. Each side's choices are partisan, and whichever side
+cheats is backed by its own half; the committee must consist of members
+neither player chose.
+
+\subsection{A proposed improvement: two-sided votes and a void zone}
+
+Two changes to the contract, not yet implemented, raise the size of
+coalition that can steal.
+
+\emph{Two-sided votes.} Today a member makes one statement per move,
+the flag (``not published in time''), and a member that says nothing
+counts in effect as saying the move was published; a colluder
+protecting a late move can simply stay silent, indistinguishable from an
+offline member. With two-sided votes each member holds two one-bit keys
+per move, ``published in time'' and ``not published in time'', and
+reveals one of them. A colluder must then sign a false statement rather
+than hide behind silence; an offline member counts for neither side; and
+a member that reveals both has contradicted itself, provably, even in
+Script.
+
+\emph{A void zone.} Today a single threshold decides: at least $t$ flags
+and the claimant wins, otherwise the refutation stands. With two
+thresholds, at least two thirds voting ``not published'' pays the
+claimant, at most one third pays the mover, and anything in between
+refunds both stakes. Stealing then needs two thirds of the committee in
+either direction; a coalition between one and two thirds can only force
+a refund. This is the familiar trade of Byzantine agreement, one third
+to block progress and two thirds to break safety. In the contract it
+costs a second set of $n$ points in the vote-counting leaf and one more
+leaf, the refund; its price in play is that an honest winner can be
+griefed into a refund by a sizeable minority.
+
+\subsection{What remains}
+
+A committee majority, now two thirds, can still take a pot. With an
+audit layer it can do so only provably, at the cost of every colluder's
+franchise; security remains economic at the top, like proof of work,
+but the attack is no longer deniable. One step further is possible: if
+committee members' bonds are held under a key controlled by the pool (a
+large-threshold key over the audit layer's membership), the pool could
+slash a provably colluding committee and compensate the victim, judging
+from the audit layer's record. That moves the trust up a level, to the
+larger set, which is the point.
 
 \section{Related work}
 \label{sec:related}
@@ -1193,7 +1372,12 @@ its attestations are read in Bitcoin Script. BitVM~\cite{bitvm} settles
 arbitrary computation on Bitcoin by bisection; we avoid on-chain
 bisection by giving each game a family of single-step disprove leaves.
 StackSat-128~\cite{stacksat} is a Script-friendly hash designed for the
-proof-of-work alternative. For storage, see
+proof-of-work alternative. The accountable venue of
+Section~\ref{sec:accountable} follows the pattern of Ethereum's sync
+committees~\cite{synccommittee} (a sampled committee attesting for a
+constrained verifier) and of witness-cosigned transparency
+logs~\cite{ct}; committee sampling by joint randomness is in the spirit
+of Algorand's sortition~\cite{algorand}. For storage, see
 Section~\ref{sec:storage}.
 
 \section{Conclusion}
@@ -1205,7 +1389,10 @@ read, and flags by majority what it did not, closes the gap with
 $O(1)$ transactions per dispute and no change to Bitcoin. Content stays
 cryptographic; time becomes a 1-of-$n$ and majority fact about a bonded,
 fee-paid set of members; shared facts are secured economically, up to a
-bound set by the venue's revenue.
+bound set by the venue's revenue. The remaining weakness, a colluding
+majority of the venue, can be made accountable rather than deniable: a
+large audit layer, anchored to Bitcoin, from which each contract's
+committee is drawn and against which its statements can be judged.
 
 
 \begin{thebibliography}{99}
@@ -1237,6 +1424,12 @@ bound set by the venue's revenue.
 \bibitem{rcpor} A.~Abadi, S.~J.~Murdoch and T.~Zacharias. Recurring contingent payment for proofs of retrievability, 2021. \url{https://eprint.iacr.org/2021/1145}
 
 \bibitem{scrypt} sCrypt. Pay for storage using proof of retrievability on Bitcoin. \url{https://scryptplatform.medium.com/pay-for-storage-using-proof-of-retrievability-on-bitcoin-d5f2df009e1}
+
+\bibitem{synccommittee} Ethereum consensus specifications, Altair: the sync committee. \url{https://github.com/ethereum/consensus-specs}
+
+\bibitem{ct} B.~Laurie, A.~Langley and E.~Kasper. Certificate Transparency. RFC~6962, 2013.
+
+\bibitem{algorand} Y.~Gilad, R.~Hemo, S.~Micali, G.~Vlachos and N.~Zeldovich. Algorand: scaling Byzantine agreements for cryptocurrencies. SOSP 2017.
 
 \bibitem{bitstream} R.~Linus. BitStream: decentralized file hosting incentivised via Bitcoin payments, 2023. \url{https://robinlinus.com/bitstream.pdf}
 
