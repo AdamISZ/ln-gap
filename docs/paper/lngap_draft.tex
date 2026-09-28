@@ -1777,7 +1777,7 @@ of \S\ref{sec:graph:refuted}:
 (*\push{\dl}*) OP_CSV OP_DROP  (*\push{P_{c(d)}}*) OP_CHECKSIGVERIFY      (*the claimant, after the window*)
 WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))                             (*the 192 parked digits*)
 PREAMBLE  BODY((*$\pi$*))                                     (*one element: 1 iff the rule is broken*)
-OP_VERIFY  OP_2DROP (*$\times 96$*)  OP_1
+CLEANUP                                                  (*drop the rest, leave that element*)
 \end{lstlisting}
 and its witness, bottom to top, is: the exhibit (zero to two script
 numbers), the $195$ (hash, digit) pairs of the Winternitz reveal
@@ -1930,9 +1930,10 @@ else:
 With the exhibit $j = 1$: the guard holds ($|2| = |-2|$, not a
 knight, $1 \le 1 < 2$); $\mathit{step} = 1 + 8 \cdot (-1) = -7$; one
 gated addition gives $\mathit{sq} = 58 - 7 = 51$, d7; the read returns
-the prior nibble $9$, which is non-zero. The body leaves $1$,
-\texttt{OP\_VERIFY} consumes it, the $192$ digits are dropped in
-pairs, and the leaf ends in \texttt{OP\_1}.
+the prior nibble $9$, which is non-zero. The body leaves $1$; the
+cleanup drops everything else, and the spend succeeds with that $1$ as
+the only stack element. Appendix~\ref{app:chess:bytes} shows the same
+computation opcode by opcode.
 
 \paragraph{The spend.} After the refutation has $\dl$ confirmations,
 $\Pa$ builds \texttt{disprove\_chess\_ray} spending $P_2$: witness
@@ -1948,6 +1949,192 @@ for ``the board is wrong''), the leaf would have failed whatever
 square it named; the regtest test \texttt{pos\_chess\_graph} checks
 that rejection before mining the ray disprove. The illegality is in the
 move, not in the bookkeeping, and the family has one leaf for each.
+
+\subsection{The same disproof, as bytes}
+\label{app:chess:bytes}
+
+The walk-through above is the program. What goes on chain is the
+transaction below, taken from the same regtest run; the raw transaction,
+the leaf's full disassembly and every witness element are in the
+repository under \texttt{docs/paper/data/}. The transaction has one
+input (the refuted output $P_2$, with \texttt{nSequence} $= 6$: $\dl = 6$
+blocks on regtest), one output ($820{,}000$ sat to $\Pa$), and a witness
+of $394$ elements. It is $19{,}537$ bytes, of which the witness is
+$19{,}441$: weight $19{,}819$, so $4{,}955$ vB.
+
+\paragraph{The leaf script: $14{,}791$ bytes.}
+\begin{center}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+segment & bytes & \\
+\midrule
+header: CSV and the claimant's key & 37 & \\
+Winternitz steps, one per digit & 13{,}650 & $195 \times 70$ \\
+Winternitz checksum finale & 602 & \\
+\textbf{the ray predicate (preamble and body)} & \textbf{391} & \\
+cleanup & 111 & \\
+\midrule
+total & 14{,}791 & $10{,}618$ opcodes \\
+\bottomrule
+\end{tabular}
+\end{center}
+The rule of chess is $391$ bytes. Of the whole script, $96\%$ is
+reading the parked digits back under the one-time key, which every
+leaf of the family repeats verbatim; only the predicate differs from
+leaf to leaf. In the listings, pushes are written \push{n} in decimal
+(the script uses \texttt{OP\_1}\dots\texttt{OP\_16} or a minimal push)
+and the \texttt{OP\_} prefix is dropped after the first listing.
+
+The header and the first Winternitz step, byte for byte (the step
+verifies the last checksum digit; the $194$ others differ only in the
+$20$-byte public-key hash):
+\begin{lstlisting}[style=script]
+OP_6 OP_CSV OP_DROP                              (*$\dl = 6$*)
+OP_PUSHBYTES_32 651920c198e3c13afe5c4995fd4e924a9c46bd5ebab08ab2a7df235c955b6b31
+OP_CHECKSIGVERIFY                                (*$\sigma_{\Pa}$*)
+OP_SWAP OP_SIZE <20> OP_EQUALVERIFY              (*a 20-byte hash*)
+OP_SWAP <15> OP_MIN OP_DUP OP_TOALTSTACK         (*the digit, for the checksum*)
+<8> OP_2DUP OP_LESSTHAN
+OP_IF   OP_DROP OP_TOALTSTACK OP_HASH160 (*$\times 8$*)
+OP_ELSE OP_SUB OP_TOALTSTACK OP_ENDIF
+OP_DUP OP_HASH160 (*$\times 7$*)                            (*the chain to 15 hashes*)
+OP_FROMALTSTACK OP_PICK                          (*the hash at the digit's height*)
+OP_PUSHBYTES_20 fa0d31c163b74e26212fc6057c974b14f8dcae03 OP_EQUALVERIFY
+OP_2DROP OP_2DROP OP_2DROP OP_2DROP
+\end{lstlisting}
+The finale then recomputes $\sum_{i<192} (15 - d_i)$ from the
+altstack and compares it with the three checksum digits:
+\begin{lstlisting}[style=script]
+FROMALTSTACK DUP NEGATE  (FROMALTSTACK TUCK SUB) (*$\times 191$*)  <2880> ADD
+FROMALTSTACK (DUP ADD)(*$\times 4$*) FROMALTSTACK ADD
+(DUP ADD)(*$\times 4$*) FROMALTSTACK ADD  EQUALVERIFY
+\end{lstlisting}
+It leaves the $192$ digits on the stack, digit $0$ deepest and digit
+$191$ on top, with the exhibit $j$ below them all. Here is the
+predicate, all $381$ opcodes, with the value each line leaves in this
+spend on the right.
+\begin{lstlisting}[style=script]
+(*\textit{registers: fields gathered from the digits (a byte is high$\cdot$16 + low)}*)
+<110> PICK                                                   (*prior side\hfill 1*)
+<109> PICK                                                   (*prior castling\hfill 15*)
+<109> PICK DUP ADD DUP ADD DUP ADD DUP ADD <109> PICK ADD    (*prior ep\hfill 20*)
+<108> PICK DUP ADD DUP ADD DUP ADD DUP ADD <108> PICK ADD    (*prior halfmove\hfill 0*)
+<0>                                                          (*no move number\hfill 0*)
+<19> PICK                                                    (*new side\hfill 0*)
+<18> PICK                                                    (*new castling\hfill 15*)
+<18> PICK DUP ADD DUP ADD DUP ADD DUP ADD <18> PICK ADD      (*new ep\hfill 64*)
+<17> PICK DUP ADD DUP ADD DUP ADD DUP ADD <17> PICK ADD      (*new halfmove\hfill 1*)
+<0>                                                          (*no move number\hfill 0*)
+<17> PICK DUP ADD DUP ADD DUP ADD DUP ADD <17> PICK ADD      (*from\hfill 58*)
+<16> PICK DUP ADD DUP ADD DUP ADD DUP ADD <16> PICK ADD      (*to\hfill 44*)
+<15> PICK                                                    (*promotion\hfill 0*)
+(*\textit{preamble}*)
+<12> PICK                                                    (*$S$\hfill 1*)
+<1> OVER DUP ADD SUB                                         (*$1 - 2S$\hfill $-1$*)
+<4> PICK DUP <8> GREATERTHANOREQUAL                          (*from; rank of from:*)
+OVER <16> GREATERTHANOREQUAL ADD  OVER <24> GREATERTHANOREQUAL ADD
+OVER <32> GREATERTHANOREQUAL ADD  OVER <40> GREATERTHANOREQUAL ADD
+OVER <48> GREATERTHANOREQUAL ADD  OVER <56> GREATERTHANOREQUAL ADD  (*\hfill 7*)
+DUP DUP ADD DUP ADD DUP ADD ROT SWAP SUB                     (*file $=$ from $-$ 8 rank\hfill 2*)
+<5> PICK DUP <8> GREATERTHANOREQUAL                          (*to; rank of to:*)
+OVER <16> GREATERTHANOREQUAL ADD  OVER <24> GREATERTHANOREQUAL ADD
+OVER <32> GREATERTHANOREQUAL ADD  OVER <40> GREATERTHANOREQUAL ADD
+OVER <48> GREATERTHANOREQUAL ADD  OVER <56> GREATERTHANOREQUAL ADD  (*\hfill 5*)
+DUP DUP ADD DUP ADD DUP ADD ROT SWAP SUB                     (*file of to\hfill 4*)
+DUP <3> PICK SUB                                             (*$\Delta f$\hfill 2*)
+<2> PICK <5> PICK SUB                                        (*$\Delta r$\hfill $-2$*)
+<10> PICK <196> SWAP SUB PICK                                (*prior[from]\hfill 11*)
+DUP 0NOTEQUAL OVER <8> GREATERTHANOREQUAL <10> PICK NUMEQUAL BOOLAND (*own piece?\hfill 1*)
+OVER DUP <8> GREATERTHANOREQUAL DUP ADD DUP ADD DUP ADD SUB  (*its kind\hfill 3*)
+OVER IF ELSE DROP <0> ENDIF                                  (*$K$ (0 if not own)\hfill 3*)
+(*\textit{the ray body: the guard}*)
+<4> PICK <0> NUMEQUAL <4> PICK <0> NUMEQUAL BOOLOR           (*$\Delta f = 0 \lor \Delta r = 0$\hfill 0*)
+<5> PICK ABS <5> PICK ABS NUMEQUAL BOOLOR                    (*$\lor\ |\Delta f| = |\Delta r|$\hfill 1*)
+<5> PICK 0NOTEQUAL <5> PICK 0NOTEQUAL BOOLOR BOOLAND         (*$\land$ not a null move\hfill 1*)
+OVER <2> NUMNOTEQUAL BOOLAND                                 (*$\land\ K \ne 2$\hfill 1*)
+<217> PICK <1> GREATERTHANOREQUAL BOOLAND                    (*$\land\ j \ge 1$\hfill 1*)
+<217> PICK <6> PICK ABS <6> PICK ABS MAX LESSTHAN BOOLAND    (*$\land\ j < \max(|\Delta f|,|\Delta r|)$\hfill 1*)
+IF
+  <4> PICK DUP <0> GREATERTHAN SWAP <0> LESSTHAN SUB         (*sign $\Delta f$\hfill 1*)
+  <4> PICK DUP <0> GREATERTHAN SWAP <0> LESSTHAN SUB         (*sign $\Delta r$\hfill $-1$*)
+  DUP ADD DUP ADD DUP ADD ADD                                (*step\hfill $-7$*)
+  <14> PICK                                                  (*sq $:=$ from\hfill 58*)
+  <1> <219> PICK LESSTHANOREQUAL IF OVER ADD ENDIF           (*$1 \le j$: sq $+=$ step\hfill 51*)
+  <2> <219> PICK LESSTHANOREQUAL IF OVER ADD ENDIF           (*skipped*)
+  <3> <219> PICK LESSTHANOREQUAL IF OVER ADD ENDIF           (*skipped*)
+  <4> <219> PICK LESSTHANOREQUAL IF OVER ADD ENDIF           (*skipped*)
+  <5> <219> PICK LESSTHANOREQUAL IF OVER ADD ENDIF           (*skipped*)
+  <6> <219> PICK LESSTHANOREQUAL IF OVER ADD ENDIF           (*skipped*)
+  <200> SWAP SUB PICK                                        (*prior[sq]\hfill 9*)
+  0NOTEQUAL SWAP DROP                                        (*occupied: the result\hfill 1*)
+ELSE
+  <0>
+ENDIF
+\end{lstlisting}
+Each \texttt{PICK} depth is fixed when the leaf is built: $110$ is
+digit $81$ (the prior side) counted from the top of the $192$; $217$
+and $219$ reach past the file and the named values to the exhibit
+$j$; $196$ and $200$ are the depths of the prior board's square $0$
+at those two reads, so that \texttt{<base> SWAP SUB PICK} fetches
+square $s$. The cleanup parks the result, drops the other $217$
+elements (the exhibit, the $192$ digits and $24$ named values) and
+brings the result back as the only stack element, which is what a
+tapscript spend requires:
+\begin{lstlisting}[style=script]
+TOALTSTACK  2DROP (*$\times 108$*)  DROP  FROMALTSTACK
+\end{lstlisting}
+(\texttt{wrong\_slot} and \texttt{chess\_malformed} end instead as in
+the outline of \S\ref{sec:graph:refuted}, \texttt{OP\_VERIFY}, the
+drops, \texttt{OP\_1}; the two are equivalent.)
+
+\paragraph{The witness.} It has $394$ elements; they are listed here
+from the bottom of the stack (element $0$) up, with the element's
+length in bytes.
+\begin{lstlisting}[style=script]
+  0     1  01                                         (*the exhibit $j = 1$*)
+  1    20  690f6755ecad892ca2bc261c703a982368efb205   (*digit 0: hash*)
+  2     0  (empty)                                    (*digit 0: value 0*)
+  ...
+135    20  3685302342eb8c77c2c76720d704e589830ec973   (*digit 67 (prior d7)*)
+136     1  09                                         (*9: a black pawn*)
+  ...
+149    20  2c31103666df2902a7453a27162bf6bb57197e08   (*digit 74 (prior c8)*)
+150     1  0b                                         (*11: a black bishop*)
+  ...
+369    20  d4b4a5068c7fd66efb32ec0a4c9ab8693e718840   (*digit 184*)
+370     1  03                                         (*from, high nibble*)
+371    20  51317f5d3588b80d2139d3b9564ffb10aaae956a   (*digit 185*)
+372     1  0a                                         (*from $= \mathtt{0x3a} = 58$*)
+373    20  150c592248ef4fdeb8e6a988f2e9e302e84d2ed7   (*digit 186*)
+374     1  02                                         (*to, high nibble*)
+375    20  ca10142fde07c2d6fb4e3fd0173ed0948bf5a46f   (*digit 187*)
+376     1  0c                                         (*to $= \mathtt{0x2c} = 44$*)
+  ...
+386     1  09                                         (*checksum digits (385-390):*)
+388     1  01
+390     1  0b                                         (*$\mathtt{0x91b} = 2331$*)
+391    64  19ea82ef2e44ec8f...9d13474f                (*$\sigma_{\Pa}$, Schnorr*)
+392 14791  56b27520651920c1...                        (*the leaf script*)
+393   193  c050929b74c1a049...                        (*control block: depth 5*)
+\end{lstlisting}
+Element $2i+1$ is digit $i$'s chain value and element $2i+2$ its
+value as a minimal script number (so a $0$ is the empty push). The
+$192$ digit values, read in order, are the two parked heads; this is
+the \emph{whole} of what $\Pb$'s signed move contributes to the spend:
+\begin{lstlisting}[style=script]
+head(1) = 00010100 070c0000 42356324 11110111 00000000 00001000
+          00000000 00000000 99999999 cabdebac 010f1400 0c1c0001
+head(2) = 00010201 0b3a0000 42356324 11110111 00000000 00001000
+          00000000 0000b000 99999999 ca0debac 000f4001 3a2c0002
+\end{lstlisting}
+Read it with the tables of \S\ref{app:chess}: word0 (game $1$, depth,
+mover), word1 (e2--e4 is $12 + 64 \cdot 28 = \mathtt{0x070c}$, c8--e6
+is $58 + 64 \cdot 44 = \mathtt{0xb3a}$), then the board rank by rank
+from a1: \texttt{42356324} is White's back rank, and in head(2) the
+eighth rank \texttt{ca0debac} has lost the bishop from c8 (the third
+nibble) while the sixth rank \texttt{0000b000} has gained it on e6.
+Rank seven, \texttt{99999999}, still holds all eight black pawns,
+d7's included. That pawn is the fact the whole spend proves.
 
 
 \end{document}
