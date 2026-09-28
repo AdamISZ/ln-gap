@@ -79,7 +79,7 @@ Suppose you want to play a game on Lightning, like chess, for a monetary reward,
 
 I mention chess not because it's a good game to bet on (it isn't!) but because it's a game that's sufficiently complex that expressing it in onchain transactions (most specifically, proving a that move is illegal; proving that a move is legal would be way worse!) gets very expensive and we want to avoid it.
 
-One approach to doing this offchain is called ForceMoveLINK. The idea is relatively simple: behave optimistically, and fallback to onchain transactions as the arbiter if your opponent does not follow the rules you agreed to. The reason for its name is that, once on-chain, the opponent is \emph{forced to move} by having a timeout expressed in the blockchain's consensus logic. So in Bitcoin this would mean that the Script controlling the funds has a shape like: 
+One approach to doing this offchain is called ForceMove~\cite{forcemove}. The idea is relatively simple: behave optimistically, and fallback to onchain transactions as the arbiter if your opponent does not follow the rules you agreed to. The reason for its name is that, once on-chain, the opponent is \emph{forced to move} by having a timeout expressed in the blockchain's consensus logic. So in Bitcoin this would mean that the Script controlling the funds has a shape like: 
 
 \[
 \texttt{<}\,T_1\,\texttt{>}\ \ \texttt{OP\_CHECKSEQUENCEVERIFY}\ \ \texttt{OP\_DROP}\ \ \texttt{<}\,P_A\,\texttt{>}\ \ \texttt{OP\_CHECKSIG},
@@ -168,13 +168,13 @@ the arrows are spending conditions, not messages.}
 
 \subsection{Building a proof of publication ledger}
 
-We can build a single-use seal using Bitcoin itself. That is of course a well known primitive by now, and exemplified in the simple, but useful, OpenTimestamps project LINK. As discussed earlier, it's not practical to use this to adjudicate onchain, because Bitcoin SPV proofs in Script are not practical. If we make a separate proof of publication ledger, we could use proof of work as a consensus mechanism for deciding a canonical chain, or we could use a set of bonded validators, where the security assumption is: if members of the quorum equivocate on the state, their bond can be slashed. This is the equivalent economic security assumption of the reorg threat in the proof of work variant. Let's consider PoW and bonded validator\footnote{We are not calling it proof of stake, because while the consensus algorithm may be similar, it's a notably different security construction than one in which the stake is the tokens of the ledger itself; here the ``stake'' is the bond \emph{in Bitcoin}, a timelocked slashable-to-burn output on the Bitcoin blockchain itself.}.
+We can build a single-use seal using Bitcoin itself. That is of course a well known primitive by now, and exemplified in the simple, but useful, OpenTimestamps project~\cite{ots}. As discussed earlier, it's not practical to use this to adjudicate onchain, because Bitcoin SPV proofs in Script are not practical. If we make a separate proof of publication ledger, we could use proof of work as a consensus mechanism for deciding a canonical chain, or we could use a set of bonded validators, where the security assumption is: if members of the quorum equivocate on the state, their bond can be slashed. This is the equivalent economic security assumption of the reorg threat in the proof of work variant. Let's consider PoW and bonded validator\footnote{We are not calling it proof of stake, because while the consensus algorithm may be similar, it's a notably different security construction than one in which the stake is the tokens of the ledger itself; here the ``stake'' is the bond \emph{in Bitcoin}, a timelocked slashable-to-burn output on the Bitcoin blockchain itself.}.
 
 \subsubsection{Proof of Work}
 
 As already noted, proving inclusion in Bitcoin's PoW chain with its SHA2 linked chain of headers is not practical in Bitcoin Script, without new opcodes (for example CAT for Merkle trees; we defer the details to many other papers and discussions). But since we are designing from scratch, we are not limited to that.
 
-Considering that arithmetic in Bitcoin Script is more or less limited to ``Little Script'' which operates on 4 byte numbers, what we can do is design the proof of work algorithm to use nibble arithmetic only. This is realized in our sample code in n4bitLINK. Note that there had already been a very similar construction made in 2025 by AbdelStark, see stacksat-128LINK. So in general terms, imagine the proof of work hashing uses this nibble based algo, such that proving a hash chain is correct in Bitcoin Script is actually feasible. This would mean a contract participant can post something to the proof of publication ledger, and if their counterparty challenges, saying ``you didn't publish anything'', they can prove that in fact they did, in Script, thus winning the dispute over the pot.
+Considering that arithmetic in Bitcoin Script is more or less limited to ``Little Script'' which operates on 4 byte numbers, what we can do is design the proof of work algorithm to use nibble arithmetic only. This is realized in our sample code, in the \texttt{n4bit} crate of the proof of concept. Note that there had already been a very similar construction made in 2025 by AbdelStark, see StackSat-128~\cite{stacksat}. So in general terms, imagine the proof of work hashing uses this nibble based algo, such that proving a hash chain is correct in Bitcoin Script is actually feasible. This would mean a contract participant can post something to the proof of publication ledger, and if their counterparty challenges, saying ``you didn't publish anything'', they can prove that in fact they did, in Script, thus winning the dispute over the pot.
 
 Consider reorgs and canonical history: the key feature of proof of work is that the canonical history is defined by the heaviest chain. So imagine: Alice says ``Bob didn't publish his move'', then Bob says ``yes I did: it's in this PoP ledger block at this height, and here's the header chain back to genesis/checkpoint''. Alice can counter-refute: ``no you didn't: here's an alternate header chain with more weight, proving that yours is not canonical''. This is of course both necessary but also shows the fragility: necessary because otherwise Bob can "mine" a super-cheap chain that costs almost no PoW, fragile because without the kind of enormous weight of something like Bitcoin's PoW chain, reorgs could be easy and frequent even without adversarial behavior.
 
@@ -190,7 +190,7 @@ It turns out that with careful thought, it's possible to construct a version of 
 
 A naive idea of how to do this hits a snag: Bitcoin Script can read Winternitz signatures in a couple of kilobytes; weighty but OK. It cannot, directly, read Schnorr or BLS signatures on arbitrary messages (the former without CHECKSIGFROMSTACK, the latter .. well that would be a much bigger consensus update!). The latter two can support an aggregated signature; the former (Winternitz, or Lamport) cannot. To assess 66 out of 100 Winternitz signatures in a Bitcoin signature seems patently absurd.
 
-Therefore we consider the natural question: can you reproduce the one-time nature of hash-based OTS schemes in an elliptic curve context? We claim that you can, using something we'll call EC-OTS; the detailed explanation is deferred to LINK. That construction might be of independent interest, since it gives the same basic effect as a hash-based WOTS, but using EC curve points instead.
+Therefore we consider the natural question: can you reproduce the one-time nature of hash-based OTS schemes in an elliptic curve context? We claim that you can, using something we'll call EC-OTS; the detailed construction is in Section~\ref{sec:graph:math}. That construction might be of independent interest, since it gives the same basic effect as a hash-based WOTS, but using EC curve points instead.
 
 But taking that construction and saying ``we'll have a $\frac{2}{3}$ threshold attest to state updates in an EC OTS verifiable in Script'' really doesn't give you what you need.
 
@@ -207,7 +207,7 @@ You may be wondering why we insist on \emph{attributable} fraud. Without attribu
 
 \subsection{What the proof of publication ledger attests to}
 
-We'll continue to use the two simple motivating examples: tic-tac-toe, and chess. We'll discuss external facts, i.e. something not limited to a 2 player game, in Section LINK.
+We'll continue to use the two simple motivating examples: tic-tac-toe, and chess. We'll discuss external facts, i.e. something not limited to a 2 player game, in Section~\ref{sec:beyond}.
 
 What would an attestation look like? Probably a variant of:
 
@@ -1644,7 +1644,7 @@ committee is drawn and against which its statements can be judged.
 
 \bibitem{bitvm} R.~Linus. BitVM: compute anything on Bitcoin, 2023.
 
-\bibitem{stacksat} AbdelStark. StackSat-128, 2025.
+\bibitem{stacksat} AbdelStark. StackSat-128, 2025. \url{https://github.com/starkware-bitcoin/stacksat128}
 
 \bibitem{jk} A.~Juels and B.~S.~Kaliski. PORs: proofs of retrievability for large files. ACM CCS 2007.
 
