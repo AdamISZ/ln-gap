@@ -364,10 +364,27 @@ atomically, with a point-locked payment inside the mover's channel. The
 lock point is $T = C_h + P_{i,s}$, the sum of the content points the
 mover's head selects and the intended sealer's proposer point; its
 discrete log is revealed exactly when member $i$ seals exactly that
-head as that move (Section~\ref{sec:graph:fee}). Sealing is not
-contingent on the fee arriving: the lock is the member's reward, so a
-payer's route (here, through the opponent) cannot be used to censor. Publication and payment
+head as that move (Section~\ref{sec:graph:fee}). Publication and payment
 are one event, as a preimage and a payment are one event in Lightning.
+
+The designated sealer is generally not the payer's channel counterparty,
+so the fee must be routed: the payer's hub offers the same lock onward,
+to member $i$ or to the next hop, locked to the same point $T$ (less a
+routing fee), and when member $i$ seals, the revealed $t$ settles each
+hop in turn, backwards. This is a \emph{point}-time-locked contract
+(PTLC) route, not a hash-locked one: $t$ is a discrete logarithm, the
+sum of the attestation's scalars and the sealer's proposer scalar, and
+no hash preimage can stand for ``the venue attested exactly this head''.
+The payment is held only from submission until the seal, seconds, so it
+has the shape of a hold invoice without the liquidity cost of a long
+hold. PTLCs are not yet deployed on the Lightning Network; the scheme
+relies on them, or on channels that implement the point lock directly,
+as ours do (the lock is an ordinary contract output with an adaptor
+pre-signature, Section~\ref{sec:graph:fee}). The proof of concept
+settles the lock in a single channel, with the sealer as the payer's
+counterparty. Sealing is not contingent on the fee arriving: the lock is
+the member's reward, so a payer's route (in the demonstration, through
+the opponent) cannot be used to censor.
 
 \paragraph{Bonds.} Each member locks bitcoin in a timelocked output on
 Bitcoin for the duration of its membership. The lock is a sacrifice of
@@ -802,7 +819,10 @@ next channel state with $L$ removed and its value credited, and the
 payer's policy accepts iff $tG = T$. A claim with no matching block on
 the venue (sealed by nobody, by someone else, or with another head) is
 a self-contradiction of member $i$ against the venue's own record, and
-is answered by ejection rather than by script.
+is answered by ejection rather than by script. When the sealer is not the
+payer's counterparty, each hop of the route carries the same output,
+locked to the same $T$, with expiries decreasing towards the sealer as
+for HTLCs; the proof of concept builds the single-hop case.
 
 \begin{figure}[t]
 \centering
