@@ -174,7 +174,7 @@ We can build a single-use seal using Bitcoin itself. That is of course a well kn
 
 As already noted, proving inclusion in Bitcoin's PoW chain with its SHA2 linked chain of headers is not practical in Bitcoin Script, without new opcodes (for example CAT for Merkle trees; we defer the details to many other papers and discussions). But since we are designing from scratch, we are not limited to that.
 
-Considering that arithmetic in Bitcoin Script is more or less limited to ``Little Script'' which operates on 4 byte numbers, what we can do is design the proof of work algorithm to use nibble arithmetic only. This is realized in our sample code, in the \texttt{n4bit} crate of the proof of concept. Note that there had already been a very similar construction made in 2025 by AbdelStark, see StackSat-128~\cite{stacksat}. So in general terms, imagine the proof of work hashing uses this nibble based algo, such that proving a hash chain is correct in Bitcoin Script is actually feasible. This would mean a contract participant can post something to the proof of publication ledger, and if their counterparty challenges, saying ``you didn't publish anything'', they can prove that in fact they did, in Script, thus winning the dispute over the pot.
+Considering that arithmetic in Bitcoin Script is more or less limited to ``Little Script'' which operates on 4 byte numbers, what we can do is design the proof of work algorithm to use nibble arithmetic only. This is realized in our sample code, in the \texttt{n4bit} crate of the proof of concept~\cite{lngapcode}. Note that there had already been a very similar construction made in 2025 by AbdelStark, see StackSat-128~\cite{stacksat}. So in general terms, imagine the proof of work hashing uses this nibble based algo, such that proving a hash chain is correct in Bitcoin Script is actually feasible. This would mean a contract participant can post something to the proof of publication ledger, and if their counterparty challenges, saying ``you didn't publish anything'', they can prove that in fact they did, in Script, thus winning the dispute over the pot.
 
 Consider reorgs and canonical history: the key feature of proof of work is that the canonical history is defined by the heaviest chain. So imagine: Alice says ``Bob didn't publish his move'', then Bob says ``yes I did: it's in this PoP ledger block at this height, and here's the header chain back to genesis/checkpoint''. Alice can counter-refute: ``no you didn't: here's an alternate header chain with more weight, proving that yours is not canonical''. This is of course both necessary but also shows the fragility: necessary because otherwise Bob can "mine" a super-cheap chain that costs almost no PoW, fragile because without the kind of enormous weight of something like Bitcoin's PoW chain, reorgs could be easy and frequent even without adversarial behavior.
 
@@ -448,7 +448,8 @@ Section~\ref{sec:security} takes this up.
 \section{Contract outputs and the dispute graph}
 \label{sec:graph}
 
-This section gives the transaction-level view of a game contract: what
+This section gives the transaction-level view of a game contract, as
+implemented in the proof of concept~\cite{lngapcode}: what
 sits on each commitment transaction, which transactions are pre-signed
 when a channel state is agreed, which are built at dispute time by one
 party alone, and how the venue's attestations enter the scripts as
@@ -885,7 +886,8 @@ the payer's pre-signature; nothing else does.}
 \subsection{Measured sizes}
 \label{sec:graph:sizes}
 
-Table~\ref{tab:sizes} gives virtual sizes as confirmed on a regtest
+Table~\ref{tab:sizes} gives virtual sizes, from the proof of
+concept's test suite~\cite{lngapcode}, as confirmed on a regtest
 node with real timelocks, for a five-member venue ($n=5$, $t=3$).
 
 \begin{table}[t]
@@ -1154,7 +1156,8 @@ it is a thin market for money. The games people play for money hide
 information, and whether LN-GAP can host them is the more telling test.
 Blackjack is the simplest casino game that needs everything the venue
 provides, and it needs little else. It is designed here, not built;
-the one new Script component has been verified on regtest.
+the one new Script component has been verified on regtest (the
+\texttt{size\_commit} test of the proof of concept~\cite{lngapcode}).
 
 \paragraph{The game.} A player plays against a dealer (the house).
 Cards count at face value from 2 to 10, ten for a jack, queen or king,
@@ -1620,7 +1623,10 @@ read, and flags by majority what it did not, closes the gap with
 $O(1)$ transactions per dispute and no change to Bitcoin. Content stays
 cryptographic; time becomes a 1-of-$n$ and majority fact about a bonded,
 fee-paid set of members; shared facts are secured economically, up to a
-bound set by the venue's revenue. The remaining weakness, a colluding
+bound set by the venue's revenue. A proof of concept, with the venue,
+the dispute graph for tic-tac-toe and chess, their scenario suites on
+regtest, and an interactive chess demonstration in the browser, is
+available~\cite{lngapcode}. The remaining weakness, a colluding
 majority of the venue, can be made accountable rather than deniable: a
 large audit layer, anchored to Bitcoin, from which each contract's
 committee is drawn and against which its statements can be judged.
@@ -1655,6 +1661,8 @@ committee is drawn and against which its statements can be judged.
 \bibitem{rcpor} A.~Abadi, S.~J.~Murdoch and T.~Zacharias. Recurring contingent payment for proofs of retrievability, 2021. \url{https://eprint.iacr.org/2021/1145}
 
 \bibitem{scrypt} sCrypt. Pay for storage using proof of retrievability on Bitcoin. \url{https://scryptplatform.medium.com/pay-for-storage-using-proof-of-retrievability-on-bitcoin-d5f2df009e1}
+
+\bibitem{lngapcode} LN-GAP proof-of-concept code. \url{https://github.com/AdamISZ/ln-gap}
 
 \bibitem{dlc} T.~Dryja. Discreet Log Contracts, 2017. \url{https://adiabat.github.io/dlc.pdf}
 
