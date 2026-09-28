@@ -58,7 +58,7 @@
 
 \section{Abstract}
 
-We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection), based on the use of a proof of publication ledger governed by a threshold of validators. The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry in the ledger, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing of entries in the ledger require only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trustless modulo corruption of the (presumed large and heterogenous) majority of the PoP ledger validators, who themselves are not required to know anything about the bilateral contract details, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by bonds (timelocked funds that will not be compensated with fees when fraud is attributed, and burnt to miners).
+We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection), based on the use of a proof of publication ledger governed by a threshold of validators. The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry in the ledger, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing of entries in the ledger require only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trust-minimised: they rely on the honesty of a majority of the (presumed large and heterogenous) PoP ledger validators, whose misbehaviour is attributable and who themselves are not required to know anything about the bilateral contract details, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by bonds (timelocked funds, whose owners lose their future fees when fraud is attributed, and which can optionally be made burnable).
 
 \section{Introduction}
 
@@ -70,7 +70,7 @@ What's missing? Lightning already provides private, fast and cheap payments. In 
 The customer wants to pay a storage service provider once per day, in sats, but wants the service provider to prove that they are upholding their agreement (with a response to a challenge for an inclusion proof), and if they fail to do so after a time window, their deposit can be taken.
 \end{quote}
 
-This is basically ``\underline{Filecoin without an altcoin}'', as realized in the system described in this paper.
+This is basically ``\underline{Filecoin without an altcoin}'', as designed in this paper (Section~\ref{sec:storage}).
 
 \subsection{The problem of 2-party games on Lightning}
 
@@ -202,7 +202,7 @@ What you need:
 \item \textbf{Positve incentives in bitcoin}: this is possible in a more general ``sidechain'' model (pay fees to move around coins on the sidechain), but this is not a sidechain, nor any kind of blockchain: the only consensus maintained on the ledger is the canonical history of publications; the semantics of the publications are none of its business. Here we have validators post bonds on bitcoin (timelocked coins) and receive fees for its publication efforts, atomically with those publications, over Lightning channels, using adaptors. This incentivizes honest participation and disincentivizes fraud or dishonesty.
 \end{itemize}
 
-You may be wondering why we insist on \emph{attributable} fraud. Without attribution, users of the ledger cannot discern which members they do not want to use in future, if something fraudulent is published. It's also possible, with attribution, to go further, and we do: we have equivocation fraud reveal a secret which can be used to burn the bonded coins (coins locked to a CLTV output), but without covenants, this is not a simple burn, it is more a miner fee-race burn: so the money game-theoretically is more or less guaranteed to end up with the miner of the next block after the secret publication. This is usually, realistically, a substantial punishment for a fraudulent validator; theoretically they can collude with bitcoin miners, but it would have to be a substantial fraction of miners to even have a chance of recouping, so that is largely theoretical.
+You may be wondering why we insist on \emph{attributable} fraud. Without attribution, users of the ledger cannot discern which members they do not want to use in future, if something fraudulent is published. With attribution, a member caught contradicting itself is ejected: it loses its future fees while its bonded coins (coins locked to a CLTV output) sit out their timelock. It's possible to go further, as an option: equivocation evidence can be made to unlock the bonded coins to anyone, but without covenants this is not a simple burn, it is a miner fee-race burn: since the evidence is public, any miner can include its own spend paying the whole bond as fee, so the money game-theoretically ends up with the miner of the first eligible block, and the cheater recovers it only by mining that block itself. We do not make this the baseline (Section~\ref{sec:venue}).
 
 \subsection{What the proof of publication ledger attests to}
 
@@ -267,7 +267,14 @@ contracts registered with it. It is not a blockchain: it has no coin,
 executes nothing, keeps no global order and no sequence of slots. It
 answers, per move of each contract, the two questions a dispute asks:
 \emph{what} was published, and \emph{whether it was published in time}.
-The two answers come from different mechanisms.
+The two answers come from different mechanisms. In the terms of Discreet
+Log Contracts~\cite{dlc}, the venue is a federation of oracles: each
+move's content is an outcome attested by one member under anticipation
+points published in advance, and each move's timeliness is a one-bit
+outcome attested by a majority. What is new is not the attestation but
+what is attested (publication and, above all, absence), and that the
+attestations are read out in Script so that the game's rules can judge
+the content.
 
 \subsection{What: attestations keyed by contract and move}
 
@@ -296,6 +303,18 @@ A shared key cannot say who used it, so each member also holds, per
 move, a \emph{proposer} key $P_{i,(c,d)} = p_{i,(c,d)}G$ and reveals
 $p_{i,(c,d)}$ in the seal it makes. Every refutation on Bitcoin names the
 member whose seal it relies on (Section~\ref{sec:graph:claim}).
+
+A seal counts only if it reaches the members before the move's due time,
+since they flag what they have not seen. Seals are public and
+self-authenticating, so the mover publishes every seal it receives to
+all members (and to any audit layer, Section~\ref{sec:accountable}): a
+sealer that reveals its seal only to the mover is defeated by the
+mover's own dissemination. Near the deadline the mover may also submit
+to several members in parallel, which is safe because seals of one entry
+are byte-identical and differ only in their proposer reveal: a sealer
+that delays its seal until the last moment is defeated by the others.
+Withholding or delaying therefore works only if every member does it,
+which is the 1-of-$n$ assumption again.
 
 Honest members seal only entries the mover signed: the contract's
 registration carries the movers' per-move state keys, and a member
@@ -355,7 +374,12 @@ identifier, timetable and movers' state keys, never its content: they
 publish points in advance and scalars when they seal or flag, and
 whoever disputes uses them. Contract identifiers must be unique on a
 venue (two contracts sharing one would share tables), and registration
-is paid, since it costs the venue a table's curve arithmetic per move.
+is paid, since it costs the venue a table's curve arithmetic per move:
+about 100\,KB of points and 100\,ms of computation per move, so some
+10\,MB and 10\,s for a contract of a hundred moves. Tables cannot be
+shared between contracts (the one-time property forbids it); attesting
+only the 48-byte head rather than the whole header would halve the
+cost.
 
 \subsection{Incentives}
 
@@ -384,7 +408,11 @@ pre-signature, Section~\ref{sec:graph:fee}). The proof of concept
 settles the lock in a single channel, with the sealer as the payer's
 counterparty. Sealing is not contingent on the fee arriving: the lock is
 the member's reward, so a payer's route (in the demonstration, through
-the opponent) cannot be used to censor.
+the opponent) cannot be used to censor. This is a rule, not an incentive: a
+member whose fee is blocked may rationally decline to seal, and
+1-of-$n$ liveness assumes that members honour the rule, their motive
+being the venue's franchise as a whole. Fees should therefore not be
+routed through the payer's opponent.
 
 \paragraph{Bonds.} Each member locks bitcoin in a timelocked output on
 Bitcoin for the duration of its membership. The lock is a sacrifice of
@@ -403,7 +431,12 @@ members is irrational when
 \]
 where $\mathrm{PV}(F)$ is the present value of the venue's total fee
 stream, $L$ the time value of one member's lock, and $G$ the value the
-equivocation can extract. For a fixed threshold fraction $t/n$ the
+equivocation can extract. $G$ is an aggregate even for two-party games:
+a colluding majority can act against every contract it serves within
+one dispute window, and pays its franchise once. It needs a colluding
+player in each contract, and a hub, which is the counterparty of many
+contracts, is exactly such a player; so $G$ is the value in flight
+across the venue, not one pot. For a fixed threshold fraction $t/n$ the
 security budget is a fixed share of the venue's fee revenue, whatever
 $n$ is: as with Bitcoin's miners, the number of validators buys
 decentralisation and liveness, the revenue buys safety.
@@ -934,6 +967,40 @@ Figure~\ref{fig:highlevel}:
 The asymmetry of cost is deliberate. The common failure, a stall, is
 cheap to prove. The expensive transaction, the refutation, is paid by
 the party answering a claim, and a party answers only when it will win.
+Winning does not, however, recover what the dispute cost: the
+pre-signed fees come out of the pot, so they fall on the winner. A
+player about to lose can therefore make a false claim for a few hundred
+virtual bytes and force the winner to pay for a refutation of some
+36\,kvB, and some hours of delay, at no further cost to itself. The
+dispute ends the contract, so this can be done once, not every move; but
+it is a lever for extortion, and it puts a floor under the pot below
+which an honest refutation does not pay.
+
+\paragraph{Who pays for a dispute (proposed, not yet implemented).}
+Every on-chain dispute exists because someone deviated: stalled,
+refused to fold, claimed or countered falsely, or answered with an
+invalid or late move. If the contract is correct, the winner of any
+on-chain resolution is the party who did not deviate, so ``the loser
+pays'' is ``the winner is reimbursed by the loser''. It suffices that
+each side adds a \emph{dispute deposit} $D$ to the contract output
+beside its stake. Cooperative settlement (a fold, an agreed result, a
+refresh) returns each deposit to its owner; an on-chain resolution pays
+the winner the whole output, as the splits already do, so the winner
+receives the loser's deposit, and that deposit pays the dispute's fees.
+An honest claim is never penalised: a real stall has no valid
+refutation, so the claimant wins and is reimbursed; the only ways to
+drive an honest claimant into an expensive path (an invalid refutation,
+a false counter) are deviations that lose to it. A false claim costs the
+honest mover nothing net, provided $D$ covers the most expensive path
+it can be forced into, about 42\,kvB for chess. The graph is unchanged;
+only the contract's value and the cooperative rules change. The price is
+capital: pre-signed fees are bumped at dispute time, so $D$ must be set
+at a pessimistic feerate, and both players lock it for the game's
+duration, recovering it in the cooperative case. The pot floor becomes a
+capital cost rather than a loss, and shrinking the refutation (most of
+it is the readout's script constants) reduces it directly. A player
+about to lose can still delay the winner's payout, at the price of its
+whole deposit.
 
 \section{Beyond games: a public clock and a seal}
 \label{sec:beyond}
@@ -984,8 +1051,9 @@ For contracts, uniqueness of a shared fact is economic: two attestations
 for one fact are an unambiguous, attributable equivocation by the venue,
 whichever of them was anchored, and the condition of
 Section~\ref{sec:venue} must hold with $G$ the value extractable from
-\emph{all} contracts relying on the fact. For a two-party game $G$ is one
-pot. For a shared fact it is an aggregate, measured against the
+\emph{all} contracts relying on the fact. For a single two-party game $G$ is one
+pot, though a majority acting against many games at once faces the
+same aggregate (Section~\ref{sec:venue}). For a shared fact it is an aggregate, measured against the
 franchise of the members who equivocate. We take this as the limitation
 of the system for shared facts: they are secure up to a value set by the
 venue's fee revenue, bounded, and best suited to facts whose total
@@ -1220,9 +1288,11 @@ majority protect a staller by withholding flags. The choice is between
 the two residuals, and it is open.
 
 \paragraph{Economic security, and its limit.} The bond and the fees
-defend what is attributable. For two-party contracts the gain from any
-venue misbehaviour is at most one pot, and a venue whose members' fee
-franchise exceeds the largest pot in flight has no reason to misbehave.
+defend what is attributable. For one two-party contract the gain from
+venue misbehaviour is at most its pot, but a colluding majority can act
+against every contract it serves at once, and a hub is a colluding
+player in many of them; so the members' fee franchise must exceed the
+value in flight across the venue, not the largest single pot.
 For shared facts the gain is the sum over all contracts relying on a
 fact, and the same franchise must cover it. We state this as the
 limitation of the system rather than engineer around it: the only ways
@@ -1423,7 +1493,13 @@ its attestations are read in Bitcoin Script. BitVM~\cite{bitvm} settles
 arbitrary computation on Bitcoin by bisection; we avoid on-chain
 bisection by giving each game a family of single-step disprove leaves.
 StackSat-128~\cite{stacksat} is a Script-friendly hash designed for the
-proof-of-work alternative. The accountable venue of
+proof-of-work alternative. The attestation primitive is that of Discreet
+Log Contracts~\cite{dlc}: an oracle publishes anticipation points in
+advance and reveals the scalar for the outcome that occurred, and a
+contract conditions on it; the venue is a federation of such oracles,
+attesting publication and timeliness rather than external events, and
+its attestations are read out in Script rather than consumed by adaptor
+signatures alone. The accountable venue of
 Section~\ref{sec:accountable} follows the pattern of Ethereum's sync
 committees~\cite{synccommittee} (a sampled committee attesting for a
 constrained verifier) and of witness-cosigned transparency
@@ -1475,6 +1551,8 @@ committee is drawn and against which its statements can be judged.
 \bibitem{rcpor} A.~Abadi, S.~J.~Murdoch and T.~Zacharias. Recurring contingent payment for proofs of retrievability, 2021. \url{https://eprint.iacr.org/2021/1145}
 
 \bibitem{scrypt} sCrypt. Pay for storage using proof of retrievability on Bitcoin. \url{https://scryptplatform.medium.com/pay-for-storage-using-proof-of-retrievability-on-bitcoin-d5f2df009e1}
+
+\bibitem{dlc} T.~Dryja. Discreet Log Contracts, 2017. \url{https://adiabat.github.io/dlc.pdf}
 
 \bibitem{synccommittee} Ethereum consensus specifications, Altair: the sync committee. \url{https://github.com/ethereum/consensus-specs}
 
