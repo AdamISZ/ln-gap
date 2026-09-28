@@ -150,6 +150,13 @@ struct PosGame {
 
 impl PosGame {
     fn open(value: Amount) -> Result<PosGame> {
+        PosGame::open_with_deposit(value, Amount::ZERO)
+    }
+
+    /// A game whose contract value is `stakes` plus a dispute deposit `d`
+    /// from each side (D56).
+    fn open_with_deposit(stakes: Amount, d: Amount) -> Result<PosGame> {
+        let value = stakes + d * 2;
         let rt = Regtest::start()?;
         let mut miner = PosMiner::new(SEED, members());
         let registry = miner.registry(CONTRACT_ID, MAX_DEPTH)?;
@@ -169,7 +176,7 @@ impl PosGame {
         let clock = GameClock { t0, ell: ELL, margin: MARGIN };
         let deadline = t0 + 100_000;
         let btc_open = rt.height()? + 1;
-        let inst = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, clock, keys_u, registry.clone())?;
+        let inst = PosInstance::new(CONTRACT_ID, value, deadline, GAME_ID, instance::Game::Ttt, clock, keys_u, registry.clone())?.with_deposit(d)?;
         miner.register(CONTRACT_ID, MAX_DEPTH, inst.authorship()).map_err(|e| anyhow::anyhow!(e))?;
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
@@ -207,6 +214,9 @@ impl PosGame {
         ensure!(g.rt.height()? == btc_open, "the funding mined exactly one block");
         g.graph = g.inst.graph(&ctx, c_op, &c_prev)?;
         ensure!(g.graph.len() == GRAPH_LEN, "the wired graph: settle + 9x(claim, refute, 3+3 splits) + 5x(exhibit, 3 splits) + 9 per-depth equiv (D43) + 8x(counter, refute, 3+3 splits) (D44)");
+        if g.inst.deposit > Amount::ZERO {
+            g.say(format!("each side's dispute deposit: {} sat inside the contract (D56): returned by cooperative settlement, paid to the winner of an on-chain dispute", g.inst.deposit.to_sat()));
+        }
         g.say(format!("game opened: contract {CONTRACT_ID}, pot {} sat; {GRAPH_LEN} pre-signed transactions; a move every {ELL} s, claims {MARGIN} s after a move's due time", g.inst.value.to_sat()));
         Ok(g)
     }
@@ -1029,6 +1039,55 @@ pub const PS13: Scenario = Scenario {
     },
 };
 
+/// Each side's dispute deposit in PS14/PS15: it covers the most expensive
+/// path an honest party can be forced into at the scenarios' fixed fee
+/// (claim or counter, refutation, split: 3,000 sat), with room to spare.
+const DEPOSIT: u64 = 10_000;
+
+pub const PS14: Scenario = Scenario {
+    id: "PS14",
+    title: "PoS graph: a spurious claim with dispute deposits — the loser pays (D56)",
+    expected: "each side has a 10,000 sat dispute deposit inside the contract; the hub's move 2 is on the venue; the user claims absence anyway; the hub refutes and its self-checking split pays it the whole output: both stakes, both deposits, less the three hops' fees — the user's deposit covers the fees, so the honest mover nets its stake, the user's stake and its own deposit back with 7,000 sat to spare; settle, the no-dispute fallback, would have returned each deposit: three transactions",
+    run: || {
+        let mut g = PosGame::open_with_deposit(sat(POT), sat(DEPOSIT))?;
+        // settle returns each deposit to its owner (nobody disputed)
+        let settle = g.skel("settle").tx.clone();
+        ensure!(settle.output.iter().all(|o| o.value >= sat(DEPOSIT)), "settle returns each deposit: {:?}", settle.output.iter().map(|o| o.value).collect::<Vec<_>>());
+        g.play(4)?; // X@4
+        g.play(1)?; // O@1 — the hub DID publish move 2
+        g.wait_claim(2)?;
+        g.claim_absent(2)?; // the user's spurious claim
+        let (psig, h, _, _) = g.refute(2)?;
+        ensure!(g.disproves_firing(2).is_empty(), "the parked move is legal");
+        g.wait_to(h + u32::from(g.params.delta) + u32::from(g.params.delta_prime) + 1)?;
+        g.split(2, "absent_2/refuted", 1, Some(&psig))?;
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "absent_2/refuted/split_HubWins".to_string()], "{:?}", roles(&g));
+        let fees = 3_000;
+        ensure!(g.balances() == [sat(0), sat(POT + 2 * DEPOSIT - fees)], "{:?}", g.balances());
+        ensure!(POT + 2 * DEPOSIT - fees >= POT + DEPOSIT, "the honest mover is made whole: stakes and its own deposit, the fees paid from the user's");
+        g.say(format!("the hub receives {} sat: both stakes ({POT}) and its own deposit back ({DEPOSIT}), the dispute's {fees} sat of fees paid from the user's deposit, {} sat of it left over", POT + 2 * DEPOSIT - fees, DEPOSIT - fees));
+        Ok(report(&g, &PS14))
+    },
+};
+
+pub const PS15: Scenario = Scenario {
+    id: "PS15",
+    title: "PoS graph: an honest stall claim with dispute deposits is not penalised (D56)",
+    expected: "each side has a 10,000 sat dispute deposit; the hub stalls at move 2; the user's absence claim and timeout split pay the user the whole output — both stakes and both deposits less two fees: the honest claimant is reimbursed from the staller's deposit: two transactions",
+    run: || {
+        let mut g = PosGame::open_with_deposit(sat(POT), sat(DEPOSIT))?;
+        g.play(4)?;
+        g.stall(); // the hub does not move 2
+        g.wait_claim(2)?;
+        let (h, _, _) = g.claim_absent(2)?;
+        g.wait_to(h + u32::from(g.params.delta) + 1)?;
+        g.split(2, "absent_2", 0, None)?;
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/split_UserWins".to_string()], "{:?}", roles(&g));
+        ensure!(g.balances() == [sat(POT + 2 * DEPOSIT - 2_000), sat(0)], "{:?}", g.balances());
+        Ok(report(&g, &PS15))
+    },
+};
+
 pub fn scenarios() -> Vec<Scenario> {
-    vec![PS1, PS2, PS3, PS4, PS5, PS6A, PS6B, PS7, PS8, PS9, PS10, PS11, PS12, PS13]
+    vec![PS1, PS2, PS3, PS4, PS5, PS6A, PS6B, PS7, PS8, PS9, PS10, PS11, PS12, PS13, PS14, PS15]
 }

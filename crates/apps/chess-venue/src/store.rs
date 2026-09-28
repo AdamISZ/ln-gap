@@ -155,6 +155,9 @@ pub struct VenueParams {
     /// Seconds from the contract proposal to move 0's time `t0` (setup:
     /// the graph is built and signed in between).
     pub start_secs: u32,
+    /// Each side's dispute deposit in sat (D56), inside the contract value.
+    #[serde(default)]
+    pub deposit: u64,
 }
 
 /// A seal, as the venue publishes it: the attestation, the proposer
@@ -251,6 +254,9 @@ pub struct ContractJson {
     pub t0: u32,
     pub ell: u32,
     pub margin: u32,
+    /// Each side's dispute deposit (D56): the value is the pot plus two.
+    #[serde(default)]
+    pub deposit: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

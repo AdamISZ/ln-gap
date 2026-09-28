@@ -218,7 +218,14 @@ pub struct GameClock {
 #[derive(Clone, Debug)]
 pub struct PosInstance {
     pub id: u32,
+    /// The contract output's value `V`: both stakes and both dispute
+    /// deposits.
     pub value: Amount,
+    /// Each side's dispute deposit `D` (D56): inside `V`, returned to its
+    /// owner by cooperative settlement (and by `settle`, where nobody
+    /// disputed), paid to the winner of any on-chain dispute with the rest
+    /// of `V` — the loser pays the dispute's costs.
+    pub deposit: Amount,
     /// The contract's `settle` deadline: a unix time (D55; a median-time-
     /// past CLTV), after every depth's claim window.
     pub deadline: u32,
@@ -268,7 +275,29 @@ impl PosInstance {
         // HubWins 1 / Draw 2); chess's Draw split can never fire on this
         // graph (chess.rs's resolution fragment).
         let outcomes = Contract::outcomes(&TicTacToe);
-        Ok(PosInstance { id, value, deadline, game_id, game, t0, ell, margin, keys, outcomes, registry })
+        Ok(PosInstance { id, value, deposit: Amount::ZERO, deadline, game_id, game, t0, ell, margin, keys, outcomes, registry })
+    }
+
+    /// Give each side a dispute deposit `d` inside the contract value
+    /// (D56). The value must hold both deposits and a positive stake.
+    pub fn with_deposit(mut self, d: Amount) -> Result<PosInstance> {
+        ensure!(self.value > d * 2, "the contract value {} must exceed both deposits of {}", self.value, d);
+        self.deposit = d;
+        Ok(self)
+    }
+
+    /// Both stakes together: the value less both deposits.
+    pub fn stakes(&self) -> Amount {
+        self.value - self.deposit * 2
+    }
+
+    /// A cooperative settlement's balances for `payout` (D56): the stakes
+    /// follow the result, each deposit returns to its owner. The channel
+    /// layer's fold uses this; an on-chain dispute instead pays the winner
+    /// the whole output.
+    pub fn cooperative_payout(&self, payout: Payout) -> [Amount; 2] {
+        let [u, h] = payout.dist(self.stakes());
+        [u + self.deposit, h + self.deposit]
     }
 
     pub fn max_depth(&self) -> u32 {
@@ -449,7 +478,15 @@ impl PosInstance {
         let mut out = Vec::new();
         let tree0 = self.tree(ctx)?;
         let r = Contract::resolution(&TicTacToe, &Board::empty());
-        let tx = build_spend(outpoint, &tree0.leaf("settle")?.timelock, self.dist_outputs(ctx, r.payout, self.value - fee));
+        // settle is the no-dispute fallback: each deposit returns to its
+        // owner (D56), the stakes (less the fee, shared) follow R
+        let [su, sh] = r.payout.dist(self.stakes() - fee);
+        let settle_outs: Vec<TxOut> = [(su + self.deposit, Role::User), (sh + self.deposit, Role::Hub)]
+            .into_iter()
+            .filter(|(a, _)| *a >= ctx.params.dust)
+            .map(|(a, r)| TxOut { value: a, script_pubkey: ctx.key(r).payout_spk.clone() })
+            .collect();
+        let tx = build_spend(outpoint, &tree0.leaf("settle")?.timelock, settle_outs);
         out.push(PresignedTx::new("settle", tx, vec![prevout.clone()], &tree0, "settle", format!("settle: R(s) = {}", r.name))?);
         for d in 1..=self.max_depth() {
             let a_tree = self.claim_tree(ctx, d)?;

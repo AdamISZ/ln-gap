@@ -25,3 +25,5 @@ scenario_test!(ps10_claim_one_depth_ahead_countered, PS10);
 scenario_test!(ps11_false_counter_refuted, PS11);
 scenario_test!(ps12_late_attestation_killed_by_the_flags, PS12);
 scenario_test!(ps13_silent_member_skipped_another_seals, PS13);
+scenario_test!(ps14_spurious_claim_loser_pays_the_deposit, PS14);
+scenario_test!(ps15_honest_claim_with_deposits_not_penalised, PS15);

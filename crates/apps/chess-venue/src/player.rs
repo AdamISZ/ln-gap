@@ -215,11 +215,12 @@ impl Player {
             // settle long after the last claim
             let clock = GameClock { t0: unix_now() + vparams.start_secs, ell: vparams.ell, margin: vparams.margin };
             let deadline = clock.t0 + (max_depth + 1) * clock.ell + clock.margin + 7 * 24 * 3600;
-            let probe = PosInstance::new(CONTRACT_ID, Amount::from_sat(POT_SAT), deadline, GAME_ID, Game::Chess, clock, merged.clone(), registry.clone())?;
+            let value = POT_SAT + 2 * vparams.deposit;
+            let probe = PosInstance::new(CONTRACT_ID, Amount::from_sat(value), deadline, GAME_ID, Game::Chess, clock, merged.clone(), registry.clone())?.with_deposit(Amount::from_sat(vparams.deposit))?;
             let ctx = CommitCtx { params: &params, keys: &pubs, broadcaster: Role::User, seq: 1, rev_hash: [0u8; 20] };
             let tree = probe.tree(&ctx)?;
-            store.write(Store::contract(), &ContractJson { spk: hex::encode(tree.script_pubkey().as_bytes()), value: POT_SAT, deadline, t0: clock.t0, ell: clock.ell, margin: clock.margin })?;
-            println!("{me}: contract proposed ({} sat; move 1 due in {}s, a move every {}s); waiting for the venue to fund it...", POT_SAT, vparams.start_secs + vparams.ell, vparams.ell);
+            store.write(Store::contract(), &ContractJson { spk: hex::encode(tree.script_pubkey().as_bytes()), value, deadline, t0: clock.t0, ell: clock.ell, margin: clock.margin, deposit: vparams.deposit })?;
+            println!("{me}: contract proposed ({value} sat: a {POT_SAT} sat pot and a {} sat dispute deposit each; move 1 due in {}s, a move every {}s); waiting for the venue to fund it...", vparams.deposit, vparams.start_secs + vparams.ell, vparams.ell);
             wait_for(|| store.read(Store::funded()))?
         } else {
             println!("{me}: waiting for the user's contract and the venue's funding...");
@@ -227,7 +228,7 @@ impl Player {
         };
         let contract: ContractJson = wait_for(|| store.read(Store::contract()))?;
         let clock = GameClock { t0: contract.t0, ell: contract.ell, margin: contract.margin };
-        let inst = PosInstance::new(CONTRACT_ID, Amount::from_sat(POT_SAT), contract.deadline, GAME_ID, Game::Chess, clock, merged, registry.clone())?;
+        let inst = PosInstance::new(CONTRACT_ID, Amount::from_sat(contract.value), contract.deadline, GAME_ID, Game::Chess, clock, merged, registry.clone())?.with_deposit(Amount::from_sat(contract.deposit))?;
         let ctx = CommitCtx { params: &params, keys: &pubs, broadcaster: Role::User, seq: 1, rev_hash: [0u8; 20] };
         let tree = inst.tree(&ctx)?;
         ensure!(hex::encode(tree.script_pubkey().as_bytes()) == funded.spk, "the funded output is not the contract we agreed");

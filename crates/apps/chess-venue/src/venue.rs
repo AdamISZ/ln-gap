@@ -327,7 +327,7 @@ pub fn run(dir: PathBuf, block_secs: u64, max_depth: u32, web: Option<u16>, timi
     let n = registry.n();
     let threshold = registry.threshold;
     println!("venue: {n} members sharing one content key, flag threshold {threshold} of {n} (the majority); the designated sealer of a move is the rotation, any member may seal");
-    let params = VenueParams { block_secs, n, threshold, max_depth, ell: timing.ell, backoff: timing.backoff, margin: timing.margin, start_secs: timing.start_secs };
+    let params = VenueParams { block_secs, n, threshold, max_depth, ell: timing.ell, backoff: timing.backoff, margin: timing.margin, start_secs: timing.start_secs, deposit: timing.deposit };
     store.write(Store::params(), &params)?;
     println!("venue: a move every {}s (the mover falls back after {}s); claims {}s after a move's due time; Bitcoin blocks every {block_secs}s, independently", timing.ell, timing.backoff, timing.margin);
     let server = match web {

@@ -2539,6 +2539,58 @@ On regtest a claim opens about six block intervals after its lock (MTP
 trails the clock); with 10 s blocks, ~50 s. On signet it is about an
 hour, which is the argument for a small `m` there.
 
+## D56. Dispute deposits: the loser pays for the dispute
+
+Date: 2026-09-28. Context: a review of the paper draft (point 1: a
+player about to lose can make a false absence claim for ~200 vB and force
+the winner to pay for a ~36 kvB refutation, since the pre-signed fees
+come out of the pot the winner receives; a lever for extortion and a
+floor under the pot). Agreed with the user; BUILT the same day.
+
+**The principle.** Every on-chain dispute exists because someone
+deviated: stalled, refused to fold, claimed or countered falsely, or
+answered with an invalid or late move. If the contract is correct, the
+winner of any on-chain resolution is the party who did not deviate, so
+"the loser pays" is "the winner is reimbursed by the loser".
+
+**The mechanism.** Each side adds a dispute deposit `D` to the contract
+output beside its stake: `V = stake_u + stake_h + D_u + D_h`
+(`PosInstance::deposit`, `with_deposit`, `stakes()`). Cooperative
+settlement returns each deposit to its owner and divides only the stakes
+by the result (`cooperative_payout`, for the channel layer's fold).
+`settle`, the no-dispute fallback at the deadline, does the same. Every
+on-chain dispute resolution already pays the winner the whole remaining
+output (the splits, the disproves, `not_timely`, the `equiv` exhibit),
+so the winner receives the loser's deposit, and that deposit pays the
+dispute's fees. No leaf, no pre-signed transaction and no graph count
+changes; on-chain draws split everything evenly, deposits included.
+
+**Both cases.** An honest claim is never penalised: a real stall has no
+valid refutation, so the claimant wins and is reimbursed (PS15); the
+only ways to push an honest claimant into an expensive path (an invalid
+refutation, a false counter) are deviations that lose to it. A false
+claim costs the honest mover nothing net if `D` covers the most
+expensive path it can be forced into: claim or counter, refutation,
+split, about 42 kvB for chess (PS14: 3 hops of fees paid from the
+claimant's deposit).
+
+**Sizing and price.** Pre-signed fees are bumped at dispute time, so `D`
+is a flat reimbursement set at a pessimistic feerate; the honest party
+bears any excess, as with Lightning's fee assumptions. Both players lock
+`D` for the game's duration and recover it cooperatively: the pot floor
+becomes a capital cost, not a loss. Shrinking the refutation (mostly the
+readout's script constants) lowers `D` directly. Residual: a player about
+to lose can still delay the winner's payout, at the price of its whole
+deposit.
+
+**Built.** pos: the fields and methods above; `settle` returns deposits.
+Harness: PS14 (spurious claim with 10,000 sat deposits: the hub receives
+both stakes and both deposits less 3,000 sat of fees) and PS15 (honest
+stall claim with deposits). chess-venue: `--deposit` (default 250,000
+sat per side, covering four 60k-sat hops); the contract carries it.
+Driven: a stall claimed and split pays the user 1,000,000 + 500,000 -
+120,000 = 1,380,000 sat.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

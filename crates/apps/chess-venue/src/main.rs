@@ -42,7 +42,7 @@ use anyhow::{bail, Result};
 use lngap_channel::Role;
 
 fn usage() -> ! {
-    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S] [--web PORT]\n  lngap-chess-venue play user|hub [--dir D] [--max-depth M] [--web PORT]");
+    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S] [--deposit SAT] [--web PORT]\n  lngap-chess-venue play user|hub [--dir D] [--max-depth M] [--web PORT]");
     std::process::exit(2)
 }
 
@@ -55,13 +55,17 @@ pub struct Timing {
     pub backoff: u32,
     pub margin: u32,
     pub start_secs: u32,
+    /// Each side's dispute deposit, sat (D56).
+    pub deposit: u64,
 }
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut dir = PathBuf::from("chess-venue");
     let mut block_secs = 20u64;
-    let mut timing = Timing { ell: 90, backoff: 5, margin: 60, start_secs: 60 };
+    // the deposit covers the longest dispute path at the demo's fixed
+    // pre-sign fee: claim or counter, refutation, split (4 x 60k)
+    let mut timing = Timing { ell: 90, backoff: 5, margin: 60, start_secs: 60, deposit: 250_000 };
     let mut max_depth = 20u32;
     let mut web: Option<u16> = None;
     let mut positional = Vec::new();
@@ -88,6 +92,10 @@ fn main() -> Result<()> {
                     "--margin" => timing.margin = v,
                     _ => timing.start_secs = v,
                 }
+                i += 2;
+            }
+            "--deposit" => {
+                timing.deposit = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or_else(|| usage());
                 i += 2;
             }
             "--web" => {
