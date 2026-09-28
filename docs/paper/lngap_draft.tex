@@ -24,8 +24,9 @@
 % macros for the dispute-graph section
 \newcommand{\op}[1]{\texttt{OP\_#1}}
 \newcommand{\push}[1]{\ensuremath{\langle #1\rangle}}
-\newcommand{\U}{\mathsf{U}}
-\newcommand{\Hb}{\mathsf{H}}
+\newcommand{\Pa}{\mathsf{A}}
+\newcommand{\Pb}{\mathsf{B}}
+\newcommand{\Hub}{\mathsf{H}}
 \newcommand{\tsd}{\Delta}
 \newcommand{\dl}{\delta}
 \newcommand{\dlp}{\delta'}
@@ -392,7 +393,8 @@ head as that move (Section~\ref{sec:graph:fee}). Publication and payment
 are one event, as a preimage and a payment are one event in Lightning.
 
 The designated sealer is generally not the payer's channel counterparty,
-so the fee must be routed: the payer's hub offers the same lock onward,
+so the fee must be routed: the payer's hub (for instance a Lightning
+service provider coordinating fee payment to the venue) offers the same lock onward,
 to member $i$ or to the next hop, locked to the same point $T$ (less a
 routing fee), and when member $i$ seals, the revealed $t$ settles each
 hop in turn, backwards. This is a \emph{point}-time-locked contract
@@ -452,13 +454,13 @@ when a channel state is agreed, which are built at dispute time by one
 party alone, and how the venue's attestations enter the scripts as
 public-key constants. We use tic-tac-toe as the worked instance
 (a $48$-byte entry head, at most $M=9$ moves) and quote chess where the
-numbers differ. Throughout, $\U$ is the user and $\Hb$ the hub; each
-holds a payment key $P_\U$, $P_\Hb$, and every 2-of-2 leaf below is
+numbers differ. Throughout, $\Pa$ and $\Pb$ are the two players ($\Pa$
+white, $\Pb$ black); each holds a payment key $P_\Pa$, $P_\Pb$, and every 2-of-2 leaf below is
 \[
-  \push{P_\U}\ \op{CHECKSIG}\ \push{P_\Hb}\ \op{CHECKSIGADD}\ \push{2}\ \op{NUMEQUAL}
+  \push{P_\Pa}\ \op{CHECKSIG}\ \push{P_\Pb}\ \op{CHECKSIGADD}\ \push{2}\ \op{NUMEQUAL}
 \]
 (or \op{NUMEQUALVERIFY} when the leaf continues), with the witness
-carrying $\sigma_\Hb$ then $\sigma_\U$. Timelocks: $\tsd$ is the
+carrying $\sigma_\Pb$ then $\sigma_\Pa$. Timelocks: $\tsd$ is the
 channel's \texttt{to\_self\_delay}, $\dl$ the challenge window and
 $\dlp$ the additional delay on prover-favourable paths; move $d$ is due
 at $T_d = t_0 + d\ell$ and a depth-$d$ absence claim is admissible once
@@ -471,7 +473,7 @@ contract, $s = (c, d)$ (\S\ref{sec:venue}).
 
 The two parties agree the contract at an off-chain draft. Beyond the
 channel keys, the draft fixes, per depth $d \in 1..M$ (move $d$ is made
-by the \emph{mover} $m(d)$, alternating from $\U$ at $d=1$; the other
+by the \emph{mover} $m(d)$, alternating from $\Pa$ at $d=1$; the other
 party is the \emph{claimant} $c(d)$):
 \begin{itemize}
 \item $K^{\mathrm{ref}}_d$, the mover's \emph{refute key}: a Winternitz
@@ -485,8 +487,8 @@ party is the \emph{claimant} $c(d)$):
   publishes carries this signature inline, so anyone can check
   authorship of a published move without the mover's cooperation;
 \item $K^{\mathrm{code}}_d$ (mover) and $K^{\mathrm{ccode}}_d$
-  (claimant): Lamport keys over the $2$-bit outcome code $X \in \{\text{UserWins},
-  \text{HubWins}, \text{Draw}\}$.
+  (claimant): Lamport keys over the $2$-bit outcome code $X \in \{\text{A wins},
+  \text{B wins}, \text{Draw}\}$.
 \end{itemize}
 From the venue's registry for this contract the draft pins, per move
 $d$ (key index $s = (c, d)$):
@@ -561,7 +563,7 @@ depth, and no venue data is needed.
 $A_d$ carries the claim tree
 \begin{align*}
   A_d:\quad & \texttt{refute},\ \texttt{counter}\ (d \ge 2),\
-  \texttt{split}_X\ (X \in \{\text{UW},\text{HW},\text{D}\}).
+  \texttt{split}_X\ (X \in \{\text{A},\text{B},\text{D}\}: A wins, B wins, draw).
 \end{align*}
 \begin{lstlisting}[style=script]
 split_X:   (*\push{\dl}*) OP_CSV OP_DROP  2-of-2-VERIFY
@@ -1149,7 +1151,7 @@ settlement stays in bitcoin, in a channel.
 
 An auction is the simplest useful contract that is not two-party. A
 seller auctions a lot; each bidder, and the seller, has a channel with a
-hub $\Hb$; every party's contract is a two-party contract with $\Hb$,
+hub $\Hub$; every party's contract is a two-party contract with $\Hub$,
 and all of them settle on one shared fact: the set of bids published on
 time.
 
@@ -1157,7 +1159,7 @@ time.
 $H(\mathit{bid}\,\|\,\mathit{salt}\,\|\,\mathit{key})$ by a commit time
 $T_c$ and reveal them by a reveal time $T_r$. A bidder locks
 $L_i \ge \mathit{bid}_i$ in its contract, over-locking by a random amount
-so that $\Hb$ learns nothing before the reveals. An unrevealed
+so that $\Hub$ learns nothing before the reveals. An unrevealed
 commitment forfeits a deposit $\pi$. On the keyed venue each bidder's
 commitment and reveal are entries under their own keys, one table per
 (auction, bidder, phase), so each has exactly one legitimate content and
@@ -1174,10 +1176,10 @@ $k$ is not a timely reveal. Each refutation is one inclusion path and
 one comparison; the number of bidders never enters a leaf. Completeness
 comes from the same leaves: an omitted bid is exhibited with its
 timeliness, and the seller's contract can exhibit \emph{any} omitted
-bid, so $\Hb$ cannot suppress the high bid in favour of a shill.
+bid, so $\Hub$ cannot suppress the high bid in favour of a shill.
 
 \paragraph{The legs.} As with a routed payment, the hub's contracts net
-to zero: in the seller's contract the lot goes to $\Hb$ against $p$, and
+to zero: in the seller's contract the lot goes to $\Hub$ against $p$, and
 in the winner's the lot goes to the winner against $p$; losers are
 refunded. The legs are atomic because they settle on the same fact.
 

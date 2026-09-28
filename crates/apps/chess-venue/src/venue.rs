@@ -126,7 +126,7 @@ impl Venue {
                 let describe = |b: &BlockJson| format!("an entry of {} bytes (head {}…)", b.entry.len() / 2, &b.header[80..96]);
                 depths.push(DepthView {
                     depth: d,
-                    mover: instance::mover_at(d).name().into(),
+                    mover: side(instance::mover_at(d)).into(),
                     due: rel(c.t0 + d * c.ell),
                     designated: lngap_pos::rotation(CONTRACT_ID, d, self.miner.n()),
                     seals: seals.values().map(|b| SealView { proposer: b.proposer, entry: describe(b), sealed_at: rel(b.sealed_at), late: b.late, rogue: b.rogue }).collect(),

@@ -92,7 +92,7 @@ async function cmd(c){const r=await (await fetch("/cmd",{method:"POST",body:JSON
 $("go").onclick=()=>{const u=$("uci").value.trim();if(!u)return;const how=$("how").value;cmd(how==="legal"?"move "+u:"cheat "+u+" "+how);$("uci").value=""};
 async function poll(){
   try{snap=await (await fetch("/state")).json()}catch(e){return}
-  $("who").textContent=snap.role==="user"?"you are WHITE (user)":"you are BLACK (hub)";
+  $("who").textContent=snap.role==="user"?"you are WHITE":"you are BLACK";
   $("clock").textContent="t+"+snap.now+"s · move "+(snap.depth+1)+" due t+"+snap.next_due+"s ("+(snap.next_due-snap.now)+"s) · a move every "+snap.ell+"s · Bitcoin height "+snap.height+", MTP t+"+snap.mtp+"s";
   $("turn").textContent=snap.terminal?("game over: "+snap.terminal):("depth "+snap.depth+" · "+(snap.to_move==="user"?"white":"black")+" to move");
   $("pot").textContent="payout address: "+snap.balance_sat.toLocaleString()+" sat";

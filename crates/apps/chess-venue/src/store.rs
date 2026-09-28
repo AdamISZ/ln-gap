@@ -230,6 +230,23 @@ pub struct InboxEntry {
     pub at: u32,
 }
 
+/// A player as the game shows it: the channel's user plays White, its
+/// counterparty Black. The game layer is symmetric; `Role` names the
+/// channel's two parties and never appears in the interface.
+pub fn side(r: Role) -> &'static str {
+    match r {
+        Role::User => "White",
+        Role::Hub => "Black",
+    }
+}
+
+/// A transaction label or message as the interface shows it: the graph's
+/// internal outcome names (`UserWins`, `HubWins`) become White's and
+/// Black's.
+pub fn ui(s: &str) -> String {
+    s.replace("UserWins", "WhiteWins").replace("HubWins", "BlackWins")
+}
+
 /// Now, in unix seconds.
 pub fn unix_now() -> u32 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(0)

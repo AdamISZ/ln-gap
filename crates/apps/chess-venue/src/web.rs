@@ -54,7 +54,7 @@ struct CmdResult {
 pub fn serve_player(mut p: Player, port: u16) -> Result<()> {
     let server = Server::http(("127.0.0.1", port)).map_err(|e| anyhow::anyhow!("binding 127.0.0.1:{port}: {e}"))?;
     p.publish_web_port(port)?;
-    println!("{}: browse http://127.0.0.1:{port}", p.role());
+    println!("{}: browse http://127.0.0.1:{port}", crate::store::side(p.role()));
     let mut last = Instant::now();
     loop {
         if last.elapsed() >= Duration::from_secs(1) {

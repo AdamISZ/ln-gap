@@ -6,8 +6,8 @@
 //!
 //! ```text
 //!   lngap-chess-venue venue [--dir D] [--block-secs 20] [--ell 90] [--web 8080]   # the node, the roster, the clock
-//!   lngap-chess-venue play user [--dir D] [--web 8081]                 # white
-//!   lngap-chess-venue play hub  [--dir D] [--web 8082]                 # black
+//!   lngap-chess-venue play white [--dir D] [--web 8081]                # White
+//!   lngap-chess-venue play black [--dir D] [--web 8082]                # Black
 //! ```
 //!
 //! With `--web` a process serves a page on that port instead of (the
@@ -42,7 +42,7 @@ use anyhow::{bail, Result};
 use lngap_channel::Role;
 
 fn usage() -> ! {
-    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S] [--deposit SAT] [--web PORT]\n  lngap-chess-venue play user|hub [--dir D] [--max-depth M] [--web PORT]");
+    eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S] [--deposit SAT] [--web PORT]\n  lngap-chess-venue play white|black [--dir D] [--max-depth M] [--web PORT]");
     std::process::exit(2)
 }
 

@@ -125,6 +125,7 @@ impl Player {
     }
 
     fn say(&mut self, s: String) {
+        let s = ui(&s);
         println!("  {s}");
         self.log.push(s);
     }
@@ -186,12 +187,14 @@ impl Player {
 
     pub fn open(dir: PathBuf, me: Role, max_depth: u32) -> Result<Player> {
         let store = Store::new(dir);
-        println!("{me}: waiting for the venue's node...");
+        let who = side(me);
+        let them = side(me.other());
+        println!("{who}: waiting for the venue's node...");
         let node = wait_for(|| store.read::<NodeInfo>(Store::node()))?;
         let rt = Regtest::attach(&PathBuf::from(node.datadir))?;
-        println!("{me}: waiting for the venue's registry...");
+        println!("{who}: waiting for the venue's registry...");
         let registry: Registry = wait_for(|| store.read(Store::registry()))?;
-        println!("{me}: registry has {} members, threshold {}, depths 0..={}", registry.n(), registry.threshold, registry.max_depth());
+        println!("{who}: registry has {} members, threshold {}, depths 0..={}", registry.n(), registry.threshold, registry.max_depth());
 
         // my keys: the channel keys and the per-depth contract keys
         let label = format!("chess-venue/{}", me.name());
@@ -199,7 +202,7 @@ impl Player {
         let mut ks = KeyStore::new(Seed::from_label(&format!("{label}-ks")));
         let mine = instance::gen_pos_keys(&mut ks, me, CONTRACT_ID, 1, max_depth, Game::Chess)?;
         store.write(&Store::offer(me), &Offer { pubs: keys.public(), keys: mine.clone() })?;
-        println!("{me}: offer published; waiting for {}'s offer...", me.other());
+        println!("{who}: offer published; waiting for {them}'s offer...");
         let theirs: Offer = wait_for(|| store.read(&Store::offer(me.other())))?;
         let their_state_keys = theirs.keys.iter().filter_map(|(d, o)| o.state.clone().map(|k| (*d, k))).collect();
         let merged = instance::collect_keys(&mine, &theirs.keys, max_depth)?;
@@ -220,10 +223,10 @@ impl Player {
             let ctx = CommitCtx { params: &params, keys: &pubs, broadcaster: Role::User, seq: 1, rev_hash: [0u8; 20] };
             let tree = probe.tree(&ctx)?;
             store.write(Store::contract(), &ContractJson { spk: hex::encode(tree.script_pubkey().as_bytes()), value, deadline, t0: clock.t0, ell: clock.ell, margin: clock.margin, deposit: vparams.deposit })?;
-            println!("{me}: contract proposed ({value} sat: a {POT_SAT} sat pot and a {} sat dispute deposit each; move 1 due in {}s, a move every {}s); waiting for the venue to fund it...", vparams.deposit, vparams.start_secs + vparams.ell, vparams.ell);
+            println!("{who}: contract proposed ({value} sat: a {POT_SAT} sat pot and a {} sat dispute deposit each; move 1 due in {}s, a move every {}s); waiting for the venue to fund it...", vparams.deposit, vparams.start_secs + vparams.ell, vparams.ell);
             wait_for(|| store.read(Store::funded()))?
         } else {
-            println!("{me}: waiting for the user's contract and the venue's funding...");
+            println!("{who}: waiting for White's contract and the venue's funding...");
             wait_for(|| store.read(Store::funded()))?
         };
         let contract: ContractJson = wait_for(|| store.read(Store::contract()))?;
@@ -234,7 +237,7 @@ impl Player {
         ensure!(hex::encode(tree.script_pubkey().as_bytes()) == funded.spk, "the funded output is not the contract we agreed");
         let op = OutPoint { txid: funded.txid.parse()?, vout: funded.vout };
         let prev = TxOut { value: Amount::from_sat(funded.value), script_pubkey: tree.script_pubkey() };
-        print!("{me}: building and signing the pre-signed graph... ");
+        print!("{who}: building and signing the pre-signed graph... ");
         std::io::stdout().flush()?;
         let t = std::time::Instant::now();
         let mut graph = inst.graph(&ctx, op, &prev)?;
@@ -249,16 +252,16 @@ impl Player {
         }
         println!("{} transactions in {:.1}s", graph.len(), t.elapsed().as_secs_f64());
         store.write(&Store::sigs(me), &mine_sigs)?;
-        println!("{me}: signatures published; waiting for {}'s...", me.other());
+        println!("{who}: signatures published; waiting for {them}'s...");
         let theirs: SigsJson = wait_for(|| store.read(&Store::sigs(me.other())))?;
         for p in graph.iter_mut() {
-            let s = theirs.get(&p.label).ok_or_else(|| anyhow!("{} did not sign {}", me.other(), p.label))?;
+            let s = theirs.get(&p.label).ok_or_else(|| anyhow!("{them} did not sign {}", p.label))?;
             let sig = Signature::from_slice(&hex::decode(s)?)?;
-            p.add_sig(me.other(), lngap_channel::GraphSig::Full(sig), &pubs).with_context(|| format!("{}'s signature on {}", me.other(), p.label))?;
+            p.add_sig(me.other(), lngap_channel::GraphSig::Full(sig), &pubs).with_context(|| format!("{them}'s signature on {}", p.label))?;
         }
         store.write(&Store::ready(me), &serde_json::json!({ "ready": true }))?;
         let t1 = i64::from(contract.t0 + contract.ell) - i64::from(unix_now());
-        println!("{me}: every skeleton is fully signed. The game is on: white ({}) moves first; move 1 is due in {t1}s.", Role::User);
+        println!("{who}: every skeleton is fully signed. The game is on: White moves first; move 1 is due in {t1}s.");
         Ok(Player {
             me,
             store,
@@ -376,6 +379,7 @@ impl Player {
         self.blocks.insert(slot, block.clone());
         let block = &block;
         let mover = instance::mover_at(slot);
+        let mover_s = side(mover);
         let e = match ChessEntry::decode(&block.entry) {
             Ok(e) => e,
             Err(err) => {
@@ -396,13 +400,13 @@ impl Player {
         }
         if !signed {
             self.bad_slots.insert(slot, "garbage signature".into());
-            self.say(format!("venue: move {slot} sealed by member {} (a ROGUE seal: honest members refused it) with {mover}'s move {} — the signature opens no key (not a move)", block.proposer, e.state.mv));
+            self.say(format!("venue: move {slot} sealed by member {} (a ROGUE seal: honest members refused it) with {mover_s}'s move {} — the signature opens no key (not a move)", block.proposer, e.state.mv));
             return Ok(());
         }
         // a legal continuation of the position?
         if slot != self.depth + 1 {
             self.bad_slots.insert(slot, format!("the game was at depth {}", self.depth));
-            self.say(format!("venue: move {slot} sealed {mover}'s move {} but the game is at depth {} — out of sequence", e.state.mv, self.depth));
+            self.say(format!("venue: move {slot} sealed {mover_s}'s move {} but the game is at depth {} — out of sequence", e.state.mv, self.depth));
             return Ok(());
         }
         match apply(&self.state.pos, e.state.mv) {
@@ -410,17 +414,17 @@ impl Player {
                 pos.fullmove = 0;
                 if pos != e.state.pos {
                     self.bad_slots.insert(slot, "the claimed position is not the move's result".into());
-                    self.say(format!("venue: move {slot} sealed {mover}'s move {} with a position that is NOT its result — disprovable", e.state.mv));
+                    self.say(format!("venue: move {slot} sealed {mover_s}'s move {} with a position that is NOT its result — disprovable", e.state.mv));
                     return Ok(());
                 }
                 self.state = e.state.clone();
                 self.depth = slot;
                 let term = lngap_chess::terminal(&self.state.pos).map(|t| format!(" — {t:?}")).unwrap_or_default();
-                self.say(format!("venue: move {slot} sealed by member {} at t+{when}s: {mover} played {} (signed, legal){term}", block.proposer, e.state.mv));
+                self.say(format!("venue: move {slot} sealed by member {} at t+{when}s: {mover_s} played {} (signed, legal){term}", block.proposer, e.state.mv));
             }
             Err(v) => {
                 self.bad_slots.insert(slot, format!("{v}"));
-                self.say(format!("venue: move {slot} sealed {mover}'s move {} — ILLEGAL ({v}); the absence claim and the disprove family apply", e.state.mv));
+                self.say(format!("venue: move {slot} sealed {mover_s}'s move {} — ILLEGAL ({v}); the absence claim and the disprove family apply", e.state.mv));
             }
         }
         Ok(())
@@ -532,7 +536,7 @@ impl Player {
         let h = self.height();
         let now = self.rel(unix_now());
         let next = self.depth + 1;
-        out += &format!("--- {} | t+{now}s | height {h}, MTP t+{}s | game depth {} | side to move: {} ({}), move {next} due t+{}s | venue {} members, threshold {}\n", self.me, self.rel(self.rt.mtp().unwrap_or(0)), self.depth, if self.state.pos.side == lngap_chess::Colour::White { "white" } else { "black" }, instance::mover_at(next), self.rel(self.due(next)), self.registry.n(), self.registry.threshold);
+        out += &format!("--- {} | t+{now}s | height {h}, MTP t+{}s | game depth {} | side to move: {}, move {next} due t+{}s | venue {} members, threshold {}\n", side(self.me), self.rel(self.rt.mtp().unwrap_or(0)), self.depth, side(instance::mover_at(next)), self.rel(self.due(next)), self.registry.n(), self.registry.threshold);
         out += &format!("{}\n", self.state.pos);
         if let Some(t) = lngap_chess::terminal(&self.state.pos) {
             out += &format!("    terminal: {t:?}\n");
@@ -564,6 +568,7 @@ impl Player {
         let now = unix_now();
         let d = self.depth + 1;
         let mover = instance::mover_at(d);
+        let mover_s = side(mover);
         let terminal = lngap_chess::terminal(&self.state.pos).is_some();
         let delta = self.params.delta;
         let delta2 = self.params.delta + self.params.delta_prime;
@@ -574,7 +579,7 @@ impl Player {
         v.push(if terminal {
             ActionView::no("move", "the game is over")
         } else if mover != self.me {
-            ActionView::no("move", &format!("{mover} to move (move {d}, due t+{}s)", self.rel(due)))
+            ActionView::no("move", &format!("{mover_s} to move (move {d}, due t+{}s)", self.rel(due)))
         } else if now > due {
             ActionView::no("move", &format!("your move {d} was due at t+{}s: you are stalled", self.rel(due)))
         } else if let Some((pd, _, to, at)) = self.pending.as_ref().filter(|p| p.0 == d) {
@@ -596,10 +601,10 @@ impl Player {
             });
         v.push(match claimable {
             None if mover == self.me => ActionView::no("claim", &format!("move {d} is your own")),
-            None if self.due(d) >= now => ActionView::no("claim", &format!("{mover}'s move {d} is due at t+{}s", self.rel(self.due(d)))),
+            None if self.due(d) >= now => ActionView::no("claim", &format!("{mover_s}'s move {d} is due at t+{}s", self.rel(self.due(d)))),
             None => ActionView::no("claim", "nothing to claim: every move of the opponent's is timely and signed, or claimed"),
             Some(s) => {
-                let who = instance::mover_at(s);
+                let who = side(instance::mover_at(s));
                 let why = if self.late_slots.contains(&s) { format!("move {s} was sealed only LATE; the flags stand") } else if self.bad_slots.contains_key(&s) { format!("move {s} holds no valid move") } else { format!("{who} did not publish move {s} by t+{}s", self.rel(self.due(s))) };
                 match self.claim_wait(s) {
                     Some(wait) => ActionView::no("claim", &format!("{why}: not yet — {wait}")).with_cmd(&format!("claim {s}")),
@@ -663,9 +668,9 @@ impl Player {
             .iter()
             .map(|(s, b)| {
                 let entry = if let Some(why) = self.bad_slots.get(s) {
-                    format!("{}: {} — NOT a move ({why})", instance::mover_at(*s), ChessEntry::decode(&b.entry).map(|e| e.state.mv.to_string()).unwrap_or_else(|_| "?".into()))
+                    format!("{}: {} — NOT a move ({why})", side(instance::mover_at(*s)), ChessEntry::decode(&b.entry).map(|e| e.state.mv.to_string()).unwrap_or_else(|_| "?".into()))
                 } else {
-                    format!("{}: {}", instance::mover_at(*s), ChessEntry::decode(&b.entry).map(|e| e.state.mv.to_string()).unwrap_or_else(|_| "?".into()))
+                    format!("{}: {}", side(instance::mover_at(*s)), ChessEntry::decode(&b.entry).map(|e| e.state.mv.to_string()).unwrap_or_else(|_| "?".into()))
                 };
                 SlotView { slot: *s, due: self.rel(self.due(*s)), proposer: b.proposer, entry, ok: !self.bad_slots.contains_key(s) && !self.late_slots.contains(s), flags: self.flags.get(s).map(|f| f.iter().filter(|x| x.is_some()).count()), late: self.late_slots.contains(s) }
             })
@@ -681,7 +686,7 @@ impl Player {
         let live: Vec<LiveView> = self
             .live
             .iter()
-            .map(|(label, l)| LiveView { label: label.clone(), height: l.height, spent: self.spent.contains_key(&l.op), value_sat: l.prev.value.to_sat() })
+            .map(|(label, l)| LiveView { label: ui(label), height: l.height, spent: self.spent.contains_key(&l.op), value_sat: l.prev.value.to_sat() })
             .collect();
         let disproves: Vec<DisproveView> = self.live_refuted().into_iter().find(|(_, dd)| instance::mover_at(*dd) != self.me).map(|(_, dd)| self.list_disproves(dd).into_iter().map(|(name, fires)| DisproveView { name, fires }).collect()).unwrap_or_default();
         let last_move = (d >= 1).then(|| self.state.mv.to_string());
@@ -707,7 +712,7 @@ impl Player {
             live,
             actions: self.actions(),
             disproves,
-            mempool: self.mempool_labels(),
+            mempool: self.mempool_labels().iter().map(|l| ui(l)).collect(),
             balance_sat,
             log: self.log.iter().rev().take(60).rev().cloned().collect(),
         }
@@ -733,7 +738,7 @@ impl Player {
 
     fn play_move(&mut self, uci: &str) -> Result<()> {
         let d = self.depth + 1;
-        ensure!(instance::mover_at(d) == self.me, "it is {}'s move (depth {d})", instance::mover_at(d));
+        ensure!(instance::mover_at(d) == self.me, "it is {}'s move (move {d})", side(instance::mover_at(d)));
         ensure!(unix_now() <= self.due(d), "your move {d} was due at t+{}s: you are stalled", self.rel(self.due(d)));
         let mv = Move::parse(uci).ok_or_else(|| anyhow!("not a UCI move: {uci}"))?;
         let mut pos = apply(&self.state.pos, mv).map_err(|v| anyhow!("illegal: {v}"))?;
@@ -752,7 +757,7 @@ impl Player {
     fn send(&mut self, d: u32, entry: &str, to: usize) -> Result<()> {
         let at = unix_now();
         let name = format!("{}/{}.json", Store::inbox_dir(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos());
-        self.store.write(&name, &InboxEntry { from: self.me.name().into(), depth: d, to, entry: entry.to_string(), at })?;
+        self.store.write(&name, &InboxEntry { from: side(self.me).into(), depth: d, to, entry: entry.to_string(), at })?;
         self.pending = Some((d, entry.to_string(), to, at));
         Ok(())
     }
@@ -765,7 +770,7 @@ impl Player {
     /// move signed with the NEXT depth's number — `wrong_slot`).
     fn cheat_move(&mut self, uci: &str, how: &str) -> Result<()> {
         let d = self.depth + 1;
-        ensure!(instance::mover_at(d) == self.me, "it is {}'s move (depth {d})", instance::mover_at(d));
+        ensure!(instance::mover_at(d) == self.me, "it is {}'s move (move {d})", side(instance::mover_at(d)));
         if how == "late" {
             ensure!(unix_now() > self.due(d), "your move {d} is not due until t+{}s: `move` it", self.rel(self.due(d)));
         } else {
@@ -1028,7 +1033,7 @@ impl Player {
 
     fn balance(&self) -> Result<String> {
         let spk = &self.pubs[self.me.idx()].payout_spk;
-        Ok(format!("{}'s payout address holds {} sat", self.me, self.rt.balance_of(spk)?.to_sat()))
+        Ok(format!("{}'s payout address holds {} sat", side(self.me), self.rt.balance_of(spk)?.to_sat()))
     }
 }
 
@@ -1113,7 +1118,7 @@ pub fn run(dir: PathBuf, me: Role, max_depth: u32, web: Option<u16>) -> Result<(
     let mut line = String::new();
     loop {
         p.sync()?;
-        print!("{me}> ");
+        print!("{}> ", side(me));
         std::io::stdout().flush()?;
         line.clear();
         if stdin.lock().read_line(&mut line)? == 0 {
