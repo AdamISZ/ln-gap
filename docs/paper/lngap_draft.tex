@@ -1146,6 +1146,104 @@ contract per provider. What we add is the absence-adjudicating clock
 without a blockchain or a token of its own: the venue provides it, and
 settlement stays in bitcoin, in a channel.
 
+\section{Hidden information: blackjack}
+\label{sec:blackjack}
+
+A public-information game such as chess demonstrates the mechanism, but
+it is a thin market for money. The games people play for money hide
+information, and whether LN-GAP can host them is the more telling test.
+Blackjack is the simplest casino game that needs everything the venue
+provides, and it needs little else. It is designed here, not built;
+the one new Script component has been verified on regtest.
+
+\paragraph{The game.} A player plays against a dealer (the house).
+Cards count at face value from 2 to 10, ten for a jack, queen or king,
+and an ace counts one or eleven, whichever helps. The player receives
+two cards face up, the dealer one face up and one face down (the
+\emph{hole} card). The player then repeatedly chooses to \emph{hit}
+(take a card) or \emph{stand}; going over 21 loses at once. When the
+player stands, the dealer reveals the hole card and draws by a fixed
+rule: take cards until the total is at least 17. Whoever is closer to 21
+without going over wins; equal totals are a tie. We omit the refinements
+of casino play (3:2 for a natural 21, doubling, splitting, insurance).
+
+\paragraph{Why it fits.} The dealer makes no decisions: its play is
+fixed by the rule. So the hidden information is not anyone's secret
+strategy, only the cards not yet dealt, and the protocol must guarantee
+three things: each card is random and neither side can bias it; nobody
+learns a card before it is dealt, the house included; and the rules,
+the dealer's among them, are followed. The first two are commit-reveal
+randomness; the third is a disprove family of small arithmetic. What
+commit-reveal cannot do on its own is stop a party who sees that a card
+will go against it from refusing to reveal its share. That is exactly
+what the venue does: a reveal missing at its due time is a stall, and a
+stall loses the pot and, with dispute deposits, pays for the dispute.
+
+\paragraph{Randomness.} At open, for each card position $k = 1..K$
+($K \approx 16$ suffices for a hand) the player commits to a share
+$a_k$ and the house to a share $b_k$, each in $0..12$; card $k$ is
+$(a_k + b_k) \bmod 13$, a rank from ace to king. One honest party's share
+is uniform and fixed before the other's is known, so the card is
+uniform, and neither party knows it until both shares are revealed.
+Checking a share against its commitment in Script is the one new
+component, since the obvious commitment, a hash of the value and a
+salt, cannot be opened without concatenation. Instead the value is
+encoded in the \emph{length} of a random string, as in the Bitcoin
+lottery of Andrychowicz et al.~\cite{smcbitcoin}: commit
+$C = \mathrm{SHA256}(s)$ with $|s| = 32 + v$ bytes; to open, reveal $s$,
+and the script checks the hash and reads $v$ with \op{SIZE}. The string
+is random and the hash hides its length; a second opening of a
+different length would be a SHA256 collision (the 80-bit collision
+bound of HASH160 is too low for a committer with time to grind). The
+dealing check, which opens both shares, bounds each to $0..12$ and
+computes the card, is a 137-byte leaf; on regtest a correct spend is
+183\,vB, and a wrong preimage, a string one byte longer, an
+out-of-range share and a wrong claimed card are each rejected.
+
+\paragraph{Play.} The game is a sequence of venue entries, each signed
+by the side whose turn it is, exactly as chess moves are. To deal card
+$k$, both parties reveal their shares, in a fixed order; the player's
+cards and the dealer's up-card are dealt first, the hole card's shares
+only when the player stands. The player's entries are ``hit'' and
+``stand''. In the dealer phase the house reveals the hole card and then
+keeps drawing, both shares per card, until its total reaches 17; its
+entries are forced. Every entry carries the claimed new state (the
+cards so far and the totals), and the last states the outcome, which a
+fold then settles cooperatively in the channel.
+
+\paragraph{Disputes.} The disprove family covers: a share that does not
+open its commitment; a card computed wrongly from its shares; a total
+updated wrongly, including the soft ace; an action where none is
+allowed (hitting after a bust or a stand); the dealer standing below 17
+or hitting at 17 or above; and a wrong outcome. Each is a comparison or
+a few additions, of the size of tic-tac-toe's leaves. Timeliness is the
+venue's, as in any game.
+
+\paragraph{Simplifications.} Cards are drawn from an infinite deck (each
+rank independently, ten-value cards four times as likely), which is close
+to the six- or eight-deck shoes casinos use and avoids shuffling in
+Script altogether; dealing without replacement would need a mental-poker
+shuffle, which is much heavier. Payouts are one to one. A session of many
+hands is one contract with a running balance, within the horizon of
+Section~\ref{sec:security}.
+
+\paragraph{Why it matters.} ``Provably fair'' online casinos let a
+player verify, after the fact, that the outcomes were honestly random,
+while the casino holds the player's money. Here the house never holds
+the player's funds, the cards are unbiasable, and the rules, the
+dealer's included, are enforced by the contract: provably trustless
+rather than provably fair. The house keeps its statistical edge, which
+comes from the dealer acting last, and that is legitimate. Babilonia
+\cite{babilonia} makes the same move for a one-shot bet, with a
+different emphasis: a single wager, resolved by an adaptor signature
+whose completion reveals the outcome, with zero-knowledge proofs that
+the dealer's hidden choice is well formed, and indistinguishable on
+chain from an ordinary payment. A one-shot bet needs no per-step clock,
+since Bitcoin's own timeout resolves its only step; blackjack has a
+decision at every card, and so needs the venue. The two combine: where
+one side genuinely holds a secret, as in poker, Babilonia-style reveals
+by adaptor completion could replace the length commitments.
+
 \section{A sealed-bid auction}
 \label{sec:auction}
 
@@ -1511,7 +1609,7 @@ committees~\cite{synccommittee} (a sampled committee attesting for a
 constrained verifier) and of witness-cosigned transparency
 logs~\cite{ct}; committee sampling by joint randomness is in the spirit
 of Algorand's sortition~\cite{algorand}. For storage, see
-Section~\ref{sec:storage}.
+Section~\ref{sec:storage}; for hidden-information games and Babilonia, Section~\ref{sec:blackjack}.
 
 \section{Conclusion}
 
@@ -1569,6 +1667,10 @@ committee is drawn and against which its statements can be judged.
 \bibitem{sia} Sia Foundation. About providing storage on Sia. \url{https://docs.sia.tech/provide-storage/about-hosting-on-sia}
 
 \bibitem{filecoin} Filecoin documentation: slashing. \url{https://docs.filecoin.io/storage-providers/filecoin-economics/slashing}; storage deal flow, \url{https://spec.filecoin.io/systems/filecoin_markets/onchain_storage_market/storage_deal_flow/}
+
+\bibitem{smcbitcoin} M.~Andrychowicz, S.~Dziembowski, D.~Malinowski and {\L}.~Mazurek. Secure multiparty computations on Bitcoin. IEEE Symposium on Security and Privacy, 2014. \url{https://eprint.iacr.org/2013/784}
+
+\bibitem{babilonia} waxwing. Babilonia: probabilistic coinjoin and covert betting. Version 2.0 (draft), September 2026. \url{https://github.com/AdamISZ/babilonia-paper}
 
 \bibitem{bitstream} R.~Linus. BitStream: decentralized file hosting incentivised via Bitcoin payments, 2023. \url{https://robinlinus.com/bitstream.pdf}
 
