@@ -648,7 +648,10 @@ tic-tac-toe \texttt{wrong\_slot}, \texttt{cell\_occupied}$_i$,
 \texttt{status\_mismatch} and so on (about thirty leaves); for chess the
 twelve certificate kinds (a piece moving through an occupied square, a
 king left in check, \dots) plus a well-formedness leaf, each taking a
-small exhibit (a square, an attacker) from the witness. A disprove is
+small exhibit (a square, an attacker) from the witness.
+Appendix~\ref{app:chess} lists every chess predicate, with the layout
+of the 192 parked digits it reads, and follows one disproof (a bishop
+moving through a pawn) from the parked tuple to the spend. A disprove is
 not pre-signed: the claimant builds it at dispute time, copies the
 mover's WOTS reveal from the confirmed refutation's witness, signs with
 its own key, and takes the pot. \texttt{not\_timely} is the timeliness
@@ -1683,5 +1686,268 @@ committee is drawn and against which its statements can be judged.
 \bibitem{bitstream} R.~Linus. BitStream: decentralized file hosting incentivised via Bitcoin payments, 2023. \url{https://robinlinus.com/bitstream.pdf}
 
 \end{thebibliography}
+
+\appendix
+
+\section{The chess disprove family, in full}
+\label{app:chess}
+
+Section~\ref{sec:graph:refuted} gives the shape of a
+\texttt{disprove}$_\pi$ leaf and names the predicates only by example.
+This appendix lists every predicate of the chess family, says what each
+computes and from which digits, and works through one disproof from the
+parked register file to the spend. The code is the
+\texttt{lngap-chess} crate (\texttt{certificate.rs} for the
+statements, \texttt{leaf.rs} for their Script) and the PoS glue in
+\texttt{lngap-pos} (\texttt{chess.rs})~\cite{lngapcode}.
+
+\subsection{What a disprove leaf sees}
+
+A confirmed refutation at depth $d$ has parked, under the one-time key
+$K^{\mathrm{ref}}_d$, the pair $\mathrm{head}(d-1)\,\|\,\mathrm{head}(d)$:
+$2 \times 48$ bytes, so $192$ hexadecimal digits (nibbles, high nibble
+of each byte first). The disprove leaf re-verifies that Winternitz
+signature (\texttt{WOTS-VERIFY}), which leaves the $192$ digits on the
+stack as the \emph{register file}, and evaluates its predicate over
+them. At $d = 1$ there is no prior head on chain; the leaf pushes the
+constant initial head in its place, so the predicate always sees two
+heads.
+
+A head is three parts:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+bytes & digits (in a head) & content \\
+\midrule
+0--3 & 0--7 & word0: game id (2 bytes, big-endian), depth, mover \\
+4--7 & 8--15 & word1: the move, $(\text{promo} \ll 12 \mid \text{to} \ll 6 \mid \text{from}) \ll 16$ \\
+8--47 & 16--95 & the state, 40 bytes (below) \\
+\bottomrule
+\end{tabular}
+\end{center}
+In the register file the prior head occupies digits $0$--$95$ and the
+new head $96$--$191$, so the prior state starts at digit $16$ and the
+new state at digit $112$. The state bytes are:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+state byte & state digits & field \\
+\midrule
+0--31 & 0--63 & the board: one nibble per square, square $s$ at digit $s$ \\
+32 & 64, 65 & side to move ($0$ White, $1$ Black) \\
+33 & 66, 67 & castling rights (4 bits; the high nibble must be $0$) \\
+34 & 68, 69 & en passant square ($64$ = none) \\
+35 & 70, 71 & halfmove clock \\
+36, 37 & 72--75 & the move's from and to squares \\
+38 & 76, 77 & promotion piece in the high nibble; low nibble $0$ \\
+39 & 78, 79 & depth \\
+\bottomrule
+\end{tabular}
+\end{center}
+Squares are numbered $s = f + 8r$ with file $f$ and rank $r$ from $0$,
+so a1 $= 0$, h1 $= 7$, a8 $= 56$. A square's nibble is empty ($0$) or
+a piece kind $k$ (1 pawn, 2 knight, 3 bishop, 4 rook, 5 queen, 6 king)
+plus $8$ for Black. There is no move number in the state (the depth
+takes its place), which is why the chess certificate's thirteenth kind,
+\textsc{MoveNumber}, is not part of the PoS family.
+
+\paragraph{The common preamble.} Script has no multiplication, division
+or bitwise operations, so every chess leaf opens with the same
+arithmetic, built from comparisons, additions and doublings:
+\begin{itemize}[nosep]
+\item a byte from its two digits: $16h + \ell$ as \texttt{h} doubled
+  four times, plus \texttt{l};
+\item rank and file of a square $s$: $r = \sum_{k=1}^{7} [s \ge 8k]$
+  (seven comparisons), $f = s - 8r$ ($8r$ by three doublings);
+\item colour and kind of a nibble $n$: $c = [n \ge 8]$, $k = n - 8c$;
+\item a board read at a computed square: \texttt{<base> OP\_SWAP
+  OP\_SUB OP\_PICK}, the square having been range-checked to $0..63$
+  (\texttt{OP\_WITHIN OP\_VERIFY}) whenever it comes from the witness.
+\end{itemize}
+From these the preamble names: the side to move $S$ (from the
+\emph{prior} state), $\Delta f = f(\text{to}) - f(\text{from})$,
+$\Delta r = r(\text{to}) - r(\text{from})$, and the kind $K$ of the
+piece on from in the prior board, or $0$ if that square does not hold a
+piece of side $S$. from, to and the promotion come from the
+\emph{new} state's bytes 36--38 (the mover's own account of its move).
+
+\paragraph{The general form.} Every leaf of the family has the shape
+of \S\ref{sec:graph:refuted}:
+\begin{lstlisting}[style=script]
+(*\push{\dl}*) OP_CSV OP_DROP  (*\push{P_{c(d)}}*) OP_CHECKSIGVERIFY      (*the claimant, after the window*)
+WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))                             (*the 192 parked digits*)
+PREAMBLE  BODY((*$\pi$*))                                     (*one element: 1 iff the rule is broken*)
+OP_VERIFY  OP_2DROP (*$\times 96$*)  OP_1
+\end{lstlisting}
+and its witness, bottom to top, is: the exhibit (zero to two script
+numbers), the $195$ (hash, digit) pairs of the Winternitz reveal
+($192$ message digits and $3$ checksum digits), copied from the
+refutation's witness, and the claimant's signature.
+
+\subsection{The predicates}
+
+Each chess predicate is the \emph{negation} of one statement a legal
+move makes true; the leaf fires (leaves $1$) exactly when the parked
+tuple falsifies it. ``Prior'' and ``new'' are the two parked states;
+$S$ is the side to move in the prior.
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}>{\ttfamily}p{0.28\linewidth}p{0.49\linewidth}p{0.13\linewidth}@{}}
+\toprule
+\normalfont leaf & fires iff & exhibit \\
+\midrule
+wrong\_slot & either head's word0 is not this game's constant for its
+  slot: (game, $d-1$, the claimant) and (game, $d$, the mover) & -- \\
+chess\_malformed & the new head is not a well-formed encoding: from or
+  to $\ge 64$; the castling byte's high nibble or byte 38's low nibble
+  non-zero; a promotion code of $1$ or $\ge 6$; the depth byte $\ne d$;
+  or word1 is not the move rebuilt from bytes 36--38 & -- \\
+chess\_mover & from does not hold a piece of side $S$, or that piece
+  cannot make the move $(\Delta f, \Delta r)$: a pawn one forward, two
+  forward from its start rank, or one diagonally forward; a knight's
+  L; a bishop's diagonal, a rook's line, a queen's either; a king's
+  step or the castling shape ($\Delta r = 0$, $|\Delta f| = 2$) & -- \\
+chess\_destination & to holds a piece of side $S$; or, for a pawn, to
+  is occupied on a push, or neither an enemy piece nor the en passant
+  square on a capture & -- \\
+chess\_ray & the move is a line (not a knight's), $1 \le j <
+  \max(|\Delta f|, |\Delta r|)$, and the $j$-th square from from
+  towards to is occupied in the prior. Covers sliders, the double push
+  and the castling king's path & $j$ \\
+chess\_promotion & a pawn reaching the last rank names no promotion
+  piece, or any other move names one & -- \\
+chess\_castling & a castling-shaped king move with: the king not on
+  its home square, the right not held, the rook not on its corner, the
+  destination occupied, or (queenside) the b-file square occupied & -- \\
+chess\_castlingattacked & a castling-shaped king move, and the piece
+  on \emph{by} is an enemy attacking, in the prior, the king's square
+  ($\mathit{crossed} = 0$) or the square it crosses ($\mathit{crossed} =
+  1$) & $\mathit{crossed}$, \emph{by} \\
+chess\_kingattacked & in the new board, \emph{king} holds side $S$'s
+  king and the piece on \emph{by} is an enemy that attacks it: the
+  piece's geometry, and for a slider every square between is empty &
+  \emph{king}, \emph{by} \\
+chess\_board & new$[\mathit{sq}]$ is not what the move makes it: the
+  moved or promoted piece on to; empty on from and on a pawn taken en
+  passant; the rook moved by a castle; prior$[\mathit{sq}]$ elsewhere
+  & \emph{sq} \\
+chess\_side & the new side to move is not $1 - S$ & -- \\
+chess\_castlingfield & the new castling rights are not the prior's
+  with exactly the rights lost that the move touched (a king move
+  loses both of that side's, a move from or to a corner loses that
+  corner's) & -- \\
+chess\_epfield & the new en passant square is not the square passed by
+  a double push, or not $64$ after any other move & -- \\
+chess\_clock & the halfmove clock is not reset to $0$ after a pawn
+  move or capture, or not the prior plus one otherwise & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+The first two leaves are about the heads as records (the right slot,
+a decodable encoding); \texttt{chess\_malformed} uses only digit
+comparisons and never reads the board, so it stays live for a head
+whose fields would make the other leaves' reads fail. The twelve
+\texttt{chess\_}$\ast$ kinds are the rules. Together they are designed
+to be \emph{sound} (a legal move with its honest successor fires no
+leaf) and \emph{complete} (any other well-formed tuple fires at least
+one, with some exhibit); in the code the first is a unit test over
+legal moves and the second is tested by fuzzing against an independent
+move generator. The exhibit is what makes each check bounded: king
+safety is a universal (``no enemy piece attacks the king''), and its
+falsification is one attacker, which the leaf verifies directly rather
+than searching.
+
+The exhibits range over small sets: $j \in \{1,\dots,6\}$,
+$\mathit{crossed} \in \{0,1\}$, and squares in $0..63$, range-checked
+in the leaf. A claimant who picks a wrong exhibit (a $j$ pointing at
+an empty square, an attacker that does not attack) simply fails the
+leaf and can try another before the window closes; the challenge space
+is about $4{,}400$ (kind, exhibit) pairs and the claimant searches it
+off-chain.
+
+\subsection{A worked disproof: a bishop through a pawn}
+
+This is scenario PC6 of the repository, run on regtest.
+
+\paragraph{The moves.} $\Pa$ (White) plays 1.\,e4, sealed at depth 1.
+At depth 2 $\Pb$ (Black) submits c8--e6: the bishop on c8 moves along
+the diagonal through d7, which holds Black's own pawn. $\Pb$ signs the
+entry and publishes, as the new state, exactly what that move would
+produce if it were legal: the bishop on e6, c8 empty, side to move
+White, castling rights unchanged, en passant none, halfmove clock $1$.
+The venue attests it (the venue checks signatures, not chess).
+
+\paragraph{The dispute.} $\Pa$ will not play on from an illegal
+position. Once the claim lock $T_2 + m$ has passed it broadcasts the
+thin absence claim \texttt{absent}$_2$ ($189$ vB), ``$\Pb$ did not move
+at depth 2''. As a statement about the venue the claim is false, and
+$\Pb$ answers with \texttt{refute} ($36{,}615$ vB): the venue's attestation
+of heads 1 and 2, the proposer fragments, and the Winternitz
+signature under $K^{\mathrm{ref}}_2$ that parks
+$\mathrm{head}(1)\,\|\,\mathrm{head}(2)$ in the output $P_2$. The
+refutation is valid: the heads \emph{were} attested. What it has done
+is put $\Pb$'s move on chain in a form Script can read.
+
+\paragraph{Finding the predicate.} $\Pa$ runs the family off-chain on
+the parked tuple. Exactly one leaf fires: \texttt{chess\_ray}, with
+$j = 1$. (\texttt{chess\_board} does not: the new board is the honest
+consequence of the claimed move. Nor do \texttt{chess\_mover}, since
+a bishop may move diagonally; \texttt{chess\_destination}, since e6 is
+empty; or the field leaves, since $\Pb$ updated them correctly.)
+
+\paragraph{The computation.} In the register file, with the offsets
+above:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+digits & value & meaning \\
+\midrule
+81 (prior byte 32, low) & 1 & $S$ = Black \\
+16 + 58 = 74 (prior c8) & 11 ($= 3 + 8$) & a black bishop \\
+16 + 51 = 67 (prior d7) & 9 ($= 1 + 8$) & a black pawn \\
+184, 185 (new byte 36) & 3, 10 & from $= 16 \cdot 3 + 10 = 58$ (c8) \\
+186, 187 (new byte 37) & 2, 12 & to $= 16 \cdot 2 + 12 = 44$ (e6) \\
+188 (new byte 38, high) & 0 & no promotion \\
+\bottomrule
+\end{tabular}
+\end{center}
+The preamble computes $r(58) = 7$, $f(58) = 58 - 56 = 2$ and $r(44) =
+5$, $f(44) = 44 - 40 = 4$, so $\Delta f = 2$ and $\Delta r = -2$. The
+prior nibble at 58 is $11$: non-zero, colour $1 = S$, so $K = 11 - 8 =
+3$, a bishop. The body of \texttt{chess\_ray} is
+\begin{lstlisting}[style=script]
+guard := (df = 0 or dr = 0 or |df| = |dr|)  and  (df, dr) != (0, 0)
+         and  K != 2  and  j >= 1  and  j < max(|df|, |dr|)
+if guard:
+    step := sign(df) + 8 * sign(dr)                 (*three doublings*)
+    sq   := from
+    for i in 1..6:  if i <= j:  sq := sq + step     (*six gated additions*)
+    result := prior[sq] != 0                        (*computed \texttt{OP\_PICK}*)
+else:
+    result := 0
+\end{lstlisting}
+With the exhibit $j = 1$: the guard holds ($|2| = |-2|$, not a
+knight, $1 \le 1 < 2$); $\mathit{step} = 1 + 8 \cdot (-1) = -7$; one
+gated addition gives $\mathit{sq} = 58 - 7 = 51$, d7; the read returns
+the prior nibble $9$, which is non-zero. The body leaves $1$,
+\texttt{OP\_VERIFY} consumes it, the $192$ digits are dropped in
+pairs, and the leaf ends in \texttt{OP\_1}.
+
+\paragraph{The spend.} After the refutation has $\dl$ confirmations,
+$\Pa$ builds \texttt{disprove\_chess\_ray} spending $P_2$: witness
+$[\,1,\ \text{the }195\text{ reveal pairs from the refutation's
+witness},\ \sigma_{\Pa}\,]$, the leaf script and its control block. It
+confirms at $4{,}955$ vB and pays the whole contract output to $\Pa$.
+The three transactions total $41{,}759$ vB. $\Pb$'s checked
+\texttt{split}$_X$ on the same output was locked for $\dl + \dlp$, so
+the output is gone before it could open.
+
+Had $\Pa$ picked \texttt{chess\_board} instead (a natural first guess
+for ``the board is wrong''), the leaf would have failed whatever
+square it named; the regtest test \texttt{pos\_chess\_graph} checks
+that rejection before mining the ray disprove. The illegality is in the
+move, not in the bookkeeping, and the family has one leaf for each.
+
 
 \end{document}
