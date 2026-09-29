@@ -10,6 +10,7 @@ pub mod funding;
 pub mod presign;
 pub mod protocol;
 pub mod sweep;
+pub mod wire;
 
 use std::sync::Arc;
 

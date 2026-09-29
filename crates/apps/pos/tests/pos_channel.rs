@@ -26,6 +26,7 @@ use lngap_channel::chain::Chain;
 use lngap_channel::funding::{build_funding_tx, sign_funding_input};
 use lngap_channel::presign::GraphKey;
 use lngap_channel::protocol::{funding_tree, run_bus, ChannelParty, Policy};
+use lngap_channel::wire::WireEnvelope;
 use lngap_channel::{ChannelParams, ChannelState, ContractOutput, PartyKeys, PresignedTx, Role};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsSig;
@@ -145,11 +146,21 @@ impl World {
         Hand { inst, deck, sealed: Default::default(), pair_sig: None }
     }
 
-    /// A channel update: the user proposes, the hub answers.
+    /// A channel update: the user proposes, the hub answers; every message
+    /// crosses as JSON (the wire format), its contract ids resolved against
+    /// the receiver's own instances.
     fn update(&mut self, balances: [Amount; 2], contracts: Vec<Arc<dyn ContractOutput>>) {
         let seq = self.user.current_seq() + 1;
+        let known = contracts.clone();
         let msgs = self.user.propose(ChannelState { seq, balances, contracts }).unwrap();
-        run_bus(&mut self.user, &mut self.hub, msgs).unwrap();
+        let mut queue: std::collections::VecDeque<_> = msgs.into();
+        while let Some(env) = queue.pop_front() {
+            let json = serde_json::to_string(&WireEnvelope::from_env(&env).unwrap()).unwrap();
+            let back: WireEnvelope = serde_json::from_str(&json).unwrap();
+            let env = back.into_env(|id| known.iter().find(|c| c.id() == id).cloned()).unwrap();
+            let target = if env.to == Role::User { &mut self.user } else { &mut self.hub };
+            queue.extend(target.handle(env).unwrap());
+        }
         assert_eq!((self.user.current_seq(), self.hub.current_seq()), (seq, seq));
         assert!(self.user.pending_seq().is_none() && self.hub.pending_seq().is_none());
     }
