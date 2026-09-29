@@ -27,36 +27,28 @@
 //! once both players have agreed it. A claim waits for median-time-past
 //! to pass the due time plus `--margin`. The players exchange their
 //! key offers and their graph signatures through `D/players/` and then
-//! drive the game — and its disputes — from a small REPL. Nothing else
+//! drive the game — and its disputes — from a small REPL or page.
+//!
+//! The two players open a Poon-Dryja channel once (D58); each game is a
+//! contract added to it by a channel update. A game is settled by the next
+//! update: the winner settles a mate, a stalemate or an accepted draw
+//! splits evenly, and a resignation concedes. A game with no agreed result
+//! goes on chain by force-closing the channel. The session, the venue and
+//! the dispute layer are shared with the blackjack demo (`lngap-demo`). Nothing else
 //! connects them: a disprover reads the mover's reveal off the confirmed
 //! refutation on the chain, as it would in deployment.
 
 mod player;
-mod store;
-mod venue;
-mod web;
 
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 use lngap_channel::Role;
+use lngap_demo::venue::{Timing, VenueConfig};
 
 fn usage() -> ! {
     eprintln!("usage:\n  lngap-chess-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S] [--deposit SAT] [--web PORT]\n  lngap-chess-venue play white|black [--dir D] [--max-depth M] [--web PORT]");
     std::process::exit(2)
-}
-
-/// The venue's timing (D55), in seconds: per move, the mover's fallback
-/// backoff, the claim margin past a due time, and the setup allowance
-/// from the contract proposal to move 0's time.
-#[derive(Clone, Copy, Debug)]
-pub struct Timing {
-    pub ell: u32,
-    pub backoff: u32,
-    pub margin: u32,
-    pub start_secs: u32,
-    /// Each side's dispute deposit, sat (D56).
-    pub deposit: u64,
 }
 
 fn main() -> Result<()> {
@@ -110,14 +102,22 @@ fn main() -> Result<()> {
         }
     }
     match positional.first().map(String::as_str) {
-        Some("venue") => venue::run(dir, block_secs, max_depth, web, timing),
+        Some("venue") => {
+            let cfg = VenueConfig {
+                build: Box::new(|inst, _, _| Ok(inst)),
+                game: lngap_pos::instance::Game::Chess,
+                dashboard_html: player::DASHBOARD_HTML,
+                names: player::side,
+            };
+            lngap_demo::venue::run(dir, block_secs, max_depth, web, timing, cfg)
+        }
         Some("play") => {
             let role = match positional.get(1).map(String::as_str) {
                 Some("user") | Some("white") => Role::User,
                 Some("hub") | Some("black") => Role::Hub,
                 _ => usage(),
             };
-            player::run(dir, role, max_depth, web)
+            player::run(dir, role, web)
         }
         Some(other) => bail!("unknown command {other}"),
         None => usage(),

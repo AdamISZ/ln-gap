@@ -1,9 +1,9 @@
 //! The venue process: the regtest node, the roster, the clock (D55). Mines
-//! a Bitcoin block every `block_secs`, independently of the game. For each
-//! hand the player requests, computes the venue's registry (the hand is a
-//! contract of its own, with its own tables), then registers the hand's
-//! check (the movers' state keys and both sides' share commitments, D57)
-//! once both offers and the terms are in. Seals each submitted entry on
+//! a Bitcoin block every `block_secs`, independently of the games. For each
+//! game the user requests, computes the venue's registry (the game is a
+//! contract of its own, with its own tables), then registers the game's
+//! check (built by the demo from both offers and the terms) once they are
+//! in. Seals each submitted entry on
 //! arrival by the member it is addressed to, if an honest member would;
 //! flags every due move with no valid seal. Its page shows the latest
 //! hand's timeline and the misbehaviour controls. The channel is the
@@ -22,7 +22,30 @@ use lngap_pos::{Member, PosMiner};
 use tiny_http::{Method, Response, Server};
 
 use crate::store::*;
-use crate::web::{body, html, json, DASHBOARD_HTML, VENUE_HTML};
+use crate::web::{body, html, json};
+
+pub const VENUE_HTML: &str = include_str!("venue.html");
+
+/// What the venue needs from a demo: how to build a game's instance from
+/// the two offers and the terms (to register its check), its dashboard
+/// page, and the parties' names.
+pub struct VenueConfig {
+    pub build: Box<dyn Fn(PosInstance, &Offer, &Offer) -> Result<PosInstance>>,
+    pub game: Game,
+    pub dashboard_html: &'static str,
+    pub names: fn(Role) -> &'static str,
+}
+
+/// The venue's timing (D55), in seconds.
+#[derive(Clone, Copy, Debug)]
+pub struct Timing {
+    pub ell: u32,
+    pub backoff: u32,
+    pub margin: u32,
+    pub start_secs: u32,
+    /// Each side's dispute deposit, sat (D56).
+    pub deposit: u64,
+}
 
 fn members() -> Vec<Member> {
     (0..K as u8).map(|i| Member::new([VENUE_SEED[0] + i; 32])).collect()
@@ -81,6 +104,7 @@ struct CmdResult {
 }
 
 struct Venue {
+    cfg: VenueConfig,
     store: Store,
     rt: Regtest,
     miner: PosMiner,
@@ -123,7 +147,7 @@ impl Venue {
                 }
                 depths.push(DepthView {
                     depth: d,
-                    mover: side(instance::mover_at(d)).into(),
+                    mover: (self.cfg.names)(instance::mover_at(d)).into(),
                     due: rel(c.t0 + d * c.ell),
                     designated: lngap_pos::rotation(h, d, self.miner.n()),
                     seals: seals.values().map(|b| SealView { proposer: b.proposer, entry: format!("an entry of {} bytes", b.entry.len() / 2), sealed_at: rel(b.sealed_at), late: b.late, rogue: b.rogue }).collect(),
@@ -166,12 +190,12 @@ impl Venue {
     /// New hands: the registry on request; the registration once the
     /// offers and the terms are in.
     fn hands(&mut self) -> Result<()> {
-        for h in self.store.hands() {
+        for h in self.store.games() {
             if self.store.exists(&Store::request(h)) && !self.store.exists(&Store::registry(h)) {
                 let t = Instant::now();
                 let registry = self.miner.registry(h, self.params.max_depth)?;
                 self.store.write(&Store::registry(h), &registry)?;
-                println!("venue: hand {h}: its registry ({} tables) in {:.1}s", self.params.max_depth + 1, t.elapsed().as_secs_f64());
+                println!("venue: game {h}: its registry ({} tables) in {:.1}s", self.params.max_depth + 1, t.elapsed().as_secs_f64());
             }
             if self.clocks.contains_key(&h) || !self.store.exists(&Store::registry(h)) {
                 continue;
@@ -180,11 +204,12 @@ impl Venue {
             let registry = self.store.read(&Store::registry(h))?.ok_or_else(|| anyhow!("registry"))?;
             let keys = instance::collect_keys(&user.keys, &hub.keys, self.params.max_depth)?;
             let clock = GameClock { t0: c.t0, ell: c.ell, margin: c.margin };
-            let inst = PosInstance::new(h, Amount::from_sat(c.value), c.deadline, GAME_ID, Game::Blackjack, clock, keys, registry)?.with_commitments(commitments(&user, &hub)?)?;
+            let base = PosInstance::new(h, Amount::from_sat(c.value), c.deadline, GAME_ID, self.cfg.game, clock, keys, registry)?;
+            let inst = (self.cfg.build)(base, &user, &hub)?;
             self.miner.register(h, self.params.max_depth, inst.authorship()).map_err(|e| anyhow!(e))?;
             self.clocks.insert(h, clock);
             self.store.write(&Store::registered(h), &serde_json::json!({ "hand": h }))?;
-            println!("venue: hand {h} registered (move 1 due {}s from now)", i64::from(c.t0 + c.ell) - i64::from(unix_now()));
+            println!("venue: game {h} registered (move 1 due {}s from now)", i64::from(c.t0 + c.ell) - i64::from(unix_now()));
         }
         Ok(())
     }
@@ -196,25 +221,25 @@ impl Venue {
                 let Some(e) = std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<InboxEntry>(&s).ok()) else { continue };
                 let d = e.depth;
                 if self.miner.is_silent(e.to) {
-                    println!("venue: hand {h}: {}'s move {d} was sent to member {}, which is SILENT", e.from, e.to);
+                    println!("venue: game {h}: {}'s move {d} was sent to member {}, which is SILENT", e.from, e.to);
                     self.store.remove(&p);
                     continue;
                 }
                 let now = unix_now();
                 let due = clock.t0 + d * clock.ell;
                 if now > due {
-                    println!("venue: hand {h}: {}'s move {d} arrived after its due time: held for the LATE control", e.from);
+                    println!("venue: game {h}: {}'s move {d} arrived after its due time: held for the LATE control", e.from);
                     self.park(&p, &Store::late_dir(h))?;
                     continue;
                 }
                 match self.miner.seal_entry(h, d, e.to, &hex::decode(&e.entry)?) {
                     Ok(block) => {
                         self.store.write(&Store::seal(h, d, e.to), &BlockJson::from_block(&block, now, false, false))?;
-                        println!("venue: hand {h}: t+{}s: member {} seals {}'s move {d}", i64::from(now) - i64::from(clock.t0), e.to, e.from);
+                        println!("venue: game {h}: t+{}s: member {} seals {}'s move {d}", i64::from(now) - i64::from(clock.t0), e.to, e.from);
                         self.store.remove(&p);
                     }
                     Err(err) => {
-                        println!("venue: hand {h}: member {} refuses {}'s move {d}: not signed, or a declared share does not open (held for the ROGUE control) [{err}]", e.to, e.from);
+                        println!("venue: game {h}: member {} refuses {}'s move {d}: not signed, or a declared share does not open (held for the ROGUE control) [{err}]", e.to, e.from);
                         self.park(&p, &Store::refused_dir(h))?;
                     }
                 }
@@ -234,7 +259,7 @@ impl Venue {
                 }
                 let f = self.miner.flag(h, d);
                 self.store.write(&Store::flags(h, d), &flags_to_json(&f))?;
-                println!("venue: hand {h}: move {d} has no valid seal at its due time — {} of {} members flag it", f.iter().filter(|x| x.is_some()).count(), self.miner.n());
+                println!("venue: game {h}: move {d} has no valid seal at its due time — {} of {} members flag it", f.iter().filter(|x| x.is_some()).count(), self.miner.n());
             }
         }
         Ok(())
@@ -296,10 +321,10 @@ impl Venue {
     }
 }
 
-pub fn run(dir: PathBuf, block_secs: u64, max_depth: u32, web: Option<u16>, timing: crate::Timing) -> Result<()> {
+pub fn run(dir: PathBuf, block_secs: u64, max_depth: u32, web: Option<u16>, timing: Timing, cfg: VenueConfig) -> Result<()> {
     let store = Store::new(dir.clone());
     std::fs::create_dir_all(&dir)?;
-    for stale in ["venue", "players", "channel", "hands", "node.json"] {
+    for stale in ["venue", "players", "channel", "games", "hands", "node.json"] {
         let p = dir.join(stale);
         if p.is_dir() {
             std::fs::remove_dir_all(&p)?;
@@ -324,8 +349,8 @@ pub fn run(dir: PathBuf, block_secs: u64, max_depth: u32, web: Option<u16>, timi
         }
         None => None,
     };
-    let mut v = Venue { store, rt, miner, params, clocks: BTreeMap::new(), next_block: Instant::now() + Duration::from_secs(block_secs) };
-    println!("venue: waiting for hands (the parties open their channel themselves)...");
+    let mut v = Venue { cfg, store, rt, miner, params, clocks: BTreeMap::new(), next_block: Instant::now() + Duration::from_secs(block_secs) };
+    println!("venue: waiting for games (the parties open their channel themselves)...");
     loop {
         v.hands()?;
         v.process_inbox()?;
@@ -341,7 +366,7 @@ pub fn run(dir: PathBuf, block_secs: u64, max_depth: u32, web: Option<u16>, timi
                     let path = url.split('?').next().unwrap_or("").to_string();
                     let _ = match (req.method(), path.as_str()) {
                         (Method::Get, "/") => req.respond(html(VENUE_HTML)),
-                        (Method::Get, "/dashboard") => req.respond(html(DASHBOARD_HTML)),
+                        (Method::Get, "/dashboard") => req.respond(html(v.cfg.dashboard_html)),
                         (Method::Get, "/ports") => {
                             let port = |r: Role| v.store.read::<serde_json::Value>(&Store::web(r)).ok().flatten().and_then(|j| j.get("port").and_then(|p| p.as_u64()));
                             req.respond(json(&serde_json::json!({ "user": port(Role::User), "hub": port(Role::Hub) })))

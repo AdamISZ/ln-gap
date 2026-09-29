@@ -17,6 +17,7 @@ lngap-ec-wots = { path = "../../ec-wots" }
 lngap-factchain = { path = "../factchain" }
 lngap-blackjack = { path = "../blackjack" }
 lngap-pos = { path = "../pos" }
+lngap-demo = { path = "../demo" }
 lngap-contract = { path = "../../contract" }
 bitcoin.workspace = true
 anyhow.workspace = true

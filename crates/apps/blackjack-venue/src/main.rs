@@ -24,29 +24,16 @@
 //! open (D57).
 
 mod player;
-mod store;
-mod venue;
-mod web;
 
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 use lngap_channel::Role;
+use lngap_demo::venue::{Timing, VenueConfig};
 
 fn usage() -> ! {
     eprintln!("usage:\n  lngap-blackjack-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S (default 15)] [--deposit SAT] [--web PORT]\n  lngap-blackjack-venue play player|house [--dir D] [--max-depth M] [--web PORT]");
     std::process::exit(2)
-}
-
-/// The venue's timing (D55), in seconds.
-#[derive(Clone, Copy, Debug)]
-pub struct Timing {
-    pub ell: u32,
-    pub backoff: u32,
-    pub margin: u32,
-    pub start_secs: u32,
-    /// Each side's dispute deposit, sat (D56).
-    pub deposit: u64,
 }
 
 fn main() -> Result<()> {
@@ -82,14 +69,23 @@ fn main() -> Result<()> {
         i += 2;
     }
     match positional.first().map(String::as_str) {
-        Some("venue") => venue::run(dir, block_secs, max_depth, web, timing),
+        Some("venue") => {
+            let cfg = VenueConfig {
+                build: Box::new(|inst, user, hub| inst.with_commitments(player::commitments(&user.extra, &hub.extra)?)),
+                game: lngap_pos::instance::Game::Blackjack,
+                dashboard_html: player::DASHBOARD_HTML,
+                names: player::side,
+            };
+            lngap_demo::venue::run(dir, block_secs, max_depth, web, timing, cfg)
+        }
         Some("play") => {
             let role = match positional.get(1).map(String::as_str) {
                 Some("player") | Some("user") => Role::User,
                 Some("house") | Some("hub") => Role::Hub,
                 _ => usage(),
             };
-            player::run(dir, role, max_depth, web)
+            let _ = max_depth;
+            player::run(dir, role, web)
         }
         Some(other) => bail!("unknown command {other}"),
         None => usage(),

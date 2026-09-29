@@ -349,6 +349,8 @@ dependencies = [
  "lngap-blackjack",
  "lngap-btc",
  "lngap-channel",
+ "lngap-contract",
+ "lngap-demo",
  "lngap-ec-wots",
  "lngap-factchain",
  "lngap-lamport",
@@ -429,6 +431,8 @@ dependencies = [
  "lngap-channel",
  "lngap-chess",
  "lngap-chess-fc",
+ "lngap-contract",
+ "lngap-demo",
  "lngap-ec-wots",
  "lngap-factchain",
  "lngap-lamport",
@@ -454,6 +458,25 @@ dependencies = [
  "sha2",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "lngap-demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-ec-wots",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-pos",
+ "serde",
+ "serde_json",
+ "tiny_http",
 ]
 
 [[package]]

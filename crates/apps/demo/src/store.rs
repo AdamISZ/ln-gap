@@ -6,10 +6,10 @@
 //!   first revocation hashes, funding contribution; the funding witnesses;
 //!   `funded.json`) and its message bus (`channel/bus/<to>/`, one file per
 //!   wire envelope);
-//! - `hands/<h>/`: hand `h` (contract id `h`): the player's request, the
-//!   venue's registry for it, each party's offer (per-hand keys and share
-//!   commitments), the contract terms, the venue's registration, and the
-//!   venue's seals, flags and held submissions for the hand.
+//! - `games/<g>/`: game `g` (contract id `g`): the user's request, the
+//!   venue's registry for it, each party's offer (per-game keys and the
+//!   game's own public material), the contract terms, the venue's
+//!   registration, and the venue's seals, flags and held submissions.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 /// The venue's roster: five members, majority three.
 pub const K: usize = 5;
 pub const GAME_ID: u16 = 1;
-/// Each side's stake per hand (the pot is both), and each side's share of
+/// Each side's stake per game (the pot is both), and each side's share of
 /// the channel.
 pub const STAKE_SAT: u64 = 500_000;
 pub const CHANNEL_SIDE_SAT: u64 = 3_000_000;
@@ -86,9 +86,9 @@ impl Store {
         let _ = std::fs::remove_file(p);
     }
 
-    /// The hand ids with a directory, ascending.
-    pub fn hands(&self) -> Vec<u32> {
-        let d = self.path("hands");
+    /// The game ids with a directory, ascending.
+    pub fn games(&self) -> Vec<u32> {
+        let d = self.path("games");
         let mut v: Vec<u32> = std::fs::read_dir(&d).map(|r| r.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok()).collect()).unwrap_or_default();
         v.sort();
         v
@@ -117,9 +117,9 @@ impl Store {
     pub fn bus(r: Role) -> String {
         format!("channel/bus/{}", r.name())
     }
-    // a hand
+    // a game
     fn hand(h: u32, rel: &str) -> String {
-        format!("hands/{h:04}/{rel}")
+        format!("games/{h:04}/{rel}")
     }
     pub fn request(h: u32) -> String {
         Store::hand(h, "request.json")
@@ -242,17 +242,6 @@ pub struct InboxEntry {
     pub at: u32,
 }
 
-pub fn side(r: Role) -> &'static str {
-    match r {
-        Role::User => "Player",
-        Role::Hub => "House",
-    }
-}
-
-pub fn ui(s: &str) -> String {
-    s.replace("UserWins", "PlayerWins").replace("HubWins", "HouseWins")
-}
-
 pub fn unix_now() -> u32 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(0)
 }
@@ -270,23 +259,16 @@ pub struct ChanOffer {
     pub contrib_spk: String,
 }
 
-/// A party's offer for hand `h`: its per-hand contract keys and its sixteen
-/// share commitments.
+/// A party's offer for game `g`: its per-game contract keys and the game's
+/// own public material (blackjack's share commitments; nothing for chess).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Offer {
     pub keys: Vec<(u32, PosKeyOffer)>,
-    pub commits: Vec<String>,
+    #[serde(default)]
+    pub extra: serde_json::Value,
 }
 
-pub fn commitments(user: &Offer, hub: &Offer) -> Result<lngap_blackjack::Commitments> {
-    let arr = |o: &Offer| -> Result<[[u8; 32]; lngap_blackjack::K]> {
-        let v: Vec<[u8; 32]> = o.commits.iter().map(|h| hex::decode(h).ok().and_then(|b| b.try_into().ok()).ok_or_else(|| anyhow!("a commitment is 32 bytes"))).collect::<Result<_>>()?;
-        v.try_into().map_err(|_| anyhow!("sixteen commitments"))
-    };
-    Ok(lngap_blackjack::Commitments { player: arr(user)?, house: arr(hub)? })
-}
-
-/// Hand `h`'s terms, proposed by the player (D55's clock: move `d` due at
+/// Game `g`'s terms, proposed by the user (D55's clock: move `d` due at
 /// `t0 + d·ell`; claims from the due time plus `margin`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ContractJson {

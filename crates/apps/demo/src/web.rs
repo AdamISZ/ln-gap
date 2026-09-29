@@ -1,19 +1,11 @@
-//! The browser front: a `tiny_http` server per process serving one
-//! embedded page and a JSON state endpoint, the page polling it. The
-//! player's server runs the engine loop (`sync` between requests); the
-//! venue's is driven from the venue's tick loop.
+//! The browser front: a `tiny_http` server per party process serving its
+//! page, a JSON state endpoint and a command endpoint; the engine syncs
+//! every second between requests.
 
-use std::io::Read;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tiny_http::{Header, Method, Request, Response, Server};
-
-use crate::player::Player;
-
-pub const PLAYER_HTML: &str = include_str!("player.html");
-pub const VENUE_HTML: &str = include_str!("venue.html");
-pub const DASHBOARD_HTML: &str = include_str!("dashboard.html");
 
 fn header(k: &str, v: &str) -> Header {
     Header::from_bytes(k.as_bytes(), v.as_bytes()).expect("ascii header")
@@ -49,12 +41,24 @@ struct CmdResult {
     output: String,
 }
 
-/// The player's server loop: the engine syncs every second and answers
-/// requests in between.
-pub fn serve_player(mut p: Player, port: u16) -> Result<()> {
+/// A party process as its page sees it.
+pub trait Page {
+    fn name(&self) -> String;
+    fn publish_web_port(&self, port: u16) -> Result<()>;
+    fn sync(&mut self) -> Result<()>;
+    fn snapshot(&mut self) -> serde_json::Value;
+    fn exec(&mut self, cmd: &str) -> Result<String>;
+    fn html(&self) -> &'static str;
+    /// Extra GET endpoints (path, full url) -> JSON.
+    fn get(&mut self, _path: &str, _url: &str) -> Option<serde_json::Value> {
+        None
+    }
+}
+
+pub fn serve(mut p: impl Page, port: u16) -> Result<()> {
     let server = Server::http(("127.0.0.1", port)).map_err(|e| anyhow::anyhow!("binding 127.0.0.1:{port}: {e}"))?;
     p.publish_web_port(port)?;
-    println!("{}: browse http://127.0.0.1:{port}", crate::store::side(p.role()));
+    println!("{}: browse http://127.0.0.1:{port}", p.name());
     let mut last = Instant::now();
     loop {
         if last.elapsed() >= Duration::from_secs(1) {
@@ -67,33 +71,32 @@ pub fn serve_player(mut p: Player, port: u16) -> Result<()> {
         let url = req.url().to_string();
         let path = url.split('?').next().unwrap_or("").to_string();
         let resp = match (req.method(), path.as_str()) {
-            (Method::Get, "/") => req.respond(html(PLAYER_HTML)),
+            (Method::Get, "/") => req.respond(html(p.html())),
             (Method::Get, "/state") => {
-                // current before answering: the page and any driver see the
-                // chain as of now, not as of the last periodic sync
                 if let Err(e) = p.sync() {
                     println!("  ! sync: {e:#}");
                 }
                 let snap = p.snapshot();
                 req.respond(json(&snap))
             }
-            (Method::Get, "/legal") => {
-                let from = query(&url, "from").unwrap_or_default();
-                let v = p.legal_from(&from);
-                req.respond(json(&v))
-            }
             (Method::Post, "/cmd") => {
                 if let Err(e) = p.sync() {
                     println!("  ! sync: {e:#}");
                 }
                 let b = body(&mut req);
-                let cmd: Cmd = serde_json::from_str(&b).unwrap_or(Cmd { cmd: String::new() });
-                let r = match p.exec(&cmd.cmd) {
-                    Ok(output) => CmdResult { ok: true, output },
-                    Err(e) => CmdResult { ok: false, output: format!("{e:#}") },
+                let r = match serde_json::from_str::<Cmd>(&b) {
+                    Ok(cmd) => match p.exec(&cmd.cmd) {
+                        Ok(output) => CmdResult { ok: true, output },
+                        Err(e) => CmdResult { ok: false, output: format!("{e:#}") },
+                    },
+                    Err(e) => CmdResult { ok: false, output: format!("expected {{\"cmd\": ...}}: {e}") },
                 };
                 req.respond(json(&r))
             }
+            (Method::Get, other) => match p.get(other, &url) {
+                Some(v) => req.respond(json(&v)),
+                None => req.respond(Response::from_string("not found").with_status_code(404)),
+            },
             _ => req.respond(Response::from_string("not found").with_status_code(404)),
         };
         let _ = resp;

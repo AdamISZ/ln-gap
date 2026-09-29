@@ -2745,6 +2745,31 @@ the player, one house win by the house), then one cooperative close.
 **Not in scope.** Routing, PTLCs, MuSig2 key-path funding (the funding
 output is a 2-of-2 script leaf), multiple hands at once.
 
+**Chess too, on one shared layer (2026-09-29).** The game-independent
+parts of the blackjack app (the file store, the pages, the venue process,
+the channel session with its policy, and the per-game dispute state with
+its claim / counter / refute / disprove / timely / split actions) moved to
+one crate, `lngap-demo`. A game supplies its rules through a trait: the
+authorship message, private material per game, the instance builder, the
+judgement of a sealed entry, the firing disprove leaves with their
+witnesses, R, and the cooperative result. Blackjack and chess both run on
+it. Chess's endings in the channel:
+
+- **Checkmate:** the winner settles. The loser's policy accepts because
+  its own client sees the same mate.
+- **Stalemate:** settled as a draw, an even split. On chain the side to
+  move still forfeits: R is unchanged.
+- **Resign:** concedes the game. Every policy always accepts a
+  concession paying it the win.
+- **Offer / accept draw:** the offerer's policy accepts an even split,
+  and the offer is posted to the opponent, whose ACCEPT DRAW proposes it.
+
+Any other game goes on chain by force-close, with its dispute graph as
+before. Measured on regtest: a fool's mate settled by Black; a
+resignation; an agreed draw (updates 1-6, no chain transaction); an
+illegal move (e2e5) force-closed, claimed (197 vB), refuted
+(19,532 vB) and disproved by `chess_mover` (2,692 vB).
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

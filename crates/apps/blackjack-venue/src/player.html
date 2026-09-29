@@ -62,10 +62,10 @@ function cards(el,list){el.innerHTML="";for(const c of list){const d=document.cr
 async function poll(){
   try{snap=await (await fetch("/state")).json()}catch(e){return}
   const c=snap.channel;
-  $("chan").textContent="channel "+c.status+" (update "+c.seq+"): Player "+c.player.toLocaleString()+" / House "+c.house.toLocaleString()+" sat"+(c.in_play?" · "+c.in_play.toLocaleString()+" in play":"");
+  $("chan").textContent="channel "+c.status+" (update "+c.seq+"): Player "+c.user.toLocaleString()+" / House "+c.hub.toLocaleString()+" sat"+(c.in_play?" · "+c.in_play.toLocaleString()+" in play":"");
   $("clock").textContent=(snap.hand?"hand "+snap.hand+" ("+(snap.hand_phase||"")+")"+(snap.hand_phase==="Playing"?" · move "+(snap.depth+1)+" due in "+(snap.next_due-snap.now)+"s":""):"no hand yet")+" · Bitcoin height "+snap.height;
   $("pot").textContent="on chain: "+snap.balance_sat.toLocaleString()+" sat";
-  $("chaninfo").innerHTML="<b>"+c.status+"</b>, update "+c.seq+": the Player holds <b>"+c.player.toLocaleString()+"</b> sat, the House <b>"+c.house.toLocaleString()+"</b>"+(c.in_play?", <b>"+c.in_play.toLocaleString()+"</b> in the hand's contract":"");
+  $("chaninfo").innerHTML="<b>"+c.status+"</b>, update "+c.seq+": the Player holds <b>"+c.user.toLocaleString()+"</b> sat, the House <b>"+c.hub.toLocaleString()+"</b>"+(c.in_play?", <b>"+c.in_play.toLocaleString()+"</b> in the hand's contract":"");
   $("results").textContent=snap.results.length?("settled: "+snap.results.join(" · ")):"";
   cards($("dealer"),snap.dealer_cards);cards($("player"),snap.player_cards);
   $("pt").textContent=snap.player_cards.length?"("+snap.player_total+")":"";
@@ -78,7 +78,7 @@ async function poll(){
   for(const a of snap.actions){if(MOVES.includes(a.name))continue;const btn=document.createElement("button");btn.textContent=a.name;btn.disabled=!a.enabled;btn.title=a.hint;
     btn.onclick=()=>{let c=a.cmd;const d=$("depth").value.trim();if((a.name==="claim"||a.name==="counter")&&d)c=a.name+" "+d;if(a.name==="disprove"&&$("leaf").value)c+=" "+$("leaf").value;cmd(c)};
     A.appendChild(btn);const h=document.createElement("span");h.className="hint";h.textContent=" "+a.hint;A.appendChild(h);A.appendChild(document.createElement("br"))}
-  const L=$("leaf");const cur=L.value;L.innerHTML='<option value="">the leaf that fires</option>';for(const d of snap.disproves){const o=document.createElement("option");o.value=d.name;o.textContent=d.name;L.appendChild(o)}L.value=cur;
+  const L=$("leaf");const cur=L.value;L.innerHTML='<option value="">the leaf that fires</option>';for(const d of snap.disproves){const o=document.createElement("option");o.value=d;o.textContent=d;L.appendChild(o)}L.value=cur;
   $("venuehint").textContent=snap.n+" members, flag threshold "+snap.threshold+" of "+snap.n+"; each move goes to its designated sealer, the mover falling back after "+snap.backoff+"s; claims "+snap.margin+"s after a due time";
   const S=$("slots").querySelector("tbody");S.innerHTML="";for(const s of snap.slots){const tr=document.createElement("tr");tr.className=(s.ok?"":"bad")+(s.late?" late":"");tr.innerHTML=`<td>${s.slot}</td><td>t+${s.due}s</td><td>${s.proposer>1000?"—":"member "+s.proposer}${s.late?" (LATE)":""}</td><td>${s.entry}</td><td>${s.flags==null?"":s.flags+" of "+snap.n+" flagged it"}</td>`;S.appendChild(tr)}
   $("mempool").textContent=snap.mempool.length?("in the mempool: "+snap.mempool.join(", ")):"";

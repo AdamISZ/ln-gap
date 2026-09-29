@@ -31,11 +31,12 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
 .pill{display:inline-block;padding:1px 7px;border-radius:9px;background:#eee;font-size:12px;margin-left:6px}
 </style></head>
 <body>
-<header><b id="who">…</b><span id="clock"></span><span id="turn"></span><span id="pot"></span></header>
+<header><b id="who">…</b><span id="chan"></span><span id="clock"></span><span id="turn"></span><span id="pot"></span></header>
 <main>
 <div>
   <div id="board"></div>
-  <div class="panel" style="margin-top:12px">
+  <div class="panel" style="margin-top:12px"><h3>The channel</h3><div id="chaninfo"></div><div class="hint" id="results"></div></div>
+  <div class="panel">
     <h3>Your move</h3>
     <div>click a piece, then a square &nbsp;·&nbsp; or type <input id="uci" size="6" placeholder="e2e4"> <button id="go" class="primary">publish</button></div>
     <div style="margin-top:6px">publish as
@@ -51,7 +52,7 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
     <div class="hint" id="movehint"></div>
   </div>
   <div class="panel">
-    <h3>Dispute</h3>
+    <h3>Game, channel and disputes</h3>
     <div id="actions"></div>
     <div style="margin-top:6px">depth <input id="depth" size="3" placeholder="d"> for claim / counter at another depth &nbsp;·&nbsp; disprove with
       <select id="leaf"><option value="">the leaf that fires</option></select></div>
@@ -93,9 +94,14 @@ $("go").onclick=()=>{const u=$("uci").value.trim();if(!u)return;const how=$("how
 async function poll(){
   try{snap=await (await fetch("/state")).json()}catch(e){return}
   $("who").textContent=snap.role==="user"?"you are WHITE":"you are BLACK";
-  $("clock").textContent="t+"+snap.now+"s · move "+(snap.depth+1)+" due t+"+snap.next_due+"s ("+(snap.next_due-snap.now)+"s) · a move every "+snap.ell+"s · Bitcoin height "+snap.height+", MTP t+"+snap.mtp+"s";
+  const c=snap.channel;
+  $("chan").textContent="channel "+c.status+" (update "+c.seq+"): White "+c.user.toLocaleString()+" / Black "+c.hub.toLocaleString()+" sat"+(c.in_play?" · "+c.in_play.toLocaleString()+" in play":"");
+  $("chaninfo").innerHTML="<b>"+c.status+"</b>, update "+c.seq+": White holds <b>"+c.user.toLocaleString()+"</b> sat, Black <b>"+c.hub.toLocaleString()+"</b>"+(c.in_play?", <b>"+c.in_play.toLocaleString()+"</b> in game "+snap.game+"'s contract":"")+(snap.draw_offered?" · <b>a draw is offered</b>":"");
+  $("results").textContent=snap.results.length?("settled: "+snap.results.join(" · ")):"";
+  if(!snap.game){$("clock").textContent="no game yet · Bitcoin height "+snap.height}else
+  $("clock").textContent="game "+snap.game+" ("+(snap.game_phase||"")+") · t+"+snap.now+"s · move "+(snap.depth+1)+" due t+"+snap.next_due+"s ("+(snap.next_due-snap.now)+"s) · a move every "+snap.ell+"s · Bitcoin height "+snap.height+", MTP t+"+snap.mtp+"s";
   $("turn").textContent=snap.terminal?("game over: "+snap.terminal):("depth "+snap.depth+" · "+(snap.to_move==="user"?"white":"black")+" to move");
-  $("pot").textContent="payout address: "+snap.balance_sat.toLocaleString()+" sat";
+  $("pot").textContent="on chain: "+snap.balance_sat.toLocaleString()+" sat";
   render();
   const mv=snap.actions.find(a=>a.name==="move");$("movehint").textContent=mv?mv.hint:"";$("go").disabled=!(mv&&mv.enabled);
   const A=$("actions");A.innerHTML="";
