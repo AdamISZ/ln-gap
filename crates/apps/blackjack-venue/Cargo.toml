@@ -1,0 +1,26 @@
+[package]
+name = "lngap-blackjack-venue"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Blackjack on the PoS venue (D57): a browser demo, the house as an automatic party"
+
+[[bin]]
+name = "lngap-blackjack-venue"
+path = "src/main.rs"
+
+[dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-channel = { path = "../../channel" }
+lngap-lamport = { path = "../../lamport" }
+lngap-ec-wots = { path = "../../ec-wots" }
+lngap-factchain = { path = "../factchain" }
+lngap-blackjack = { path = "../blackjack" }
+lngap-pos = { path = "../pos" }
+bitcoin.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+tiny_http.workspace = true
+rand.workspace = true

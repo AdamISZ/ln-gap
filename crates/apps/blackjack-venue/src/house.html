@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LN-GAP blackjack: the house</title>
+<style>
+body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f4f1ea;color:#1e1e1e}
+header{padding:10px 16px;background:#5a1e1e;color:#eee;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}header b{font-size:16px}
+main{padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.panel{background:#fff;border:1px solid #ddd;border-radius:6px;padding:10px 12px;margin-bottom:12px}
+.panel h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#777}
+button{font:inherit;padding:5px 10px;border:1px solid #999;border-radius:4px;background:#fafafa;cursor:pointer;margin:2px 4px 2px 0}
+button.on{background:#8b1d1d;color:#fff;border-color:#8b1d1d}button:disabled{opacity:.45}
+.hint{color:#777;font-size:12px}#log,#out{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap}#log{max-height:320px;overflow:auto}
+</style></head><body>
+<header><b>the HOUSE (console)</b><span id="hand"></span><span id="pot"></span></header>
+<main>
+<div>
+ <div class="panel"><h3>Next move</h3>
+  <div id="modes"></div>
+  <div class="hint">The house plays itself: it reveals its share of each card as soon as the player's move is sealed, draws to 17, and answers disputes honestly. A cheat applies to its next reveal (withhold: it never reveals, a stall).</div>
+  <div style="margin-top:8px"><button id="ap">autopilot</button></div>
+ </div>
+ <div class="panel"><h3>Dispute (manual)</h3><div id="actions"></div><div id="out"></div></div>
+</div>
+<div class="panel"><h3>Log</h3><div id="log"></div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const MODES=[["honest","Honest"],["wrongcard","WrongCard","deal a card one rank off"],["drawat17","DrawAt17","draw past 17"],["standon16","StandOn16","stop before 17"],["withhold","Withhold","never reveal"]];
+async function cmd(c){const r=await (await fetch("/cmd",{method:"POST",body:JSON.stringify({cmd:c})})).json();$("out").textContent=(r.ok?"":"! ")+r.output;poll()}
+async function poll(){let s;try{s=await (await fetch("/state")).json()}catch(e){return}
+ $("hand").textContent="player "+s.player_cards.join(" ")+(s.player_cards.length?" ("+s.player_total+")":"")+" · dealer "+s.dealer_cards.join(" ")+(s.dealer_total==null?"":" ("+s.dealer_total+")")+" · "+s.status+" · depth "+s.depth;
+ $("pot").textContent="payout address: "+s.balance_sat.toLocaleString()+" sat";
+ const M=$("modes");M.innerHTML="";for(const [k,v,h] of MODES){const b=document.createElement("button");b.textContent=k;b.className=s.mode===v?"on":"";b.title=h||"";b.onclick=()=>cmd("mode "+k);M.appendChild(b)}
+ $("ap").textContent="autopilot: "+(s.autopilot?"ON":"OFF");$("ap").onclick=()=>cmd("autopilot "+(s.autopilot?"off":"on"));
+ const A=$("actions");A.innerHTML="";for(const a of s.actions){const b=document.createElement("button");b.textContent=a.name;b.disabled=!a.enabled;b.title=a.hint;b.onclick=()=>cmd(a.cmd);A.appendChild(b);const h=document.createElement("span");h.className="hint";h.textContent=" "+a.hint;A.appendChild(h);A.appendChild(document.createElement("br"))}
+ $("log").textContent=s.log.join("\n");$("log").scrollTop=$("log").scrollHeight;
+}
+poll();setInterval(poll,2000);
+</script></body></html>

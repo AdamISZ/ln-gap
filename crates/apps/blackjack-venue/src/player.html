@@ -1,0 +1,85 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LN-GAP blackjack: the player</title>
+<style>
+:root{--bg:#0f5132;--felt:#146c43;--fg:#1e1e1e;--panel:#fff;--muted:#777;--ok:#2e7d32;--bad:#b3261e}
+body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f4f1ea;color:var(--fg)}
+header{padding:10px 16px;background:#2b2b2b;color:#eee;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+header b{font-size:16px}
+main{display:grid;grid-template-columns:460px 1fr;gap:14px;padding:14px}
+#table{background:radial-gradient(ellipse at center,#1a7f50 0%,#0f5132 100%);border-radius:14px;padding:16px;color:#fff;min-height:300px}
+.row{margin:8px 0 18px}.row h4{margin:0 0 6px;font-weight:600;letter-spacing:.04em}
+.cards{display:flex;gap:8px;min-height:92px}
+.card{width:62px;height:88px;border-radius:8px;background:#fff;color:#111;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.card.down{background:repeating-linear-gradient(45deg,#8b1d1d,#8b1d1d 6px,#a52a2a 6px,#a52a2a 12px);color:transparent}
+.total{font-size:13px;opacity:.9;margin-left:8px}
+#result{font-size:20px;font-weight:700;text-align:center;margin-top:6px;min-height:28px}
+.panel{background:var(--panel);border:1px solid #ddd;border-radius:6px;padding:10px 12px;margin-bottom:12px}
+.panel h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+button{font:inherit;padding:6px 12px;border:1px solid #999;border-radius:4px;background:#fafafa;cursor:pointer;margin:2px 4px 2px 0}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:#2b6cb0;color:#fff;border-color:#2b6cb0}
+input,select{font:inherit;padding:4px 6px;max-width:100%}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{padding:3px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
+#log{max-height:260px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap}
+#out{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;min-height:2em;color:#333}
+.hint{color:var(--muted);font-size:12px}
+</style></head>
+<body>
+<header><b>you are the PLAYER</b><span id="clock"></span><span id="turn"></span><span id="pot"></span></header>
+<main>
+<div>
+  <div id="table">
+    <div class="row"><h4>Dealer <span class="total" id="dt"></span></h4><div class="cards" id="dealer"></div></div>
+    <div class="row"><h4>You <span class="total" id="pt"></span></h4><div class="cards" id="player"></div></div>
+    <div id="result"></div>
+  </div>
+  <div class="panel" style="margin-top:12px">
+    <h3>Your move</h3>
+    <div id="moves"></div>
+    <div class="hint" id="movehint"></div>
+  </div>
+  <div class="panel">
+    <h3>Dispute</h3>
+    <div id="actions"></div>
+    <div style="margin-top:6px">depth <input id="depth" size="3" placeholder="d"> for claim / counter at another depth &nbsp;·&nbsp; disprove with
+      <select id="leaf"><option value="">the leaf that fires</option></select></div>
+    <div id="out"></div>
+  </div>
+</div>
+<div>
+  <div class="panel"><h3>The venue</h3><div class="hint" id="venuehint"></div><table id="slots"><thead><tr><th>move</th><th>due</th><th>sealed by</th><th>entry</th><th>flags</th></tr></thead><tbody></tbody></table></div>
+  <div class="panel"><h3>On the chain</h3><div id="mempool" class="hint"></div><table id="live"><thead><tr><th>transaction</th><th>height</th><th>output</th><th></th></tr></thead><tbody></tbody></table></div>
+  <div class="panel"><h3>Log</h3><div id="log"></div></div>
+</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);let snap=null;
+async function cmd(c){const r=await (await fetch("/cmd",{method:"POST",body:JSON.stringify({cmd:c})})).json();$("out").textContent=(r.ok?"":"! ")+r.output;await poll();return r}
+function cards(el,list){el.innerHTML="";for(const c of list){const d=document.createElement("div");d.className="card"+(c==="?"?" down":"");d.textContent=c==="?"?"":c;el.appendChild(d)}}
+async function poll(){
+  try{snap=await (await fetch("/state")).json()}catch(e){return}
+  $("clock").textContent="t+"+snap.now+"s · move "+(snap.depth+1)+" due t+"+snap.next_due+"s ("+(snap.next_due-snap.now)+"s) · Bitcoin height "+snap.height+", MTP t+"+snap.mtp+"s";
+  $("turn").textContent="depth "+snap.depth+" · the "+snap.to_move+" to move";
+  $("pot").textContent="payout address: "+snap.balance_sat.toLocaleString()+" sat";
+  cards($("dealer"),snap.dealer_cards);cards($("player"),snap.player_cards);
+  $("pt").textContent=snap.player_cards.length?"("+snap.player_total+")":"";
+  $("dt").textContent=snap.dealer_total==null?"":"("+snap.dealer_total+")";
+  $("result").textContent=snap.terminal?snap.status.toUpperCase():"";
+  const M=$("moves");M.innerHTML="";const hints=[];
+  for(const a of snap.actions){if(!["deal","hit","stand","ack"].includes(a.name))continue;const b=document.createElement("button");b.textContent=a.name.toUpperCase();b.className="primary";b.disabled=!a.enabled;b.title=a.hint;b.onclick=()=>cmd(a.cmd);M.appendChild(b);if(a.enabled)hints.push(a.name+": "+a.hint)}
+  $("movehint").textContent=hints.join(" · ");
+  const A=$("actions");A.innerHTML="";
+  for(const a of snap.actions){if(["deal","hit","stand","ack"].includes(a.name))continue;const btn=document.createElement("button");btn.textContent=a.name;btn.disabled=!a.enabled;btn.title=a.hint;
+    btn.onclick=()=>{let c=a.cmd;const d=$("depth").value.trim();if((a.name==="claim"||a.name==="counter")&&d)c=a.name+" "+d;if(a.name==="disprove"&&$("leaf").value)c+=" "+$("leaf").value;cmd(c)};
+    A.appendChild(btn);const h=document.createElement("span");h.className="hint";h.textContent=" "+a.hint;A.appendChild(h);A.appendChild(document.createElement("br"))}
+  const L=$("leaf");const cur=L.value;L.innerHTML='<option value="">the leaf that fires</option>';for(const d of snap.disproves){const o=document.createElement("option");o.value=d.name;o.textContent=d.name;L.appendChild(o)}L.value=cur;
+  $("venuehint").textContent=snap.n+" members, flag threshold "+snap.threshold+" of "+snap.n+"; each move goes to its designated sealer, the mover falling back after "+snap.backoff+"s; claims "+snap.margin+"s after a due time";
+  const S=$("slots").querySelector("tbody");S.innerHTML="";for(const s of snap.slots){const tr=document.createElement("tr");tr.className=(s.ok?"":"bad")+(s.late?" late":"");tr.innerHTML=`<td>${s.slot}</td><td>t+${s.due}s</td><td>${s.proposer>1000?"—":"member "+s.proposer}${s.late?" (LATE)":""}</td><td>${s.entry}</td><td>${s.flags==null?"":s.flags+" of "+snap.n+" flagged it"}</td>`;S.appendChild(tr)}
+  $("mempool").textContent=snap.mempool.length?("in the mempool: "+snap.mempool.join(", ")):"";
+  const V=$("live").querySelector("tbody");V.innerHTML="";for(const l of snap.live){const tr=document.createElement("tr");tr.innerHTML=`<td><code>${l.label}</code></td><td>${l.height}</td><td>${l.value_sat.toLocaleString()} sat</td><td>${l.spent?"spent":"unspent"}</td>`;V.appendChild(tr)}
+  $("log").textContent=snap.log.join("\n");$("log").scrollTop=$("log").scrollHeight;
+}
+poll();setInterval(poll,2000);
+</script></body></html>

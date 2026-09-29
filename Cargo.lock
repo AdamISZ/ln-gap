@@ -340,6 +340,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-blackjack-venue"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "lngap-blackjack",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-ec-wots",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-pos",
+ "rand",
+ "serde",
+ "serde_json",
+ "tiny_http",
+]
+
+[[package]]
 name = "lngap-btc"
 version = "0.1.0"
 dependencies = [
