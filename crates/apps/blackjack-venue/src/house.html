@@ -15,10 +15,11 @@ button.on{background:#8b1d1d;color:#fff;border-color:#8b1d1d}button:disabled{opa
 <div>
  <div class="panel"><h3>Next move</h3>
   <div id="modes"></div>
-  <div class="hint">The house plays itself: it reveals its share of each card as soon as the player's move is sealed, draws to 17, settles its wins in the channel, accepts honest results, and answers disputes honestly. A cheat applies to its next reveal (withhold: it never reveals, a stall).</div>
-  <div style="margin-top:8px"><button id="ap">autopilot</button></div>
+  <div class="hint">The house plays itself: it reveals its share of each card as soon as the player's move is sealed, draws to 17, settles its wins in the channel, accepts honest results, and leaves every dispute step to you. A cheat applies to its next reveal (withhold: it never reveals, a stall).</div>
+  <div style="margin-top:8px"><button id="ap">autopilot</button> <button id="ad">automatic disputes</button></div>
+  <div class="hint">autopilot: the house's own moves (reveals, the dealer's forced draws) and settling hands it won. Disputes (force close, claim, refute, counter, disprove, timely, split) are YOUR clicks below unless automatic disputes is on.</div>
  </div>
- <div class="panel"><h3>Dispute (manual)</h3><div id="actions"></div><div id="out"></div></div>
+ <div class="panel"><h3>Dispute: the house's steps</h3><div id="actions"></div><div id="out"></div></div>
 </div>
 <div class="panel"><h3>Log</h3><div id="log"></div></div>
 </main>
@@ -30,7 +31,7 @@ async function poll(){let s;try{s=await (await fetch("/state")).json()}catch(e){
  $("hand").textContent="player "+s.player_cards.join(" ")+(s.player_cards.length?" ("+s.player_total+")":"")+" · dealer "+s.dealer_cards.join(" ")+(s.dealer_total==null?"":" ("+s.dealer_total+")")+" · "+s.status+" · hand "+s.hand+" ("+(s.hand_phase||"-")+"), depth "+s.depth;
  $("pot").textContent="on chain: "+s.balance_sat.toLocaleString()+" sat";const c=s.channel;$("chan").textContent="channel "+c.status+" (update "+c.seq+"): Player "+c.player.toLocaleString()+" / House "+c.house.toLocaleString()+(c.in_play?" · "+c.in_play.toLocaleString()+" in play":"");
  const M=$("modes");M.innerHTML="";for(const [k,v,h] of MODES){const b=document.createElement("button");b.textContent=k;b.className=s.mode===v?"on":"";b.title=h||"";b.onclick=()=>cmd("mode "+k);M.appendChild(b)}
- $("ap").textContent="autopilot: "+(s.autopilot?"ON":"OFF");$("ap").onclick=()=>cmd("autopilot "+(s.autopilot?"off":"on"));
+ $("ap").textContent="autopilot: "+(s.autopilot?"ON":"OFF");$("ap").onclick=()=>cmd("autopilot "+(s.autopilot?"off":"on"));$("ad").textContent="automatic disputes: "+(s.auto_disputes?"ON":"OFF");$("ad").onclick=()=>cmd("autodisputes "+(s.auto_disputes?"off":"on"));
  const A=$("actions");A.innerHTML="";for(const a of s.actions){const b=document.createElement("button");b.textContent=a.name;b.disabled=!a.enabled;b.title=a.hint;b.onclick=()=>cmd(a.cmd);A.appendChild(b);const h=document.createElement("span");h.className="hint";h.textContent=" "+a.hint;A.appendChild(h);A.appendChild(document.createElement("br"))}
  $("log").textContent=s.log.join("\n");$("log").scrollTop=$("log").scrollHeight;
 }

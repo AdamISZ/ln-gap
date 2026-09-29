@@ -193,7 +193,12 @@ pub struct Player {
     results: Vec<String>,
     log: Vec<String>,
     mode: Mode,
+    /// The house plays its own game moves (reveals, the dealer's forced
+    /// draws) and settles hands it won.
     autopilot: bool,
+    /// ... and also takes every dispute step by itself (off by default:
+    /// the presenter clicks them, "if the house refutes...").
+    auto_disputes: bool,
     done: BTreeSet<String>,
     /// Autopilot actions that failed, and when (retried after 10 s).
     failed: BTreeMap<String, u32>,
@@ -356,6 +361,7 @@ impl Player {
             log: Vec::new(),
             mode: Mode::Honest,
             autopilot: me == Role::Hub,
+            auto_disputes: false,
             done: BTreeSet::new(),
             failed: BTreeMap::new(),
             settle_sent: None,
@@ -1166,6 +1172,9 @@ impl Player {
             if self.done.contains(&key) || self.failed.get(&key).is_some_and(|t| now < t + 10) {
                 continue;
             }
+            if a.name != "settle" && !self.auto_disputes {
+                continue;
+            }
             let r = match a.name.as_str() {
                 "settle" => self.settle(),
                 // the house takes a stall on chain (a withholding house does not)
@@ -1541,6 +1550,7 @@ impl Player {
             balance_sat,
             mode: self.mode,
             autopilot: self.autopilot,
+            auto_disputes: self.auto_disputes,
             log: self.log.iter().rev().take(80).rev().cloned().collect(),
         }
     }
@@ -1561,7 +1571,8 @@ const HELP: &str = "commands:
                         disputes (force: force-close the channel, putting the hand on chain)
   close                 close the channel cooperatively (no hand in it)
   mode honest|wrongcard|drawat17|standon16|withhold   the house's next move
-  autopilot on|off
+  autopilot on|off      the house plays its own moves and settles its wins (default on)
+  autodisputes on|off   the house also takes every dispute step itself (default off)
   quit";
 
 impl Player {
@@ -1598,7 +1609,11 @@ impl Player {
             }
             "autopilot" => {
                 self.autopilot = arg.as_deref() != Some("off");
-                Ok(format!("autopilot {}", if self.autopilot { "on" } else { "off" }))
+                Ok(format!("autopilot (own moves and settling wins) {}", if self.autopilot { "on" } else { "off" }))
+            }
+            "autodisputes" => {
+                self.auto_disputes = arg.as_deref() != Some("off");
+                Ok(format!("automatic disputes {}", if self.auto_disputes { "on" } else { "off: click each step" }))
             }
             "claim" => self.claim(arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
             "counter" => self.counter(arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
@@ -1744,5 +1759,6 @@ pub struct Snapshot {
     pub balance_sat: u64,
     pub mode: Mode,
     pub autopilot: bool,
+    pub auto_disputes: bool,
     pub log: Vec<String>,
 }
