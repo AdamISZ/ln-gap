@@ -2699,6 +2699,52 @@ correctness is purely cryptographic, and values need not be small; about
 about 2^40 collisions). Rebuilding short values arithmetically from
 nibbles is rejected (a salt short enough to rebuild cannot hide).
 
+## D58. The blackjack demo runs in a real channel: hands settle by update, disputes by force-close
+
+Date: 2026-09-29. Context: the talk demos. A hand is over in about a
+minute, but its payout needed an on-chain claim and a timeout; the user
+wanted several honest hands settled at once, then a cheating hand taken
+on chain, and asked for an actual Poon-Dryja channel rather than a
+cooperative-spend leaf standing in for one. BUILT the same day
+(CHANNEL_DEMO_PLAN.md).
+
+**What was already there.** `lngap-channel`'s `ChannelParty` (commitments,
+revocation, penalty, force-close, cooperative close, contract outputs with
+graphs signed for both versions) had never carried a PoS game: the PoS
+demos funded the contract output directly. `PosInstance` already had the
+`ContractOutput` trait's `tree(ctx)` and `graph(ctx, op, prev)`, with the
+revoke leaf in its tree and `to_self_delay` on the broadcaster's claims,
+so the impl is a delegation.
+
+**The pieces.** `impl ContractOutput for PosInstance`; `channel::wire`, a
+serde form of the update protocol whose `Propose` carries contract ids
+(each party resolves them to the instance it built itself; a mismatch
+then fails the commitment signatures); in the demo, a file bus under
+`channel/bus/`, the channel opened from both parties' wallet coins, and a
+hand = a contract of its own (contract id = hand number: fresh per-hand
+keys and share commitments, a venue registry computed on request).
+
+**The rules.** Each party's channel policy accepts adding a hand only
+with each side's stake and deposit, and removing it only with the
+cooperative payout of the result it saw itself (D56's deposits return).
+The winner proposes the settlement (the player for a win or push, the
+house for its wins); a party that cannot get a settlement force-closes,
+and the hand is disputed off the confirmed commitment version's graph,
+unchanged. The house's autopilot does not take a finished hand on chain
+unless its settlement went unanswered for 30 s. A party reads the venue
+before the bus, so a settlement proposal finds the final seal already
+read.
+
+**Measured (regtest).** Three honest hands, updates 1-6, no chain
+transaction; a wrong-card hand: commitment (180 vB), claim (197 vB,
+after `to_self_delay`), refutation (36,690 vB), `bj_card_2` disprove
+(4,926 vB). A second session: four hands (three player wins settled by
+the player, one house win by the house), then one cooperative close.
+`pos_channel` pins the same flow as a test.
+
+**Not in scope.** Routing, PTLCs, MuSig2 key-path funding (the funding
+output is a 2-of-2 script leaf), multiple hands at once.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
