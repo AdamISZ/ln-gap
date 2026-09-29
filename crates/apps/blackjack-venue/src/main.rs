@@ -34,7 +34,7 @@ use anyhow::{bail, Result};
 use lngap_channel::Role;
 
 fn usage() -> ! {
-    eprintln!("usage:\n  lngap-blackjack-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S] [--deposit SAT] [--web PORT]\n  lngap-blackjack-venue play player|house [--dir D] [--max-depth M] [--web PORT]");
+    eprintln!("usage:\n  lngap-blackjack-venue venue [--dir D] [--block-secs N] [--max-depth M] [--ell S] [--backoff S] [--margin S] [--start-secs S (default 15)] [--deposit SAT] [--web PORT]\n  lngap-blackjack-venue play player|house [--dir D] [--max-depth M] [--web PORT]");
     std::process::exit(2)
 }
 
@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut dir = PathBuf::from("blackjack-venue");
     let mut block_secs = 20u64;
-    let mut timing = Timing { ell: 60, backoff: 5, margin: 60, start_secs: 60, deposit: 250_000 };
+    let mut timing = Timing { ell: 60, backoff: 5, margin: 60, start_secs: 15, deposit: 250_000 };
     // a long hand: deal, reveal, 8 hits and their cards, stand, the dealer,
     // an ack, and the depth after it (the claim that ends the hand)
     let mut max_depth = 24u32;

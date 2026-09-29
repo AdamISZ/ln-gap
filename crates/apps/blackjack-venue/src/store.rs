@@ -1,5 +1,15 @@
-//! The shared directory: what the venue publishes and what the players
+//! The shared directory: what the venue publishes and what the two parties
 //! exchange. Everything is a JSON file; a reader polls.
+//!
+//! - `node.json`, `venue/params.json`: the node and the venue's rules;
+//! - `channel/`: the channel's opening (each party's offer: channel keys,
+//!   first revocation hashes, funding contribution; the funding witnesses;
+//!   `funded.json`) and its message bus (`channel/bus/<to>/`, one file per
+//!   wire envelope);
+//! - `hands/<h>/`: hand `h` (contract id `h`): the player's request, the
+//!   venue's registry for it, each party's offer (per-hand keys and share
+//!   commitments), the contract terms, the venue's registration, and the
+//!   venue's seals, flags and held submissions for the hand.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,16 +24,15 @@ use lngap_pos::SealedBlock;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-/// The venue's roster: five members, majority three (D50 amended, D53).
+/// The venue's roster: five members, majority three.
 pub const K: usize = 5;
 pub const GAME_ID: u16 = 1;
-pub const CONTRACT_ID: u32 = 1;
-/// The pot (both stakes) and the pre-sign fee per hop (the pair readout
-/// is ~37 kvB; the fee must clear the relay floor).
-pub const POT_SAT: u64 = 1_000_000;
+/// Each side's stake per hand (the pot is both), and each side's share of
+/// the channel.
+pub const STAKE_SAT: u64 = 500_000;
+pub const CHANNEL_SIDE_SAT: u64 = 3_000_000;
+/// The pre-sign fee per hop (the pair readout is ~37 kvB).
 pub const FEE_SAT: u64 = 60_000;
-/// The venue's content seed and the members' base seed (member `i` is
-/// seeded `SEED[0] + i`): the venue's secrets, known to the venue process.
 pub const VENUE_SEED: [u8; 32] = [0x66; 32];
 
 pub struct Store {
@@ -45,7 +54,6 @@ impl Store {
             return Ok(None);
         }
         let s = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
-        // a writer may be mid-write; treat a parse failure as "not yet"
         Ok(serde_json::from_str(&s).ok())
     }
 
@@ -78,6 +86,14 @@ impl Store {
         let _ = std::fs::remove_file(p);
     }
 
+    /// The hand ids with a directory, ascending.
+    pub fn hands(&self) -> Vec<u32> {
+        let d = self.path("hands");
+        let mut v: Vec<u32> = std::fs::read_dir(&d).map(|r| r.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok()).collect()).unwrap_or_default();
+        v.sort();
+        v
+    }
+
     // ----- paths -----
     pub fn node() -> &'static str {
         "node.json"
@@ -85,49 +101,58 @@ impl Store {
     pub fn params() -> &'static str {
         "venue/params.json"
     }
-    pub fn registry() -> &'static str {
-        "venue/registry.json"
-    }
-    /// Member `member`'s seal of depth `d` (D55: keyed by depth, sealed on
-    /// submission; two members may seal the same entry).
-    pub fn seal(d: u32, member: usize) -> String {
-        format!("venue/seals/{d:04}-{member}.json")
-    }
-    pub fn seals_dir() -> &'static str {
-        "venue/seals"
-    }
-    pub fn flags(d: u32) -> String {
-        format!("venue/flags/{d:04}.json")
-    }
-    /// Submissions an honest member would not seal, held for the venue
-    /// page's misbehaviour controls: after the due time (`late`), or not
-    /// signed by the mover (`refused`).
-    pub fn late_dir() -> &'static str {
-        "venue/late"
-    }
-    pub fn refused_dir() -> &'static str {
-        "venue/refused"
-    }
     pub fn web(r: Role) -> String {
         format!("players/{}/web.json", r.name())
     }
-    pub fn inbox_dir() -> &'static str {
-        "venue/inbox"
+    // the channel
+    pub fn chan_offer(r: Role) -> String {
+        format!("channel/offer-{}.json", r.name())
     }
-    pub fn offer(r: Role) -> String {
-        format!("players/{}/offer.json", r.name())
-    }
-    pub fn sigs(r: Role) -> String {
-        format!("players/{}/sigs.json", r.name())
-    }
-    pub fn contract() -> &'static str {
-        "players/contract.json"
-    }
-    pub fn ready(r: Role) -> String {
-        format!("players/{}/ready.json", r.name())
+    pub fn funding_wit(r: Role) -> String {
+        format!("channel/funding-wit-{}.json", r.name())
     }
     pub fn funded() -> &'static str {
-        "players/funded.json"
+        "channel/funded.json"
+    }
+    pub fn bus(r: Role) -> String {
+        format!("channel/bus/{}", r.name())
+    }
+    // a hand
+    fn hand(h: u32, rel: &str) -> String {
+        format!("hands/{h:04}/{rel}")
+    }
+    pub fn request(h: u32) -> String {
+        Store::hand(h, "request.json")
+    }
+    pub fn registry(h: u32) -> String {
+        Store::hand(h, "registry.json")
+    }
+    pub fn offer(h: u32, r: Role) -> String {
+        Store::hand(h, &format!("offer-{}.json", r.name()))
+    }
+    pub fn contract(h: u32) -> String {
+        Store::hand(h, "contract.json")
+    }
+    pub fn registered(h: u32) -> String {
+        Store::hand(h, "registered.json")
+    }
+    pub fn seal(h: u32, d: u32, member: usize) -> String {
+        Store::hand(h, &format!("venue/seals/{d:04}-{member}.json"))
+    }
+    pub fn seals_dir(h: u32) -> String {
+        Store::hand(h, "venue/seals")
+    }
+    pub fn flags(h: u32, d: u32) -> String {
+        Store::hand(h, &format!("venue/flags/{d:04}.json"))
+    }
+    pub fn late_dir(h: u32) -> String {
+        Store::hand(h, "venue/late")
+    }
+    pub fn refused_dir(h: u32) -> String {
+        Store::hand(h, "venue/refused")
+    }
+    pub fn inbox_dir(h: u32) -> String {
+        Store::hand(h, "venue/inbox")
     }
 }
 
@@ -136,34 +161,24 @@ pub struct NodeInfo {
     pub datadir: String,
 }
 
-/// The venue's parameters (D55): the clock and the members' rules; the
-/// game's own timetable (t0) is fixed by the contract.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VenueParams {
-    /// Seconds between Bitcoin blocks (independent of the venue).
     pub block_secs: u64,
     pub n: usize,
     pub threshold: u32,
     pub max_depth: u32,
-    /// Seconds per move (`ell`).
     pub ell: u32,
-    /// The mover's fallback: resubmit to the next member after this many
-    /// seconds without a seal.
     pub backoff: u32,
-    /// The claim margin `m` past a move's due time (median-time-past).
     pub margin: u32,
-    /// Seconds from the contract proposal to move 0's time `t0` (setup:
-    /// the graph is built and signed in between).
     pub start_secs: u32,
-    /// Each side's dispute deposit in sat (D56), inside the contract value.
     #[serde(default)]
     pub deposit: u64,
+    /// When the venue started (unix seconds): a party refuses files older
+    /// than this (a stale directory).
+    #[serde(default)]
+    pub started: u32,
 }
 
-/// A seal, as the venue publishes it: the attestation, the proposer
-/// reveal, when it was made, and whether an honest member would have made
-/// it (`late`: after the due time; `rogue`: an entry the mover did not
-/// sign) — the last two only by the venue page's misbehaviour controls.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BlockJson {
     pub depth: u32,
@@ -194,11 +209,11 @@ impl BlockJson {
         }
     }
 
-    pub fn to_block(&self) -> Result<SealedBlock> {
+    pub fn to_block(&self, contract: u32) -> Result<SealedBlock> {
         let hb: [u8; 96] = hex::decode(&self.header)?.try_into().map_err(|_| anyhow!("header is 96 bytes"))?;
         let secrets = self.secrets.iter().map(|s| Ok(SecretKey::from_slice(&hex::decode(s)?)?)).collect::<Result<Vec<_>>>()?;
         Ok(SealedBlock {
-            contract: CONTRACT_ID,
+            contract,
             header: Header(hb),
             entry: hex::decode(&self.entry)?,
             attestation: Attestation { secrets },
@@ -208,7 +223,6 @@ impl BlockJson {
     }
 }
 
-/// The members' flag scalars for a depth (index member; `None` = silent).
 pub type FlagsJson = Vec<Option<String>>;
 
 pub fn flags_to_json(f: &[Option<SecretKey>]) -> FlagsJson {
@@ -219,8 +233,6 @@ pub fn flags_from_json(f: &FlagsJson) -> Result<Vec<Option<SecretKey>>> {
     f.iter().map(|s| s.as_ref().map(|h| Ok(SecretKey::from_slice(&hex::decode(h)?)?)).transpose()).collect()
 }
 
-/// A submitted entry for depth `depth`, addressed to member `to` (the
-/// designated sealer, or the mover's fallback), at unix time `at`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct InboxEntry {
     pub from: String,
@@ -230,9 +242,6 @@ pub struct InboxEntry {
     pub at: u32,
 }
 
-/// A party as the game shows it: the channel's user is the Player, its
-/// counterparty the House. `Role` names the channel's two parties and never
-/// appears in the interface.
 pub fn side(r: Role) -> &'static str {
     match r {
         Role::User => "Player",
@@ -240,26 +249,35 @@ pub fn side(r: Role) -> &'static str {
     }
 }
 
-/// A transaction label or message as the interface shows it.
 pub fn ui(s: &str) -> String {
     s.replace("UserWins", "PlayerWins").replace("HubWins", "HouseWins")
 }
 
-/// Now, in unix seconds.
 pub fn unix_now() -> u32 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(0)
 }
 
-/// A party's public offer: its channel keys, its per-depth contract keys,
-/// and its sixteen share commitments (D57), hex.
+/// A party's channel offer: its channel keys, its revocation hashes for
+/// states 0 and 1, and its funding contribution (a coin at its payout
+/// script).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ChanOffer {
+    pub pubs: PartyPubKeys,
+    pub rev: [String; 2],
+    pub contrib_txid: String,
+    pub contrib_vout: u32,
+    pub contrib_value: u64,
+    pub contrib_spk: String,
+}
+
+/// A party's offer for hand `h`: its per-hand contract keys and its sixteen
+/// share commitments.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Offer {
-    pub pubs: PartyPubKeys,
     pub keys: Vec<(u32, PosKeyOffer)>,
     pub commits: Vec<String>,
 }
 
-/// Both offers' commitments, as the contract pins them.
 pub fn commitments(user: &Offer, hub: &Offer) -> Result<lngap_blackjack::Commitments> {
     let arr = |o: &Offer| -> Result<[[u8; 32]; lngap_blackjack::K]> {
         let v: Vec<[u8; 32]> = o.commits.iter().map(|h| hex::decode(h).ok().and_then(|b| b.try_into().ok()).ok_or_else(|| anyhow!("a commitment is 32 bytes"))).collect::<Result<_>>()?;
@@ -268,30 +286,16 @@ pub fn commitments(user: &Offer, hub: &Offer) -> Result<lngap_blackjack::Commitm
     Ok(lngap_blackjack::Commitments { player: arr(user)?, house: arr(hub)? })
 }
 
-/// The contract the user proposes: its output, and its timetable (D55:
-/// move `d` is due at `t0 + d·ell`; claims from the due time plus
-/// `margin`; `settle` from `deadline`, all unix times).
+/// Hand `h`'s terms, proposed by the player (D55's clock: move `d` due at
+/// `t0 + d·ell`; claims from the due time plus `margin`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ContractJson {
-    pub spk: String,
     pub value: u64,
     pub deadline: u32,
     pub t0: u32,
     pub ell: u32,
     pub margin: u32,
-    /// Each side's dispute deposit (D56): the value is the pot plus two.
-    #[serde(default)]
     pub deposit: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct FundedJson {
-    pub txid: String,
-    pub vout: u32,
-    pub value: u64,
-    pub spk: String,
-    pub height: u32,
-}
-
-/// A player's signatures on every pre-signed transaction, by label.
 pub type SigsJson = BTreeMap<String, String>;

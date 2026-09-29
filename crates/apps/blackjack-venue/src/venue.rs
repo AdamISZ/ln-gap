@@ -1,25 +1,24 @@
 //! The venue process: the regtest node, the roster, the clock (D55). Mines
-//! a Bitcoin block every `block_secs`, independently of the game. Seals
-//! each submitted entry on arrival, by the member it is addressed to (the
-//! designated sealer, or the mover's fallback), if that member is live and
-//! an honest member would seal it: the mover signed it and its due time
-//! has not passed. Flags every depth whose due time passes with no signed,
-//! timely seal. Funds the contract and registers it (its authorship check,
-//! from both parties' offers, with the share commitments: honest members
-//! seal only an entry whose declared reveals open, D57). With `--web` it also serves its page: the
-//! depth timeline and the misbehaviour controls (silence a member; seal a
-//! late submission; seal an unsigned one as a rogue).
+//! a Bitcoin block every `block_secs`, independently of the game. For each
+//! hand the player requests, computes the venue's registry (the hand is a
+//! contract of its own, with its own tables), then registers the hand's
+//! check (the movers' state keys and both sides' share commitments, D57)
+//! once both offers and the terms are in. Seals each submitted entry on
+//! arrival by the member it is addressed to, if an honest member would;
+//! flags every due move with no valid seal. Its page shows the latest
+//! hand's timeline and the misbehaviour controls. The channel is the
+//! parties' own: the venue neither funds nor sees it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use bitcoin::{Amount, ScriptBuf};
+use bitcoin::Amount;
 use lngap_btc::regtest::Regtest;
 use lngap_channel::Role;
 use lngap_pos::instance::{self, Game, GameClock, PosInstance};
-use lngap_pos::{Member, PosMiner, Registry};
+use lngap_pos::{Member, PosMiner};
 use tiny_http::{Method, Response, Server};
 
 use crate::store::*;
@@ -33,7 +32,6 @@ fn members() -> Vec<Member> {
 struct SealView {
     proposer: usize,
     entry: String,
-    /// Seconds after t0.
     sealed_at: i64,
     late: bool,
     rogue: bool,
@@ -43,7 +41,6 @@ struct SealView {
 struct DepthView {
     depth: u32,
     mover: String,
-    /// Seconds after t0.
     due: i64,
     designated: usize,
     seals: Vec<SealView>,
@@ -54,9 +51,9 @@ struct DepthView {
 struct VenueState {
     height: u32,
     mtp: u32,
-    /// Seconds since t0 (negative before move 0's time).
     clock: Option<i64>,
     t0: Option<u32>,
+    hand: Option<u32>,
     ell: u32,
     backoff: u32,
     margin: u32,
@@ -87,11 +84,9 @@ struct Venue {
     store: Store,
     rt: Regtest,
     miner: PosMiner,
-    registry: Registry,
     params: VenueParams,
-    /// The registered game's clock, once the contract is funded.
-    clock: Option<GameClock>,
-    ready: bool,
+    /// Registered hands' clocks.
+    clocks: BTreeMap<u32, GameClock>,
     next_block: Instant,
 }
 
@@ -100,67 +95,67 @@ impl Venue {
         self.rt.height().unwrap_or(0)
     }
 
-    /// The seals published for depth `d`, by member.
-    fn seals(&self, d: u32) -> BTreeMap<usize, BlockJson> {
-        (0..self.miner.n()).filter_map(|i| self.store.read::<BlockJson>(&Store::seal(d, i)).ok().flatten().map(|b| (i, b))).collect()
+    fn latest(&self) -> Option<u32> {
+        self.clocks.keys().next_back().copied()
     }
 
-    /// Whether depth `d` holds a seal an honest member made: signed, timely.
-    fn has_honest_seal(&self, d: u32) -> bool {
-        self.seals(d).values().any(|b| !b.late && !b.rogue)
+    fn seals(&self, h: u32, d: u32) -> BTreeMap<usize, BlockJson> {
+        (0..self.miner.n()).filter_map(|i| self.store.read::<BlockJson>(&Store::seal(h, d, i)).ok().flatten().map(|b| (i, b))).collect()
+    }
+
+    fn has_honest_seal(&self, h: u32, d: u32) -> bool {
+        self.seals(h, d).values().any(|b| !b.late && !b.rogue)
     }
 
     fn state(&self) -> VenueState {
         let now = unix_now();
-        let t0 = self.clock.map(|c| c.t0);
+        let hand = self.latest();
+        let clock = hand.and_then(|h| self.clocks.get(&h).copied());
+        let t0 = clock.map(|c| c.t0);
         let rel = |t: u32| t0.map(|z| i64::from(t) - i64::from(z)).unwrap_or(0);
         let mut depths = Vec::new();
-        if let Some(c) = self.clock {
+        if let (Some(h), Some(c)) = (hand, clock) {
             for d in 1..=self.params.max_depth {
-                let seals = self.seals(d);
-                let flags = self.store.read::<FlagsJson>(&Store::flags(d)).ok().flatten().map(|f| f.iter().filter(|x| x.is_some()).count());
-                // the timeline runs to the first move neither sealed, flagged
-                // nor yet due
-                if seals.is_empty() && flags.is_none() && c.t0 + d * c.ell > now && d > 1 && self.seals(d - 1).is_empty() {
+                let seals = self.seals(h, d);
+                let flags = self.store.read::<FlagsJson>(&Store::flags(h, d)).ok().flatten().map(|f| f.iter().filter(|x| x.is_some()).count());
+                if seals.is_empty() && flags.is_none() && c.t0 + d * c.ell > now && d > 1 && self.seals(h, d - 1).is_empty() {
                     break;
                 }
-                let describe = |b: &BlockJson| format!("an entry of {} bytes (head {}…)", b.entry.len() / 2, &b.header[80..96]);
                 depths.push(DepthView {
                     depth: d,
                     mover: side(instance::mover_at(d)).into(),
                     due: rel(c.t0 + d * c.ell),
-                    designated: lngap_pos::rotation(CONTRACT_ID, d, self.miner.n()),
-                    seals: seals.values().map(|b| SealView { proposer: b.proposer, entry: describe(b), sealed_at: rel(b.sealed_at), late: b.late, rogue: b.rogue }).collect(),
+                    designated: lngap_pos::rotation(h, d, self.miner.n()),
+                    seals: seals.values().map(|b| SealView { proposer: b.proposer, entry: format!("an entry of {} bytes", b.entry.len() / 2), sealed_at: rel(b.sealed_at), late: b.late, rogue: b.rogue }).collect(),
                     flags,
                 });
             }
         }
-        let names = |dir: &str| -> Vec<String> {
-            self.store.list(dir).unwrap_or_default().iter().filter_map(|p| std::fs::read_to_string(p).ok()).filter_map(|s| serde_json::from_str::<InboxEntry>(&s).ok()).map(|e| format!("{}'s move {} (to member {})", e.from, e.depth, e.to)).collect()
+        let names = |dir: String| -> Vec<String> {
+            self.store.list(&dir).unwrap_or_default().iter().filter_map(|p| std::fs::read_to_string(p).ok()).filter_map(|s| serde_json::from_str::<InboxEntry>(&s).ok()).map(|e| format!("{}'s move {} (to member {})", e.from, e.depth, e.to)).collect()
         };
         VenueState {
             height: self.height(),
             mtp: self.rt.mtp().unwrap_or(0),
             clock: t0.map(|z| i64::from(now) - i64::from(z)),
             t0,
+            hand,
             ell: self.params.ell,
             backoff: self.params.backoff,
             margin: self.params.margin,
             block_secs: self.params.block_secs,
             next_block_secs: self.next_block.saturating_duration_since(Instant::now()).as_secs(),
-            ready: self.ready,
+            ready: hand.is_some(),
             n: self.miner.n(),
-            threshold: self.registry.threshold,
+            threshold: self.params.threshold,
             silent: (0..self.miner.n()).filter(|i| self.miner.is_silent(*i)).collect(),
             depths,
-            inbox: names(Store::inbox_dir()),
-            late: names(Store::late_dir()),
-            refused: names(Store::refused_dir()),
+            inbox: hand.map(|h| names(Store::inbox_dir(h))).unwrap_or_default(),
+            late: hand.map(|h| names(Store::late_dir(h))).unwrap_or_default(),
+            refused: hand.map(|h| names(Store::refused_dir(h))).unwrap_or_default(),
         }
     }
 
-    /// Move a submission file into `dir` (a queue for the misbehaviour
-    /// controls).
     fn park(&self, p: &Path, dir: &str) -> Result<()> {
         let dest = self.store.dir.join(dir);
         std::fs::create_dir_all(&dest)?;
@@ -168,64 +163,83 @@ impl Venue {
         Ok(())
     }
 
-    /// Every submission in the inbox: the addressed member seals it if it
-    /// is live and an honest member would (signed, timely); a late one is
-    /// held for the late control, an unsigned one for the rogue control.
+    /// New hands: the registry on request; the registration once the
+    /// offers and the terms are in.
+    fn hands(&mut self) -> Result<()> {
+        for h in self.store.hands() {
+            if self.store.exists(&Store::request(h)) && !self.store.exists(&Store::registry(h)) {
+                let t = Instant::now();
+                let registry = self.miner.registry(h, self.params.max_depth)?;
+                self.store.write(&Store::registry(h), &registry)?;
+                println!("venue: hand {h}: its registry ({} tables) in {:.1}s", self.params.max_depth + 1, t.elapsed().as_secs_f64());
+            }
+            if self.clocks.contains_key(&h) || !self.store.exists(&Store::registry(h)) {
+                continue;
+            }
+            let (Some(user), Some(hub), Some(c)) = (self.store.read::<Offer>(&Store::offer(h, Role::User))?, self.store.read::<Offer>(&Store::offer(h, Role::Hub))?, self.store.read::<ContractJson>(&Store::contract(h))?) else { continue };
+            let registry = self.store.read(&Store::registry(h))?.ok_or_else(|| anyhow!("registry"))?;
+            let keys = instance::collect_keys(&user.keys, &hub.keys, self.params.max_depth)?;
+            let clock = GameClock { t0: c.t0, ell: c.ell, margin: c.margin };
+            let inst = PosInstance::new(h, Amount::from_sat(c.value), c.deadline, GAME_ID, Game::Blackjack, clock, keys, registry)?.with_commitments(commitments(&user, &hub)?)?;
+            self.miner.register(h, self.params.max_depth, inst.authorship()).map_err(|e| anyhow!(e))?;
+            self.clocks.insert(h, clock);
+            self.store.write(&Store::registered(h), &serde_json::json!({ "hand": h }))?;
+            println!("venue: hand {h} registered (move 1 due {}s from now)", i64::from(c.t0 + c.ell) - i64::from(unix_now()));
+        }
+        Ok(())
+    }
+
     fn process_inbox(&mut self) -> Result<()> {
-        let Some(clock) = self.clock else { return Ok(()) };
-        for p in self.store.list(Store::inbox_dir())? {
-            let Some(e) = std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<InboxEntry>(&s).ok()) else {
-                continue;
-            };
-            let d = e.depth;
-            if self.miner.is_silent(e.to) {
-                println!("venue: {}'s move {d} was sent to member {}, which is SILENT: no seal (the mover falls back after the backoff)", e.from, e.to);
-                self.store.remove(&p);
-                continue;
-            }
-            let now = unix_now();
-            let due = clock.t0 + d * clock.ell;
-            if now > due {
-                println!("venue: {}'s move {d} reached member {} at t+{}s, after its due time t+{}s: an honest member does not seal it (held for the LATE control)", e.from, e.to, i64::from(now) - i64::from(clock.t0), due - clock.t0);
-                self.park(&p, Store::late_dir())?;
-                continue;
-            }
-            let entry = hex::decode(&e.entry)?;
-            match self.miner.seal_entry(CONTRACT_ID, d, e.to, &entry) {
-                Ok(block) => {
-                    let already = self.seals(d).values().any(|b| b.header == BlockJson::from_block(&block, now, false, false).header);
-                    self.store.write(&Store::seal(d, e.to), &BlockJson::from_block(&block, now, false, false))?;
-                    println!("venue: t+{}s: member {} seals {}'s move {d} on submission{}", i64::from(now) - i64::from(clock.t0), e.to, e.from, if already { " (the same head another member already sealed: the same attestation)" } else { "" });
+        let hands: Vec<(u32, GameClock)> = self.clocks.iter().map(|(h, c)| (*h, *c)).collect();
+        for (h, clock) in hands {
+            for p in self.store.list(&Store::inbox_dir(h))? {
+                let Some(e) = std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<InboxEntry>(&s).ok()) else { continue };
+                let d = e.depth;
+                if self.miner.is_silent(e.to) {
+                    println!("venue: hand {h}: {}'s move {d} was sent to member {}, which is SILENT", e.from, e.to);
                     self.store.remove(&p);
+                    continue;
                 }
-                Err(err) => {
-                    println!("venue: member {} refuses {}'s move {d}: not signed, or a declared share does not open (held for the ROGUE control) [{err}]", e.to, e.from);
-                    self.park(&p, Store::refused_dir())?;
+                let now = unix_now();
+                let due = clock.t0 + d * clock.ell;
+                if now > due {
+                    println!("venue: hand {h}: {}'s move {d} arrived after its due time: held for the LATE control", e.from);
+                    self.park(&p, &Store::late_dir(h))?;
+                    continue;
+                }
+                match self.miner.seal_entry(h, d, e.to, &hex::decode(&e.entry)?) {
+                    Ok(block) => {
+                        self.store.write(&Store::seal(h, d, e.to), &BlockJson::from_block(&block, now, false, false))?;
+                        println!("venue: hand {h}: t+{}s: member {} seals {}'s move {d}", i64::from(now) - i64::from(clock.t0), e.to, e.from);
+                        self.store.remove(&p);
+                    }
+                    Err(err) => {
+                        println!("venue: hand {h}: member {} refuses {}'s move {d}: not signed, or a declared share does not open (held for the ROGUE control) [{err}]", e.to, e.from);
+                        self.park(&p, &Store::refused_dir(h))?;
+                    }
                 }
             }
         }
         Ok(())
     }
 
-    /// Flag every owed depth whose due time has passed with no honest seal
-    /// (owed: the depth after the deepest honestly sealed one, and below).
     fn deadlines(&mut self) -> Result<()> {
-        let Some(clock) = self.clock else { return Ok(()) };
         let now = unix_now();
-        let deepest = (1..=self.params.max_depth).filter(|d| self.has_honest_seal(*d)).max().unwrap_or(0);
-        for d in 1..=(deepest + 1).min(self.params.max_depth) {
-            if self.store.exists(&Store::flags(d)) || now <= clock.t0 + d * clock.ell || self.has_honest_seal(d) {
-                continue;
+        let hands: Vec<(u32, GameClock)> = self.clocks.iter().map(|(h, c)| (*h, *c)).collect();
+        for (h, clock) in hands {
+            let deepest = (1..=self.params.max_depth).filter(|d| self.has_honest_seal(h, *d)).max().unwrap_or(0);
+            for d in 1..=(deepest + 1).min(self.params.max_depth) {
+                if self.store.exists(&Store::flags(h, d)) || now <= clock.t0 + d * clock.ell || self.has_honest_seal(h, d) {
+                    continue;
+                }
+                let f = self.miner.flag(h, d);
+                self.store.write(&Store::flags(h, d), &flags_to_json(&f))?;
+                println!("venue: hand {h}: move {d} has no valid seal at its due time — {} of {} members flag it", f.iter().filter(|x| x.is_some()).count(), self.miner.n());
             }
-            let f = self.miner.flag(CONTRACT_ID, d);
-            self.store.write(&Store::flags(d), &flags_to_json(&f))?;
-            println!("venue: t+{}s: move {d} (due t+{}s) has no signed seal — {} of {} members flag it", i64::from(now) - i64::from(clock.t0), d * clock.ell, f.iter().filter(|x| x.is_some()).count(), self.miner.n());
         }
         Ok(())
     }
 
-    /// Take a held submission for depth `d` (any depth if `None`) from
-    /// `dir`.
     fn take_held(&self, dir: &str, d: Option<u32>) -> Result<InboxEntry> {
         for p in self.store.list(dir)? {
             if let Some(e) = std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<InboxEntry>(&s).ok()) {
@@ -238,31 +252,22 @@ impl Venue {
         Err(anyhow!("no held submission{} in {dir}", d.map(|d| format!(" for move {d}")).unwrap_or_default()))
     }
 
-    /// The misbehaviour control: member `by` seals a LATE submission (a
-    /// signed move that arrived after its due time) — the D50 fixture.
     fn seal_late(&mut self, d: Option<u32>, by: usize) -> Result<String> {
+        let h = self.latest().ok_or_else(|| anyhow!("no hand"))?;
         anyhow::ensure!(by < self.miner.n(), "no member {by}");
-        let e = self.take_held(Store::late_dir(), d)?;
-        let block = self.miner.seal_entry(CONTRACT_ID, e.depth, by, &hex::decode(&e.entry)?).map_err(|err| anyhow!(err))?;
-        let now = unix_now();
-        self.store.write(&Store::seal(e.depth, by), &BlockJson::from_block(&block, now, true, false))?;
-        let msg = format!("member {by} seals {}'s move {} LATE (after its due time; the members' flags stand)", e.from, e.depth);
-        println!("venue: {msg}");
-        Ok(msg)
+        let e = self.take_held(&Store::late_dir(h), d)?;
+        let block = self.miner.seal_entry(h, e.depth, by, &hex::decode(&e.entry)?).map_err(|err| anyhow!(err))?;
+        self.store.write(&Store::seal(h, e.depth, by), &BlockJson::from_block(&block, unix_now(), true, false))?;
+        Ok(format!("member {by} seals {}'s move {} LATE (the members' flags stand)", e.from, e.depth))
     }
 
-    /// The misbehaviour control: member `by` seals an entry honest members
-    /// refused (not signed by the mover) — provable misbehaviour, inert in
-    /// the contract.
     fn seal_rogue(&mut self, d: Option<u32>, by: usize) -> Result<String> {
+        let h = self.latest().ok_or_else(|| anyhow!("no hand"))?;
         anyhow::ensure!(by < self.miner.n(), "no member {by}");
-        let e = self.take_held(Store::refused_dir(), d)?;
-        let block = self.miner.seal_unchecked(CONTRACT_ID, e.depth, by, &hex::decode(&e.entry)?).map_err(|err| anyhow!(err))?;
-        let now = unix_now();
-        self.store.write(&Store::seal(e.depth, by), &BlockJson::from_block(&block, now, false, true))?;
-        let msg = format!("member {by} (ROGUE) seals {}'s unsigned entry for move {}: attested, provably not the mover's", e.from, e.depth);
-        println!("venue: {msg}");
-        Ok(msg)
+        let e = self.take_held(&Store::refused_dir(h), d)?;
+        let block = self.miner.seal_unchecked(h, e.depth, by, &hex::decode(&e.entry)?).map_err(|err| anyhow!(err))?;
+        self.store.write(&Store::seal(h, e.depth, by), &BlockJson::from_block(&block, unix_now(), false, true))?;
+        Ok(format!("member {by} (ROGUE) seals {}'s refused entry for move {}: attested, provably not a valid move", e.from, e.depth))
     }
 
     fn exec(&mut self, cmd: &str) -> Result<String> {
@@ -273,7 +278,7 @@ impl Venue {
                 let i: usize = i.parse()?;
                 anyhow::ensure!(i < self.miner.n(), "no member {i}");
                 self.miner.silence(i);
-                Ok(format!("member {i} is silent: it seals nothing and flags nothing"))
+                Ok(format!("member {i} is silent"))
             }
             ["wake", i] => {
                 let i: usize = i.parse()?;
@@ -289,25 +294,12 @@ impl Venue {
             _ => Err(anyhow!("unknown command (silence <i> | wake <i> | late [d|any] [member] | rogue [d|any] [member] | mine)")),
         }
     }
-
-    /// Register the funded contract: its clock, and its authorship check
-    /// from both players' offers (the movers' per-depth state keys).
-    fn register(&mut self, c: &ContractJson) -> Result<()> {
-        let user: Offer = self.store.read(&Store::offer(Role::User))?.ok_or_else(|| anyhow!("no user offer"))?;
-        let hub: Offer = self.store.read(&Store::offer(Role::Hub))?.ok_or_else(|| anyhow!("no hub offer"))?;
-        let keys = instance::collect_keys(&user.keys, &hub.keys, self.params.max_depth)?;
-        let clock = GameClock { t0: c.t0, ell: c.ell, margin: c.margin };
-        let inst = PosInstance::new(CONTRACT_ID, Amount::from_sat(c.value), c.deadline, GAME_ID, Game::Blackjack, clock, keys, self.registry.clone())?.with_commitments(commitments(&user, &hub)?)?;
-        self.miner.register(CONTRACT_ID, self.params.max_depth, inst.authorship()).map_err(|e| anyhow!(e))?;
-        self.clock = Some(clock);
-        Ok(())
-    }
 }
 
 pub fn run(dir: PathBuf, block_secs: u64, max_depth: u32, web: Option<u16>, timing: crate::Timing) -> Result<()> {
     let store = Store::new(dir.clone());
     std::fs::create_dir_all(&dir)?;
-    for stale in ["venue", "players", "node.json"] {
+    for stale in ["venue", "players", "channel", "hands", "node.json"] {
         let p = dir.join(stale);
         if p.is_dir() {
             std::fs::remove_dir_all(&p)?;
@@ -318,58 +310,30 @@ pub fn run(dir: PathBuf, block_secs: u64, max_depth: u32, web: Option<u16>, timi
     println!("venue: starting a regtest node in {}", dir.join("node").display());
     let rt = Regtest::start_in(dir.join("node"), 201).context("starting bitcoind (set LNGAP_BITCOIND if it is not on PATH)")?;
     store.write(Store::node(), &NodeInfo { datadir: rt.datadir().display().to_string() })?;
-
-    let mut miner = PosMiner::new(VENUE_SEED, members());
-    print!("venue: computing the contract's content registry for depths 0..={max_depth} ({} tables)... ", max_depth + 1);
-    let t = Instant::now();
-    let registry = miner.registry(CONTRACT_ID, max_depth)?;
-    println!("{:.1}s", t.elapsed().as_secs_f64());
-    store.write(Store::registry(), &registry)?;
-    let n = registry.n();
-    let threshold = registry.threshold;
-    println!("venue: {n} members sharing one content key, flag threshold {threshold} of {n} (the majority); the designated sealer of a move is the rotation, any member may seal");
-    let params = VenueParams { block_secs, n, threshold, max_depth, ell: timing.ell, backoff: timing.backoff, margin: timing.margin, start_secs: timing.start_secs, deposit: timing.deposit };
+    let miner = PosMiner::new(VENUE_SEED, members());
+    let n = miner.n();
+    let threshold = (n as u32) / 2 + 1;
+    let params = VenueParams { block_secs, n, threshold, max_depth, ell: timing.ell, backoff: timing.backoff, margin: timing.margin, start_secs: timing.start_secs, deposit: timing.deposit, started: unix_now() };
     store.write(Store::params(), &params)?;
-    println!("venue: a move every {}s (the mover falls back after {}s); claims {}s after a move's due time; Bitcoin blocks every {block_secs}s, independently", timing.ell, timing.backoff, timing.margin);
+    println!("venue: {n} members sharing one content key, flag threshold {threshold}; a move every {}s (fallback after {}s); claims {}s past a due time; Bitcoin blocks every {block_secs}s", timing.ell, timing.backoff, timing.margin);
     let server = match web {
         Some(port) => {
             let s = Server::http(("127.0.0.1", port)).map_err(|e| anyhow!("binding 127.0.0.1:{port}: {e}"))?;
-            println!("venue: browse http://127.0.0.1:{port} (the dashboard at /dashboard once the players are up)");
+            println!("venue: browse http://127.0.0.1:{port} (the dashboard at /dashboard once the parties are up)");
             Some(s)
         }
         None => None,
     };
-    let mut v = Venue { store, rt, miner, registry, params, clock: None, ready: false, next_block: Instant::now() + Duration::from_secs(block_secs) };
-    println!("venue: waiting for the players' contract (both `play` processes must be up)...");
-
-    // phase 1: fund and register the contract when proposed; phase 2: wait
-    // for both players to be ready; throughout: mine on the block clock,
-    // seal submissions, flag deadlines, serve requests.
-    let mut funded = false;
+    let mut v = Venue { store, rt, miner, params, clocks: BTreeMap::new(), next_block: Instant::now() + Duration::from_secs(block_secs) };
+    println!("venue: waiting for hands (the parties open their channel themselves)...");
     loop {
-        if !funded {
-            if let Some(c) = v.store.read::<ContractJson>(Store::contract())? {
-                let spk = ScriptBuf::from_bytes(hex::decode(&c.spk)?);
-                let (op, prev) = v.rt.fund(&spk, Amount::from_sat(c.value))?;
-                let h = v.rt.height()?;
-                v.store.write(Store::funded(), &FundedJson { txid: op.txid.to_string(), vout: op.vout, value: prev.value.to_sat(), spk: c.spk.clone(), height: h })?;
-                v.register(&c)?;
-                println!("venue: funded the contract output {}:{} with {} sat at height {h}; registered it (move 1 due {}s from now); waiting for both players to finish signing...", op.txid, op.vout, c.value, i64::from(c.t0 + c.ell) - i64::from(unix_now()));
-                funded = true;
-            }
-        } else if !v.ready && v.store.exists(&Store::ready(Role::User)) && v.store.exists(&Store::ready(Role::Hub)) {
-            v.ready = true;
-            println!("venue: both ready. Ctrl-C stops the node.");
-        }
-        if funded {
-            v.process_inbox()?;
-            v.deadlines()?;
-        }
+        v.hands()?;
+        v.process_inbox()?;
+        v.deadlines()?;
         if Instant::now() >= v.next_block {
             v.next_block = Instant::now() + Duration::from_secs(block_secs);
             v.rt.mine(1)?;
         }
-        // requests, or a short sleep
         match &server {
             Some(s) => {
                 if let Some(mut req) = s.recv_timeout(Duration::from_millis(250))? {

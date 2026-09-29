@@ -27,7 +27,7 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
 .hint{color:var(--muted);font-size:12px}
 </style></head>
 <body>
-<header><b>you are the PLAYER</b><span id="clock"></span><span id="turn"></span><span id="pot"></span></header>
+<header><b>you are the PLAYER</b><span id="chan"></span><span id="clock"></span><span id="pot"></span></header>
 <main>
 <div>
   <div id="table">
@@ -35,8 +35,9 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
     <div class="row"><h4>You <span class="total" id="pt"></span></h4><div class="cards" id="player"></div></div>
     <div id="result"></div>
   </div>
+  <div class="panel" style="margin-top:12px"><h3>The channel</h3><div id="chaninfo"></div><div class="hint" id="results"></div></div>
   <div class="panel" style="margin-top:12px">
-    <h3>Your move</h3>
+    <h3>Your hand</h3>
     <div id="moves"></div>
     <div class="hint" id="movehint"></div>
   </div>
@@ -55,23 +56,26 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
 </div>
 </main>
 <script>
-const $=id=>document.getElementById(id);let snap=null;
+const $=id=>document.getElementById(id);let snap=null;const MOVES=["new hand","deal","hit","stand","settle"];
 async function cmd(c){const r=await (await fetch("/cmd",{method:"POST",body:JSON.stringify({cmd:c})})).json();$("out").textContent=(r.ok?"":"! ")+r.output;await poll();return r}
 function cards(el,list){el.innerHTML="";for(const c of list){const d=document.createElement("div");d.className="card"+(c==="?"?" down":"");d.textContent=c==="?"?"":c;el.appendChild(d)}}
 async function poll(){
   try{snap=await (await fetch("/state")).json()}catch(e){return}
-  $("clock").textContent="t+"+snap.now+"s · move "+(snap.depth+1)+" due t+"+snap.next_due+"s ("+(snap.next_due-snap.now)+"s) · Bitcoin height "+snap.height+", MTP t+"+snap.mtp+"s";
-  $("turn").textContent="depth "+snap.depth+" · the "+snap.to_move+" to move";
-  $("pot").textContent="payout address: "+snap.balance_sat.toLocaleString()+" sat";
+  const c=snap.channel;
+  $("chan").textContent="channel "+c.status+" (update "+c.seq+"): Player "+c.player.toLocaleString()+" / House "+c.house.toLocaleString()+" sat"+(c.in_play?" · "+c.in_play.toLocaleString()+" in play":"");
+  $("clock").textContent=(snap.hand?"hand "+snap.hand+" ("+(snap.hand_phase||"")+")"+(snap.hand_phase==="Playing"?" · move "+(snap.depth+1)+" due in "+(snap.next_due-snap.now)+"s":""):"no hand yet")+" · Bitcoin height "+snap.height;
+  $("pot").textContent="on chain: "+snap.balance_sat.toLocaleString()+" sat";
+  $("chaninfo").innerHTML="<b>"+c.status+"</b>, update "+c.seq+": the Player holds <b>"+c.player.toLocaleString()+"</b> sat, the House <b>"+c.house.toLocaleString()+"</b>"+(c.in_play?", <b>"+c.in_play.toLocaleString()+"</b> in the hand's contract":"");
+  $("results").textContent=snap.results.length?("settled: "+snap.results.join(" · ")):"";
   cards($("dealer"),snap.dealer_cards);cards($("player"),snap.player_cards);
   $("pt").textContent=snap.player_cards.length?"("+snap.player_total+")":"";
   $("dt").textContent=snap.dealer_total==null?"":"("+snap.dealer_total+")";
   $("result").textContent=snap.terminal?snap.status.toUpperCase():"";
   const M=$("moves");M.innerHTML="";const hints=[];
-  for(const a of snap.actions){if(!["deal","hit","stand","ack"].includes(a.name))continue;const b=document.createElement("button");b.textContent=a.name.toUpperCase();b.className="primary";b.disabled=!a.enabled;b.title=a.hint;b.onclick=()=>cmd(a.cmd);M.appendChild(b);if(a.enabled)hints.push(a.name+": "+a.hint)}
+  for(const a of snap.actions){if(!MOVES.includes(a.name))continue;const b=document.createElement("button");b.textContent=a.name.toUpperCase();b.className="primary";b.disabled=!a.enabled;b.title=a.hint;b.onclick=()=>cmd(a.cmd);M.appendChild(b);if(a.enabled)hints.push(a.name+": "+a.hint)}
   $("movehint").textContent=hints.join(" · ");
   const A=$("actions");A.innerHTML="";
-  for(const a of snap.actions){if(["deal","hit","stand","ack"].includes(a.name))continue;const btn=document.createElement("button");btn.textContent=a.name;btn.disabled=!a.enabled;btn.title=a.hint;
+  for(const a of snap.actions){if(MOVES.includes(a.name))continue;const btn=document.createElement("button");btn.textContent=a.name;btn.disabled=!a.enabled;btn.title=a.hint;
     btn.onclick=()=>{let c=a.cmd;const d=$("depth").value.trim();if((a.name==="claim"||a.name==="counter")&&d)c=a.name+" "+d;if(a.name==="disprove"&&$("leaf").value)c+=" "+$("leaf").value;cmd(c)};
     A.appendChild(btn);const h=document.createElement("span");h.className="hint";h.textContent=" "+a.hint;A.appendChild(h);A.appendChild(document.createElement("br"))}
   const L=$("leaf");const cur=L.value;L.innerHTML='<option value="">the leaf that fires</option>';for(const d of snap.disproves){const o=document.createElement("option");o.value=d.name;o.textContent=d.name;L.appendChild(o)}L.value=cur;
