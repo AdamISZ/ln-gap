@@ -429,6 +429,25 @@ A venue may additionally attach evidence leaves to the bond, spendable
 by anyone holding a proof of equivocation; without covenants such a
 spend is a fee race, so the bond ends as miner fee, a burn in effect.
 
+The two penalties suit two different kinds of fault. A
+\emph{self-contradiction} (two statements under the member's own keys
+that cannot both be honest) is provable without reference to time, and
+an honest member never produces one as long as it keeps its state: it
+records a seal before releasing it, never flags a move it sealed, and
+claims a fee only after its seal is out. A member that loses that state
+and contradicts itself is in the position of a Lightning node that
+loses its channel state and broadcasts a revoked one, and the same
+answer applies: keeping state is the operator's duty. Only
+self-contradictions are fit for burning. A \emph{timing fault} (a flag
+of a move that was in fact published, a seal the record shows as late)
+depends on clocks and propagation, and an honest member can commit one
+through skew or a delayed message. It is at most grounds for ejection,
+and only outside a tolerance for skew and propagation
+(Section~\ref{sec:accountable}). Scaling a penalty with how many
+members fault together, as Ethereum's proof of stake does~\cite{ethslash},
+would separate isolated accidents from coordinated theft; we leave it
+as a direction for future work.
+
 \paragraph{The resulting condition.} An equivocation that needs $t$
 members is irrational when
 \[
@@ -1624,7 +1643,8 @@ quickly; the audit layer commits its history to Bitcoin periodically
 (an \texttt{OP\_RETURN} per hour, say, for all contracts at once), which
 fixes it against rewriting at an amortised cost. A committee majority
 that flags a move the audit layer shows as published, or lets stand a
-seal the audit layer shows as late, is then caught in either direction,
+seal the audit layer shows as late, by more than a tolerance for clock
+skew and propagation, is then caught in either direction,
 without per-move Bitcoin cost. The pattern is familiar: a small
 committee that a constrained verifier can check, attesting to a larger
 system that full observers check, as Ethereum's sync committees do for
@@ -1752,6 +1772,8 @@ which their statements can be judged.
 \bibitem{lngapcode} LN-GAP proof-of-concept code. \url{https://github.com/AdamISZ/ln-gap}
 
 \bibitem{dlc} T.~Dryja. Discreet Log Contracts, 2017. \url{https://adiabat.github.io/dlc.pdf}
+
+\bibitem{ethslash} Ethereum consensus specifications, Phase 0: slashing and the correlation penalty (\texttt{PROPORTIONAL\_SLASHING\_MULTIPLIER}). \url{https://github.com/ethereum/consensus-specs}
 
 \bibitem{synccommittee} Ethereum consensus specifications, Altair: the sync committee. \url{https://github.com/ethereum/consensus-specs}
 
