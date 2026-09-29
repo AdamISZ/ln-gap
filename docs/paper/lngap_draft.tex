@@ -368,6 +368,72 @@ are relative timelocks, where block granularity only slows a resolution.
 The per-move clock runs at the venue's pace; Bitcoin's clock measures
 only the $O(1)$ dispute about it.
 
+\subsection{A better-conditioned oracle problem}
+\label{sec:oracle}
+
+The venue is a federation of DLC oracles, but it attests a different
+kind of fact from the one DLCs are usually imagined for, a price at
+maturity, and the difference matters for security. The key property is
+that the fact concerns the \emph{action of the party who benefits from
+it}. A mover's entry, posted in an \texttt{OP\_RETURN}, proves that the
+mover published it by that block: the mover signed it and Bitcoin dates
+it. A price posted to Bitcoin proves only that someone claimed that
+price. Publication is \emph{self-certifying}; a price is not, since
+nobody can produce evidence of ``the price at noon'', only report it.
+
+Three things follow in the venue's favour. The honest party can
+strengthen the truth: a mover disseminates its seal to every member,
+to an audit layer or to Bitcoin (Section~\ref{sec:accountable}), so a
+lie must override evidence that is widely held, while a party wronged
+by a price oracle can do nothing to make the true price more evident.
+The reference cannot be manipulated: a price DLC can be attacked
+without touching its oracle, by moving a thin market at the fixing
+moment, while the venue's ``underlying'' is the mover's own action, and
+the only analogue is an attack on the network. And the oracle decides
+less: a price attestation \emph{is} the payout, while the venue attests
+only publication and timing, and the game's rules judge the content
+cryptographically.
+
+The price for this is paid elsewhere. A price oracle attests one event
+for every contract that uses it, so a lie in one party's favour is told
+to the whole world, visibly; the venue attests per contract, so a
+colluding majority can act against one contract silently. Submission
+is private between mover and member, so a false flag is attributable
+but, without a public record, not provably false, where a blatant price
+lie is evident to all. Price oracles are blind to their users; the
+venue's members see each contract's identifier and timetable, which
+also gives a briber someone to approach. And a price DLC needs its
+oracle once, at maturity, while a game needs the venue at every move.
+The self-certifying property also covers only the positive fact: for
+absence, nobody can produce evidence unless posting is mandatory, and
+the venue's trust concentrates there.
+
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright\arraybackslash}p{50mm}>{\raggedright\arraybackslash}p{38mm}>{\raggedright\arraybackslash}p{46mm}}
+\toprule
+ & price-feed DLC & the venue's per-move attestation \\
+\midrule
+can the interested party produce proof? & no & yes, for publication (not for absence) \\
+manipulating the underlying & a real attack & not applicable, apart from network attacks \\
+what the oracle decides & the payout directly & timing only; content is cryptographic \\
+can a lie be aimed at one contract? & no: it is broadcast & yes, silently (mitigated by sampling, Section~\ref{sec:roster}) \\
+publicly checkable by default & yes, for blatant lies & no; needs \texttt{OP\_RETURN} or an audit layer \\
+oracle's knowledge of its users & none & knows each contract exists \\
+liveness needed & once, at maturity & at every move \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At slow timescales the two converge: a daily closing price across many
+exchanges and a move visible to an audit layer within the hour are both
+effectively objective, and at fast timescales both blur, through
+manipulation or through propagation. Objectivity alone therefore does
+not separate them; who can produce the evidence does. The shared facts
+of Section~\ref{sec:shared} are of the price kind, and inherit its
+profile: broadcast and untargetable, but with no party able to prove
+them.
+
 \subsection{The registry}
 
 Everything a contract needs from the venue is fixed at open. The
@@ -1071,6 +1137,7 @@ they arrive together they are easily conflated. Off-chain they separate:
 \end{itemize}
 
 \subsection{Shared facts, and what defends them}
+\label{sec:shared}
 
 A true single-use seal (a Bitcoin output) reaches a contract only
 through a spend in the contract's own inputs; that is how Lightning's
