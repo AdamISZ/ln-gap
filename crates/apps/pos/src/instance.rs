@@ -87,6 +87,8 @@ pub fn mover_at(d: u32) -> Role {
 pub enum Game {
     Ttt,
     Chess,
+    /// D57: the share commitments ride in [`PosInstance::bj`].
+    Blackjack,
 }
 
 impl Game {
@@ -96,6 +98,7 @@ impl Game {
         match self {
             Game::Ttt => 3,
             Game::Chess => 42,
+            Game::Blackjack => 44,
         }
     }
     /// The first depth a terminal exhibit exists at, if the game has the
@@ -110,7 +113,7 @@ impl Game {
     pub fn min_exhibit_depth(self) -> Option<u32> {
         match self {
             Game::Ttt => Some(MIN_EXHIBIT_DEPTH),
-            Game::Chess => None,
+            Game::Chess | Game::Blackjack => None,
         }
     }
 }
@@ -250,6 +253,8 @@ pub struct PosInstance {
     /// proposer fragment) and flag point (the `not_timely` leaf's, D50),
     /// and the flag threshold (the majority, D50 amended).
     pub registry: Registry,
+    /// Blackjack's share commitments, both sides', pinned at open (D57).
+    pub bj: Option<lngap_blackjack::Commitments>,
 }
 
 impl PosInstance {
@@ -275,7 +280,7 @@ impl PosInstance {
         // HubWins 1 / Draw 2); chess's Draw split can never fire on this
         // graph (chess.rs's resolution fragment).
         let outcomes = Contract::outcomes(&TicTacToe);
-        Ok(PosInstance { id, value, deposit: Amount::ZERO, deadline, game_id, game, t0, ell, margin, keys, outcomes, registry })
+        Ok(PosInstance { id, value, deposit: Amount::ZERO, deadline, game_id, game, t0, ell, margin, keys, outcomes, registry, bj: None })
     }
 
     /// Give each side a dispute deposit `d` inside the contract value
@@ -283,6 +288,14 @@ impl PosInstance {
     pub fn with_deposit(mut self, d: Amount) -> Result<PosInstance> {
         ensure!(self.value > d * 2, "the contract value {} must exceed both deposits of {}", self.value, d);
         self.deposit = d;
+        Ok(self)
+    }
+
+    /// Pin blackjack's share commitments (D57): the disprove leaves and the
+    /// venue's registered check read them.
+    pub fn with_commitments(mut self, c: lngap_blackjack::Commitments) -> Result<PosInstance> {
+        ensure!(self.game == Game::Blackjack, "share commitments are blackjack's");
+        self.bj = Some(c);
         Ok(self)
     }
 
@@ -325,8 +338,12 @@ impl PosInstance {
     pub fn authorship(&self) -> crate::Authorship {
         let keys: Vec<WotsPublic> = self.keys.iter().map(|k| k.state.clone()).collect();
         let game = self.game;
+        let bj = self.bj.clone();
         std::sync::Arc::new(move |d: u32, entry: &[u8]| {
             let Some(pk) = d.checked_sub(1).and_then(|i| keys.get(i as usize)) else { return false };
+            if game == Game::Blackjack {
+                return bj.as_ref().is_some_and(|c| crate::blackjack::entry_ok(pk, c, d, entry));
+            }
             let head = lngap_factchain::entry_head(entry);
             let (msg, sigs) = match game {
                 Game::Ttt => match lngap_factchain::slot::SlotEntry::decode(entry) {
@@ -344,6 +361,7 @@ impl PosInstance {
                     let sigs: Vec<[u8; 20]> = entry[48..].chunks(20).map(|c| c.try_into().expect("20 bytes")).collect();
                     (crate::chess::auth_message(&head), sigs)
                 }
+                Game::Blackjack => unreachable!("handled above"),
             };
             crate::refute::check_entry_sig(pk, &msg, &sigs)
         })
@@ -421,7 +439,7 @@ impl PosInstance {
     /// splits. (The tic-tac-toe exhibit output's tree is this tree too, so
     /// a late terminal exhibit dies the same way.)
     pub fn refuted_tree(&self, ctx: &CommitCtx, d: u32) -> Result<TapTree> {
-        graph::refuted_tree(ctx, self.game, &self.layout(d), self.depth_keys(d), &self.outcomes, self.registry.flags(d), self.registry.threshold)
+        graph::refuted_tree(ctx, self.game, &self.layout(d), self.depth_keys(d), &self.outcomes, self.registry.flags(d), self.registry.threshold, self.bj.as_ref())
     }
 
     /// Payout outputs for `payout` of `v` to the parties' payout scripts.
@@ -477,7 +495,12 @@ impl PosInstance {
         let fee = ctx.params.presign_fee;
         let mut out = Vec::new();
         let tree0 = self.tree(ctx)?;
-        let r = Contract::resolution(&TicTacToe, &Board::empty());
+        // settle's resolution: tic-tac-toe's and chess's R(initial); for
+        // blackjack a refund (D57: the draw)
+        let r = match self.game {
+            Game::Blackjack => self.outcomes.iter().find(|o| o.code == 2).cloned().expect("the draw outcome"),
+            _ => Contract::resolution(&TicTacToe, &Board::empty()),
+        };
         // settle is the no-dispute fallback: each deposit returns to its
         // owner (D56), the stakes (less the fee, shared) follow R
         let [su, sh] = r.payout.dist(self.stakes() - fee);

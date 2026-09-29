@@ -1,0 +1,11 @@
+[package]
+name = "lngap-blackjack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Blackjack's native rules for the PoS venue (D57): the head, the transitions, the share commitments"
+
+[dependencies]
+sha2.workspace = true
+serde.workspace = true
+rand.workspace = true

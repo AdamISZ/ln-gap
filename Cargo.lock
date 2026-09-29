@@ -331,6 +331,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "lngap-blackjack"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "lngap-btc"
 version = "0.1.0"
 dependencies = [
@@ -572,6 +581,7 @@ dependencies = [
  "anyhow",
  "bitcoin",
  "hex",
+ "lngap-blackjack",
  "lngap-btc",
  "lngap-channel",
  "lngap-chess",
@@ -583,6 +593,7 @@ dependencies = [
  "lngap-n4bit",
  "lngap-script32",
  "lngap-tictactoe",
+ "rand",
  "serde",
 ]
 

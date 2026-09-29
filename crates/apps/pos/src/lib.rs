@@ -35,6 +35,7 @@ use lngap_ec_wots::{Attestation, Attester, EpochTable};
 use lngap_factchain::{entry_head, entry_root, Header, HEADER_BYTES, HEAD_BYTES};
 use lngap_n4bit::DIGEST_BYTES;
 
+pub mod blackjack;
 pub mod bond;
 pub mod chess;
 pub mod fee;

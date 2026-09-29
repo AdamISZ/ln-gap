@@ -91,6 +91,7 @@ fn authorship(b: Builder, game: Game, file: usize, head_off: usize, key: &WotsPu
     match game {
         Game::Ttt => ttt::authorship_fragment(b, file, head_off, key),
         Game::Chess => chess::authorship_fragment(b, file, head_off, key),
+        Game::Blackjack => crate::blackjack::authorship_fragment(b, file, head_off, key),
     }
 }
 
@@ -177,7 +178,7 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
             let b = authorship(b, game, l.file, l.new, &keys.state);
             match game {
                 Game::Ttt => authorship(b, game, l.file, 0, &keys_prev.expect("a pair has a prior").state),
-                Game::Chess => b,
+                Game::Chess | Game::Blackjack => b,
             }
         }),
         None => refute::refute_leaf(table, &keys.refute, |b| authorship(b, game, l.file, 0, &keys.state)),
@@ -393,11 +394,12 @@ pub fn not_timely_witness(tx: &Transaction, input: usize, prevouts: &[TxOut], le
 /// and its `not_timely` leaf over slot `d`'s `flags` with threshold `t`
 /// (D50), then the mover's self-checking splits after `delta + delta'`.
 #[allow(clippy::too_many_arguments)]
-pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome], flags: &[XOnlyPublicKey], t: u32) -> Result<TapTree> {
+pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome], flags: &[XOnlyPublicKey], t: u32, bj: Option<&lngap_blackjack::Commitments>) -> Result<TapTree> {
     let challenger = ctx.key(l.mover.other()).payment;
     let family = match game {
         Game::Ttt => ttt::disprove_leaves(l, &keys.refute),
         Game::Chess => chess::disprove_leaves(l, &keys.refute),
+        Game::Blackjack => crate::blackjack::disprove_leaves(l, &keys.refute, bj.ok_or_else(|| anyhow::anyhow!("a blackjack instance needs its share commitments"))?),
     };
     let mut leaves = vec![];
     for pl in family {
@@ -416,6 +418,7 @@ pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys
         let leaf = match game {
             Game::Ttt => ttt::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
             Game::Chess => chess::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
+            Game::Blackjack => crate::blackjack::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
         };
         leaves.push(leaf);
     }
