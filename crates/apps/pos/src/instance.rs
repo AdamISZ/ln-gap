@@ -581,3 +581,27 @@ impl PosInstance {
         Ok(out)
     }
 }
+
+/// A PoS game as a channel contract output (the channel's commitments carry
+/// it; its pre-signed graph is signed for both commitment versions). The
+/// tree and graph are the instance's own: its claim leaves already read
+/// the commitment's broadcaster (`to_self_delay`) and its tree carries the
+/// commitment's revoke leaf, so a revoked commitment's contract output is
+/// swept by the penalty.
+impl lngap_channel::ContractOutput for PosInstance {
+    fn id(&self) -> u32 {
+        self.id
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn value(&self) -> Amount {
+        self.value
+    }
+    fn tree(&self, ctx: &CommitCtx) -> Result<TapTree> {
+        PosInstance::tree(self, ctx)
+    }
+    fn graph(&self, ctx: &CommitCtx, outpoint: OutPoint, prevout: &TxOut) -> Result<Vec<PresignedTx>> {
+        PosInstance::graph(self, ctx, outpoint, prevout)
+    }
+}
