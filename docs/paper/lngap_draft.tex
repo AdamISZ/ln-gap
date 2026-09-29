@@ -59,7 +59,7 @@
 
 \section{Abstract}
 
-We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection), based on the use of a proof of publication ledger governed by a threshold of validators. The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry in the ledger, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing of entries in the ledger require only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trust-minimised: they rely on the honesty of a majority of the (presumed large and heterogenous) PoP ledger validators, whose misbehaviour is attributable and who themselves are not required to know anything about the bilateral contract details, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by bonds (timelocked funds, whose owners lose their future fees when fraud is attributed, and which can optionally be made burnable).
+We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection), based on the use of a proof of publication ledger governed by a threshold of validators. The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry in the ledger, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing of entries in the ledger require only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trust-minimised: they rely on the honesty of a majority of the PoP ledger validators (a committee that can be drawn at random, per contract, from a large bonded roster), whose misbehaviour is attributable and who themselves are not required to know anything about the bilateral contract details, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by bonds (timelocked funds, whose owners lose their future fees when fraud is attributed, and which can optionally be made burnable).
 
 \section{Introduction}
 
@@ -276,6 +276,9 @@ outcome attested by a majority. What is new is not the attestation but
 what is attested (publication and, above all, absence), and that the
 attestations are read out in Script so that the game's rules can judge
 the content.
+The proof of concept has one fixed set of members;
+Section~\ref{sec:roster} proposes drawing each contract's members from
+a larger bonded roster instead.
 
 \subsection{What: attestations keyed by contract and move}
 
@@ -442,7 +445,9 @@ across the venue, not one pot. For a fixed threshold fraction $t/n$ the
 security budget is a fixed share of the venue's fee revenue, whatever
 $n$ is: as with Bitcoin's miners, the number of validators buys
 decentralisation and liveness, the revenue buys safety.
-Section~\ref{sec:security} takes this up.
+Section~\ref{sec:security} takes this up, and
+Section~\ref{sec:roster} shows how per-contract committees reduce $G$
+for a targeted attack to about one pot.
 
 
 \section{Contract outputs and the dispute graph}
@@ -1409,18 +1414,25 @@ limitation of the system rather than engineer around it: the only ways
 to remove it are verifying the venue's chain in Script (SPV, impractical)
 or turning the fact into Bitcoin outputs that each contract spends,
 which works only for facts of a few bits fixed in structure long in
-advance. A third course accepts the limit but makes misbehaviour
-publicly verifiable: accountability rather than enforcement
+advance. Two further courses accept the limit but shrink it: committees
+drawn per contract, so that a targeted attack reaches one pot and a
+broad one needs a share of a large roster; and accountability rather
+than enforcement, making misbehaviour publicly verifiable
 (Section~\ref{sec:accountable}).
 
-\section{Towards an accountable venue}
+\section{Weakening the majority assumption}
 \label{sec:accountable}
 
-This section describes an extension that is not yet implemented. It
-addresses the one threat of Section~\ref{sec:security} that the design
-leaves to economics alone: a colluding majority of the venue.
+This section describes extensions that are not yet implemented. They
+address the one threat of Section~\ref{sec:security} that the design
+leaves to economics alone: a colluding majority of the venue. There are
+three levers: \emph{whose} majority it is (a committee drawn per
+contract from a bonded roster), \emph{how large} it must be to steal
+(two-sided votes and a void zone), and whether its lie \emph{can be
+shown} (publication on Bitcoin, or an audit layer).
 
 \subsection{The threshold adversary}
+\label{sec:threshold}
 
 A majority of the members can take the pot of any contract, in either
 direction. By \emph{false flags}, $t$ members declare an honest mover's
@@ -1445,6 +1457,126 @@ by a majority is therefore attributable (we know who flagged) but not
 falsifiable (nobody can show the flag was false). Punishment by ejection
 needs an objective basis, and there is none.
 
+\subsection{Committees drawn from a roster}
+\label{sec:roster}
+
+The first question is \emph{whose} majority. Two players cannot both
+choose a majority of the members who judge them, and today neither
+chooses: the venue is one fixed set, and its majority is the same for
+every contract. It need not be. The venue is already per contract in
+everything but its membership: tables, proposer and flag points, due
+times and the registry are all keyed by the contract
+(Section~\ref{sec:venue}), and nothing ties two contracts' members
+together. We propose that each contract's members, its
+\emph{committee}, be drawn at random from a larger \emph{roster} of
+bonded members. There is then no single venue but one per contract,
+each sampled from the same roster. A member's work falls rather than
+rises: it serves only the contracts it is drawn for, about $n/R$ of them
+for committees of $n$ from a roster of $R$. The committee's size is
+limited by Script (its flag points are counted in a leaf); the roster's
+is not.
+
+\paragraph{The draw.} Both players commit to random values before
+either knows the result. The seed hashes both values together with the
+hash of a Bitcoin block at a height fixed after the commitments, and a
+public procedure maps the seed and the roster to a committee. Without
+the block hash, whoever reveals last would see the committee first and
+could abort and retry until the draw suited it; with it, each attempt
+costs a block, and a player that keeps abandoning contracts before
+funding is conspicuous. Each player may first strike a small, fixed
+number of members it distrusts; a larger allowance would let a player
+strike honest members too. The committee is fixed at open, because the
+pre-signed graph embeds its points.
+
+\paragraph{What it buys.} An adversary now needs a share of the
+roster, not a majority of one set. If it controls a fraction $f$ of the
+roster, the chance that a committee of a few dozen has a colluding
+majority is small while $f$ is well below a half, and it falls
+exponentially with the committee's size; with the void zone of
+Section~\ref{sec:voidzone}, where theft needs two thirds, committees of
+a few dozen suffice even when $f$ approaches a third. Collusion now
+takes one of two forms, and both cost more than before. A \emph{broad}
+attack, taking many contracts at once, needs a share of the whole
+roster near a half (or two thirds): what a fixed venue's majority
+already posed, spread over a larger set. A \emph{targeted} attack,
+bribing a particular committee after the draw, reaches only the
+contract that committee serves. The aggregate gain $G$ of
+Section~\ref{sec:venue}, which for a fixed venue is the value in flight
+across every contract (a hub being a colluding player in many of them),
+becomes for a targeted attack about one pot, and a hub that wants to
+steal from many of its contracts must corrupt as many different
+committees.
+
+\paragraph{What it does not buy.} Sampling defeats collusion arranged
+before the draw, not bribery after it: the committee is known at open
+and serves for the contract's life. It complements, and does not
+replace, the measures below, which make a lie by the chosen committee
+provable.
+
+\paragraph{The bond is the ticket.} Every guarantee above is a
+statement about the adversary's share of the roster, and that share
+means something only if it is costly to acquire. Membership of the
+roster is therefore a bond, and the bond does more work than in a fixed
+venue:
+\begin{itemize}
+\item \emph{The roster lives on Bitcoin.} A member is a timelocked
+  output with its owner's key, announced by a signature under that key.
+  The roster at a given height is the set of unexpired announced bonds,
+  which anyone with a node can reconstruct. Entry is permissionless,
+  and the draw is reproducible by anyone from the seed.
+\item \emph{Weight, not headcount.} The draw weights members by the
+  value locked and by the lock's remaining term, so an adversary's share
+  of the roster is its share of locked bitcoin-time, not its number of
+  identities. Splitting a bond into ten members buys nothing.
+\item \emph{The term covers the contract.} A bond must outlast every
+  contract its owner serves, including the dispute windows; a member
+  whose lock expires before a contract's last deadline is not eligible
+  for that contract.
+\item \emph{Sizing per contract.} A targeted bribe must pay a majority
+  of the committee at least what each member stands to lose: the time
+  value of its lock and its expected future fees. The players can check
+  this against their pot at open, and a contract with a larger pot can
+  require a larger committee or a larger minimum bond. The condition of
+  Section~\ref{sec:venue} becomes a per-contract parameter rather than
+  one inequality for the whole venue.
+\item \emph{Assembling versus using.} As in Section~\ref{sec:venue},
+  the baseline bond is a sacrifice of time value, lost through ejection,
+  and ejection needs an objective fault. A timeliness lie is
+  attributable but not falsifiable
+  (Section~\ref{sec:threshold}), so the bond makes a colluding
+  majority costly to \emph{assemble}; making it costly to \emph{use}
+  needs the record of the audit layer below.
+\end{itemize}
+
+\subsection{Two-sided votes and a void zone}
+\label{sec:voidzone}
+
+Two changes to the contract, not yet implemented, raise the size of
+coalition that can steal.
+
+\emph{Two-sided votes.} Today a member makes one statement per move,
+the flag (``not published in time''), and a member that says nothing
+counts in effect as saying the move was published; a colluder
+protecting a late move can simply stay silent, indistinguishable from an
+offline member. With two-sided votes each member holds two one-bit keys
+per move, ``published in time'' and ``not published in time'', and
+reveals one of them. A colluder must then sign a false statement rather
+than hide behind silence; an offline member counts for neither side; and
+a member that reveals both has contradicted itself, provably, even in
+Script.
+
+\emph{A void zone.} Today a single threshold decides: at least $t$ flags
+and the claimant wins, otherwise the refutation stands. With two
+thresholds, at least two thirds voting ``not published'' pays the
+claimant, at most one third pays the mover, and anything in between
+refunds both stakes. Stealing then needs two thirds of the committee in
+either direction; a coalition between one and two thirds can only force
+a refund. This is the familiar trade of Byzantine agreement, one third
+to block progress and two thirds to break safety. In the contract it
+costs a second set of $n$ points in the vote-counting leaf and one more
+leaf, the refund; its price in play is that an honest winner can be
+griefed into a refund by a sizeable minority.
+
 \subsection{Publishing on Bitcoin}
 
 A mover who fears the venue can publish its entry on Bitcoin, in an
@@ -1468,8 +1600,11 @@ record should live.
 
 The record need not live on Bitcoin, and it need not be verified in
 Script. Its only purpose is to let observers judge the venue after the
-fact, and observers can verify far more than a script can. This suggests
-three layers (Figure~\ref{fig:layers}):
+fact, and observers can verify far more than a script can. The
+roster's members are its natural participants, long-lived and bonded,
+but the roles differ: the roster is who may be drawn, the audit layer is
+the record against which the drawn are judged. This suggests three
+layers (Figure~\ref{fig:layers}):
 
 \begin{center}
 \small
@@ -1508,13 +1643,13 @@ trusted set; it limits only each contract's committee.
   lay/.default=44mm,
   >={Stealth[length=5pt]},
 ]
-\node[lay=52mm, fill=black!4] (A) at (0,3.6) {\textbf{Audit layer}\\ large, dynamic pool; the public record of every entry and its time};
-\node[lay, fill=blue!4] (V) at (-3.4,0.9) {\textbf{Venue committee}\\ sampled from the pool per contract; attestations and flags};
-\node[lay, fill=orange!8] (B) at (3.4,0.9) {\textbf{Bitcoin}\\ money, disputes, the claim clock};
+\node[lay=52mm, fill=black!4] (A) at (0,3.6) {\textbf{Audit layer}\\ large, dynamic; the public record of every entry and its time};
+\node[lay, fill=blue!4] (V) at (-3.4,0.9) {\textbf{Venue committee}\\ drawn from the roster per contract; attestations and flags};
+\node[lay, fill=orange!8] (B) at (3.4,0.9) {\textbf{Bitcoin}\\ money, disputes, the claim clock, the roster's bonds};
 \node[lay=40mm, draw=black!40, text=black!70] (C) at (0,-1.6) {\textbf{Contract} (in a channel)};
 \draw[->] (V.south) -- node[pos=0.45, left=3pt, font=\scriptsize, align=right] {signatures\\ read in Script} (C.north west);
 \draw[->] (C.north east) -- node[pos=0.55, right=3pt, font=\scriptsize] {disputes} (B.south);
-\draw[->, densely dashed] ([xshift=-10mm]A.south) -- node[pos=0.5, left=4pt, font=\scriptsize] {samples, audits} (V.north);
+\draw[->, densely dashed] ([xshift=-10mm]A.south) -- node[pos=0.5, left=4pt, font=\scriptsize] {audits} (V.north);
 \draw[->, densely dashed] ([xshift=10mm]A.south) -- node[pos=0.5, right=4pt, font=\scriptsize] {periodic anchor} (B.north);
 \end{tikzpicture}
 \caption{Three layers. Only the solid arrows are checked in Script; the
@@ -1523,66 +1658,14 @@ the fact.}
 \label{fig:layers}
 \end{figure}
 
-\subsection{Committees drawn from a pool}
-
-The audit layer's participants form a natural pool: long-lived, bonded,
-and large. Each contract's committee can be drawn from it at random,
-with randomness to which both players contribute (commit, then reveal),
-optionally after each side has struck members it distrusts. An
-adversary controlling a fraction $f$ of the pool then controls a
-majority of a committee of a hundred with a probability that is
-negligible while $f$ is well below one half: the attack needs a large
-share of the pool, not of one committee. The per-contract cost is small,
-since the content key is shared by the whole pool and only the one-bit
-proposer and flag points are per member.
-
-A natural alternative does not work: letting each player choose half of
-the committee. Suppose Alice is the mover at some depth, with $n = 100$
-and flag threshold $t$. If Bob's fifty are his sybils, they must not be
-able to kill Alice's timely refutation by flagging it, so $t \ge 51$. If
-instead Alice's fifty are hers, and she moves late with a colluding
-sealer while her fifty withhold their flags, Bob's fifty honest flags
-must suffice to kill the late refutation, so $t \le 50$. No threshold
-satisfies both. Each side's choices are partisan, and whichever side
-cheats is backed by its own half; the committee must consist of members
-neither player chose.
-
-\subsection{A proposed improvement: two-sided votes and a void zone}
-
-Two changes to the contract, not yet implemented, raise the size of
-coalition that can steal.
-
-\emph{Two-sided votes.} Today a member makes one statement per move,
-the flag (``not published in time''), and a member that says nothing
-counts in effect as saying the move was published; a colluder
-protecting a late move can simply stay silent, indistinguishable from an
-offline member. With two-sided votes each member holds two one-bit keys
-per move, ``published in time'' and ``not published in time'', and
-reveals one of them. A colluder must then sign a false statement rather
-than hide behind silence; an offline member counts for neither side; and
-a member that reveals both has contradicted itself, provably, even in
-Script.
-
-\emph{A void zone.} Today a single threshold decides: at least $t$ flags
-and the claimant wins, otherwise the refutation stands. With two
-thresholds, at least two thirds voting ``not published'' pays the
-claimant, at most one third pays the mover, and anything in between
-refunds both stakes. Stealing then needs two thirds of the committee in
-either direction; a coalition between one and two thirds can only force
-a refund. This is the familiar trade of Byzantine agreement, one third
-to block progress and two thirds to break safety. In the contract it
-costs a second set of $n$ points in the vote-counting leaf and one more
-leaf, the refund; its price in play is that an honest winner can be
-griefed into a refund by a sizeable minority.
-
 \subsection{What remains}
 
 A committee majority, now two thirds, can still take a pot. With an
 audit layer it can do so only provably, at the cost of every colluder's
 franchise; security remains economic at the top, like proof of work,
 but the attack is no longer deniable. One step further is possible: if
-committee members' bonds are held under a key controlled by the pool (a
-large-threshold key over the audit layer's membership), the pool could
+committee members' bonds are held under a key controlled by the roster
+(a large-threshold key over its membership), the roster could
 slash a provably colluding committee and compensate the victim, judging
 from the audit layer's record. That moves the trust up a level, to the
 larger set, which is the point.
@@ -1630,9 +1713,10 @@ bound set by the venue's revenue. A proof of concept, with the venue,
 the dispute graph for tic-tac-toe and chess, their scenario suites on
 regtest, and an interactive chess demonstration in the browser, is
 available~\cite{lngapcode}. The remaining weakness, a colluding
-majority of the venue, can be made accountable rather than deniable: a
-large audit layer, anchored to Bitcoin, from which each contract's
-committee is drawn and against which its statements can be judged.
+majority of the venue, can be made both harder to assemble and
+accountable rather than deniable: committees drawn per contract from a
+large bonded roster, and an audit layer, anchored to Bitcoin, against
+which their statements can be judged.
 
 
 \begin{thebibliography}{99}
