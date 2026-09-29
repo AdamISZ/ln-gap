@@ -2591,6 +2591,114 @@ sat per side, covering four 60k-sat hops); the contract carries it.
 Driven: a stall claimed and split pays the user 1,000,000 + 500,000 -
 120,000 = 1,380,000 sat.
 
+## D57. Blackjack on the PoS venue: shares in entry bodies, openings in leaf witnesses
+
+Date: 2026-09-29. Context: the talk demos (docs/planning/DEMOS_PLAN.md).
+Paper §8 designed blackjack with length-encoded SHA256 commitments
+opened by OP_SIZE (the dealing leaf verified on regtest, size_commit.rs)
+but left open how a revealed share reaches a dispute. This note settles
+that and the rest of the game's shape on the D55 graph. Agreed with the
+user: OP_SIZE now; the BLAKE3 route recorded as the upgrade.
+
+**Where s comes from.** Data crosses the pre-signed graph's outputs only
+as WOTS-parked nibbles, and OP_SHA256 / OP_SIZE act on ONE stack element:
+a share string routed through the parked heads would arrive as 64-88
+nibbles, and rejoining them is OP_CAT. So share strings never travel
+through heads. The heads carry the CARDS (rank nibbles); the strings ride
+in the entry BODY (after the head and the mover's state-key signature;
+the entry root commits to them, the venue serves them); and a disprove
+leaf that needs a share takes the string as its OWN witness element,
+checks it against the commitment pinned in the leaf at open, and reads
+the value with OP_SIZE. The claimant has the strings because the entry
+bodies are public.
+
+**Availability is the venue's, correctness is the leaves'.** The one gap
+left is a mover that posts an entry claiming cards but withholding its
+share strings: the counterparty can neither continue nor disprove. The
+contract's registered authorship check (D55) is extended for blackjack:
+the head declares the range `[lo, hi)` of card positions whose share the
+mover reveals in this entry, and honest members seal only if the body
+carries, for every position in the range, a string that opens the
+mover's pinned commitment and encodes a value in 0..=12. An entry that
+fails is not a move: honest members neither seal it nor count it at the
+due time, so they flag the depth, and a rogue member's seal of it is
+killed by `not_timely` (and is itself provable, from the entry). Given
+that, the refutation need NOT carry the strings (considered in the plan,
+dropped): correctness is enforced cryptographically by the disprove
+leaves over parked cards plus witness strings, availability by the usual
+majority.
+
+**The game (the demo's scope).** One hand per contract; an infinite deck
+(rank = (a + b) mod 13, 0 = ace, 9..12 = ten-valued); 1:1 payouts, push
+refunds; no naturals, doubling, splitting or insurance; the dealer stands
+on all 17s. K = 16 card positions, each with a player commitment `A_k`
+and a house commitment `B_k` exchanged at open (C = SHA256(s),
+|s| = 32 + v). Positions: 0, 1 the player's first cards; 2 the dealer's
+up-card; 15 the hole card; 3.. the player's hits, then the dealer's draws
+from the stand position `ds`. The player hits at most while `np <= 10`;
+the dealer's draws stop at position 14 (a forced stand past it).
+
+The graph needs strict alternation (keys are per depth by parity), and
+blackjack fits: the player (user) moves at odd depths, the house (hub)
+at even. Each card is revealed first by the player and second by the
+house, so the house learns a card first and can abort: that abort is a
+stall and loses the pot (the scene the demo exists for).
+
+| depth | mover | action | reveals |
+|---|---|---|---|
+| 1 | player | DEAL | a_0, a_1, a_2 |
+| 2 | house | REVEAL | b_0, b_1, b_2 (cards 0-2 dealt) |
+| odd | player | HIT / STAND | HIT: a_np; STAND: a_np..a_15 (hole and all draws) |
+| even | house | REVEAL | after HIT: b_np (the card; bust ends the hand); after STAND: b_np..b_15 and the whole dealer phase in one move |
+| odd | player | ACK | nothing: only after a terminal state the player won or pushed |
+
+**The head** (48 bytes; digits are nibbles): 0-7 word0 (the venue's);
+8 action; 9 phase; 10 status (0 open, 1 player wins, 2 house wins,
+3 push); 11 zero; 12-13 `np` (next undealt position); 14-15 `ds`;
+16-17 `lo`; 18-19 `hi`; 20-35 the 16 card ranks; 36-95 zero. The state
+key signs bytes 4..48 (44 bytes, 88 digits). Phases: START, DEALT
+(awaiting the house), DECIDE, HIT (awaiting the card), STOOD (awaiting
+the dealer), DONE, CLOSED.
+
+**The disprove family** (over the parked pair; at depth 1 the prior is
+the constant initial head, as in chess): `wrong_slot`; `bj_malformed`
+(fields out of range, padding non-zero); `bj_transition` (the action not
+allowed in the prior phase for this depth's mover, ACK unless the player
+won or pushed, or the wrong next phase); `bj_counters` (np, ds, lo, hi
+not what the action requires); `bj_cards_kept` (a dealt card changed, or
+an undealt one non-zero); `bj_status` (bust, the showdown, a push, and
+phase DONE iff the status is set); `bj_dealer` (the dealer stopped below
+17 with positions left, or drew at 17 or more); `bj_card_k` for each k
+(house depths: a card dealt at this depth is not (v + w) mod 13, the two
+strings from the witness); `bj_share_k` for each k (the mover revealed
+position k at this depth and its string opens to a value over 12).
+
+**Resolution, and a gate removed.** R(state) is the status when set
+(player wins, house wins, draw) and otherwise "the side to move forfeits"
+(the mover of the parked depth wins). The chess and tic-tac-toe checked
+splits are gated by the MOVER's outcome-code reveal, harmless there
+because R always favours the mover of a refuted depth; in blackjack the
+house can park a terminal state it lost, and could then lock the pot by
+never revealing its code. The blackjack checked split drops the code
+gate: it is 2-of-2 pre-signed and proves R in-leaf, so either party can
+broadcast the correct one after `delta + delta'`. Terminal states are
+always produced by house moves, so the player is always next: when the
+house won, the player has no legal move and loses to the house's claim;
+when the player won or pushed, the player ACKs (a legal move), after
+which the house has no legal move; any false claim is answered by the
+counter (D44), which forces the claimant to park its terminal state and
+be judged by R. `settle` at the deadline refunds the stakes (a draw), not
+R(initial). No terminal-exhibit family (D37) is needed.
+
+**Other paths (recorded, not built).** A salted commitment under a
+Script-native hash over parked nibbles (BLAKE3 as in BitVMX: 70.3 KB for
+a 33-byte input, peak stack 659): reveals then ride IN the head, so
+availability comes from ordinary attestation and needs no member check,
+correctness is purely cryptographic, and values need not be small; about
+70 KB of script per opening. n4bit is rejected for commitments (a toy,
+about 2^40 collisions). Rebuilding short values arithmetically from
+nibbles is rejected (a salt short enough to rebuild cannot hide).
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
