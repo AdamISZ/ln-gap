@@ -1504,17 +1504,23 @@ remains, as for any game.
 A bridge is not wholly of that kind. An entitlement to withdraw is a
 fact about a history that many parties extend after the contract opens,
 and setup can fix only the rules for recognising that history. Two
-questions remain. The first is which history is canonical. If that is
-decided by proof of work, as for a rollup anchored in Bitcoin, it is
-self-certifying: accumulated work is evidence, not testimony, like
-publication. The claim quotes a chain of headers and a challenger may
-answer with a heavier one, as a move of the game, so the question is
+questions remain. The first is which history is canonical, and a bridge
+has two histories to settle. The other system's own order, its
+transfers and withdrawals, is typically fixed by a sequencer or a
+committee signing its states: their keys are one more setup fact, and
+the trust moves to them, with the same answers as for the venue (a
+bond, and the data published where others can see it). The deposits,
+though, are Bitcoin transactions, and whether they happened is not the
+sequencer's to decide: one crediting a deposit that exists only on a
+fork would mint entitlements from nothing. That history is decided by
+proof of work, which is self-certifying: accumulated work is evidence,
+not testimony, like publication. The proven statement includes the
+deposit's inclusion under a chain of headers, and a challenger may
+answer with a heavier chain, as a move of the game, so the question is
 settled by the game and the venue's clock rather than by the venue
 vouching for a fact. This is how BitVM2 bridges treat it~\cite{bitvm2},
 and why ESSPI's authors note that an inclusion proof must admit
-counter-proofs within a bounded time~\cite{esspi}. If the history is
-decided instead by a committee's signatures, their keys are one more
-setup fact, and the trust moves to that committee. The second question
+counter-proofs within a bounded time~\cite{esspi}. The second question
 is uniqueness: an entitlement proved in two contracts would be paid
 twice, which is the shared-fact failure again. It is answered inside
 the proven statement, by binding the entitlement to the contract that
