@@ -53,8 +53,19 @@ pub fn run_nums(script: &Script, stack: Vec<i64>) -> Result<Vec<i64>, String> {
 }
 
 /// Like [`run`]; with `trace` set, print the top of both stacks before every instruction.
-pub fn run_trace(script: &Script, mut stack: Vec<Vec<u8>>, trace: bool) -> Result<Vec<Vec<u8>>, String> {
+pub fn run_trace(script: &Script, stack: Vec<Vec<u8>>, trace: bool) -> Result<Vec<Vec<u8>>, String> {
+    run_inner(script, stack, trace).map(|(s, _)| s)
+}
+
+/// Like [`run`], also returning the peak number of elements on the main
+/// and alt stacks together (consensus caps it at 1,000).
+pub fn run_peak(script: &Script, stack: Vec<Vec<u8>>) -> Result<(Vec<Vec<u8>>, usize), String> {
+    run_inner(script, stack, false)
+}
+
+fn run_inner(script: &Script, mut stack: Vec<Vec<u8>>, trace: bool) -> Result<(Vec<Vec<u8>>, usize), String> {
     let mut alt: Vec<Vec<u8>> = Vec::new();
+    let mut peak = stack.len();
     let mut skip: Vec<bool> = Vec::new();
     fn pop(s: &mut Vec<Vec<u8>>) -> Result<Vec<u8>, String> {
         s.pop().ok_or_else(|| "stack underflow".to_string())
@@ -67,6 +78,7 @@ pub fn run_trace(script: &Script, mut stack: Vec<Vec<u8>>, trace: bool) -> Resul
         Ok(decode(&v))
     }
     for (pc, ins) in script.instructions().enumerate() {
+        peak = peak.max(stack.len() + alt.len());
         let ins = ins.map_err(|e| e.to_string())?;
         if trace {
             let n = stack.len();
@@ -176,5 +188,6 @@ pub fn run_trace(script: &Script, mut stack: Vec<Vec<u8>>, trace: bool) -> Resul
             }
         }
     }
-    Ok(stack)
+    peak = peak.max(stack.len() + alt.len());
+    Ok((stack, peak))
 }
