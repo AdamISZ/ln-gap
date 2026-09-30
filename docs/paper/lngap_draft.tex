@@ -293,6 +293,18 @@ outcome attested by a majority. What is new is not the attestation but
 what is attested (publication and, above all, absence), and that the
 attestations are read out in Script so that the game's rules can judge
 the content.
+
+\paragraph{Not a federation.} Both this venue and a federated sidechain
+such as Liquid~\cite{liquid} rest on a majority, but not on the same one. A federation
+holds the coins: its keys sign every withdrawal, so its majority can
+move any funds, and can freeze them. The venue holds no coins and
+decides one bit per move, whether it was published in time; it cannot
+forge a move, which the player signs, nor change a rule, which Script
+enforces, nor stop anyone leaving, since every user's funds sit in its
+own channel and a unilateral close is always available. A federation is
+trusted with the money; the venue only with the clock.
+Section~\ref{sec:security} develops the comparison.
+
 The proof of concept has one fixed set of members;
 Section~\ref{sec:roster} proposes drawing each contract's members from
 a larger bonded roster instead.
@@ -1589,7 +1601,8 @@ The assumptions fall into five classes:
 \item \textbf{Cryptographic}: holds unconditionally given the primitives
   (one-time signatures, Schnorr, SHA-256) and Script.
 \item \textbf{Lightning's}: a party watches the chain and responds within
-  its windows; fees for pre-signed transactions can be bumped.
+  its windows, and its transactions confirm within them (Bitcoin's
+  liveness, below).
 \item \textbf{1 of $n$}: at least one member is honest and live before
   the relevant due time.
 \item \textbf{Majority}: fewer than $t$ members collude.
@@ -1635,6 +1648,49 @@ majority fact. This split is the design's central trade. Content is
 expensive to adjudicate and made cheap by the disprove family; time is
 impossible to adjudicate between two parties and made possible by the
 venue.
+
+\paragraph{A timekeeper, not a custodian.} A first reading often takes
+the design for a federated sidechain with extra steps: if a majority
+decides the truth, why not let it decide everything? The answer is in
+what the majority decides, and what it holds.
+\begin{itemize}
+\item \emph{What it decides.} A federation's keys sign every
+  withdrawal, so its majority can move any funds anywhere. The venue's
+  committee holds no key to any funds and decides one bit per move. It
+  cannot forge a move (the player signs it), change a rule (Script
+  enforces it), or pay anyone.
+\item \emph{Whom it needs.} A federation majority can steal alone. A
+  venue majority gains only by helping one party of a contract against
+  the other, so it needs that party as an accomplice, and a dispute
+  that reaches the chain and turns on timing.
+\item \emph{How much is exposed.} A federation's majority reaches every
+  coin in its custody at once. A committee's reaches the pot of a
+  contract it serves, in a live dispute, and committees drawn per
+  contract (Section~\ref{sec:roster}) make a broad attack need a
+  majority of many committees.
+\item \emph{Freezing.} Theft is not the only risk, nor the most
+  likely: a custodian can refuse to let funds leave, and a federation of
+  named legal entities can be compelled to, and can do it easily, for
+  instance by admitting withdrawals only to approved addresses. Here
+  there is nothing to freeze. Every user's funds sit in its own channel,
+  a unilateral close is always available, and if the venue falls
+  silent the contracts resolve by their deadlines.
+\item \emph{Who the members are.} A federation's members must be known,
+  since users trust them by name and their legal exposure is part of
+  the security, which is also what makes them compellable. The venue's
+  members need no legal identity at all: each is a bonded output and a
+  key, and should be pseudonymous. Compelling one achieves little, since
+  it holds nothing; the most it can be made to do is misstate the time
+  of a move in a contract it serves, under its own key.
+\end{itemize}
+The machinery of the preceding sections exists to shrink what the
+majority decides. Script judges content, one-time signatures bind each
+move to its author, publication needs one member, and the majority is
+left with a single bit. Without that machinery the majority would decide
+outcomes, and the design would be a federation. In a federated sidechain
+the majority is judge, jury and bank; here it is a timekeeper, which can
+be bribed to misstate the time of one move in one contract, and only in
+league with a party to that contract.
 
 \paragraph{Censorship.} A mover whose entry no member will seal loses by
 absence. This is theft-shaped, not merely a delay, and nothing in Script
@@ -1719,8 +1775,9 @@ mover's move after its due time while $n - t + 1$ members withhold their
 flags, so the late refutation stands. The majority threshold balances
 the two, each needing about half of the members. This resembles a
 majority attack on a proof-of-work chain, with three differences. The
-venue's attackers are named (every flag and every seal carries a
-member's key), where a miner is anonymous. What they stake is a
+venue's attackers are identified (every flag and every seal carries a
+member's key: a pseudonymous identity, not a legal one), where a
+miner's work carries no identity at all. What they stake is a
 franchise of future fees, bought with a timelocked bond that cannot be
 rented for the attack, where hash power can. And the attack can target a single contract,
 silently, where a reorganisation is public.
@@ -2089,6 +2146,8 @@ which their statements can be judged.
 \bibitem{coins} R.~Linus. Coins: a billion Bitcoin users, 2020; R.~Linus and B.~Tse, Stakechains, CoDecFin 2022.
 
 \bibitem{fidelity} C.~Belcher. Design for improving JoinMarket's resistance to sybil attacks using fidelity bonds, 2019. \url{https://gist.github.com/chris-belcher/18ea0e6acdb885a2bfbdee43dcd6b5af}; and JoinMarket, \emph{Fidelity bonds} (documentation). \url{https://github.com/JoinMarket-Org/joinmarket-clientserver/blob/master/docs/fidelity-bonds.md}
+
+\bibitem{liquid} J.~Nick, A.~Poelstra and G.~Sanders. Liquid: a Bitcoin sidechain, 2020. \url{https://blockstream.com/assets/downloads/pdf/liquid-whitepaper.pdf}
 
 \bibitem{bitvm} R.~Linus. BitVM: compute anything on Bitcoin, 2023.
 
