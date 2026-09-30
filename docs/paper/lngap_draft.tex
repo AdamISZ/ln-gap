@@ -223,6 +223,7 @@ What you need, then:
 You may be wondering why we insist on \emph{attributable} fraud. Without attribution, users of the venue cannot discern which members they do not want to use in future, if something fraudulent is published. With attribution, a member caught contradicting itself is ejected: it loses its future fees while its bonded coins (coins locked to a CLTV output) sit out their timelock. Timelocked coins as a costly identity are not new: JoinMarket's fidelity bonds~\cite{fidelity} use exactly such outputs to make a Sybil attack on its market of coinjoin makers expensive, and are, to our knowledge, the only deployed use of timelocked bitcoin for that purpose; Section~\ref{sec:roster} returns to them for a roster that anyone can join. It's possible to go further, as an option: equivocation evidence can be made to unlock the bonded coins to anyone, but without covenants this is not a simple burn, it is a miner fee-race burn: since the evidence is public, any miner can include its own spend paying the whole bond as fee, so the money game-theoretically ends up with the miner of the first eligible block, and the cheater recovers it only by mining that block itself. We do not make this the baseline (Section~\ref{sec:venue}).
 
 \subsection{What the venue attests to}
+\label{sec:attests}
 
 We'll continue to use the two simple motivating examples: tic-tac-toe, and chess. We'll discuss external facts, i.e. something not limited to a 2 player game, in Section~\ref{sec:beyond}.
 
@@ -277,12 +278,39 @@ statement per move of each contract, and nothing about the game:
 Section~\ref{sec:venue} describes how the venue produces these, and
 Section~\ref{sec:graph} how a Bitcoin script consumes them.
 
+\paragraph{Order comes from the heads.} A venue that keeps no order
+(Section~\ref{sec:venue}) may seem to invite trouble: what if Bob
+publishes move 4 before Alice has published move 3? Nothing breaks. The
+venue seals it, since it checks only that the right mover signed an
+entry for that move, and the seal is timely, being early. But Bob's head
+carries the whole position after move 4, so it commits him to one
+particular move 3 by Alice. If she plays it, the game continues and Bob
+has only shown her his reply in advance; if she plays anything else,
+his move 4 no longer follows from her move 3 and the disprove family
+refutes it; and he cannot replace it, since his one-time key for move 4
+is spent and a second move 4 is an equivocation. An early move is a
+binding, conditional commitment that can hurt only its maker. (A
+correspondence player once answered 1.e4 with ``1\ldots b6, and 2\ldots
+Bb7 whatever you play''; his opponent replied 2.Ba6, and the
+pre-committed bishop move lost a piece.) This rests on three
+properties of the contract, not of the venue: every move number has one
+designated mover, so an early move takes no one else's turn; every head
+carries the state it follows from, so an early move pins down the
+history it answers; and every move number has its own one-time key, so
+an early move cannot be withdrawn. A rule that needs order the heads
+cannot express, such as ``valid only if made after time $T$'' or ``first
+to post wins'', is outside the design: the venue attests \emph{by} a
+time, never \emph{after} one, and simultaneous moves must be recast as
+commitments and reveals on alternate move numbers.
+
 \section{The venue}
 \label{sec:venue}
 
 The venue is a set of $n$ bonded members that attest the moves of the
 contracts registered with it. It is not a blockchain: it has no coin,
-executes nothing, keeps no global order and no sequence of slots. It
+executes nothing, keeps no global order and no sequence of slots (the
+order of a contract's moves is carried by their heads,
+Section~\ref{sec:attests}). It
 answers, per move of each contract, the two questions a dispute asks:
 \emph{what} was published, and \emph{whether it was published in time}.
 The two answers come from different mechanisms. In the terms of Discreet
