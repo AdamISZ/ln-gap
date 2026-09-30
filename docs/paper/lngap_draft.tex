@@ -1481,6 +1481,19 @@ only self-contradiction, do not reach it. Publishing the entry on
 Bitcoin makes such a refusal publicly visible
 (Section~\ref{sec:accountable}).
 
+\paragraph{Bitcoin's liveness.} Every branch of the dispute graph is a
+race against a timelock: a refutation must confirm before the
+claimant's timeout, a disprove before the mover's split. The contract
+therefore assumes, as Lightning does for its HTLCs and BitVMX for its
+rounds, that a transaction can be confirmed within its window. The
+graph's pre-signed transactions have one input each and pay a fee fixed
+at signing, out of that input; this leaves the replacement-cycling
+attack~\cite{cycling} no second input to evict them through, but a fee
+spike can hold one back past its window. Fee-bumping (an anchor output
+for CPFP) would answer the spike and readmit the attack, with
+Lightning's mitigations; the windows $\delta$ and $\delta'$ are what
+buys time for either.
+
 \paragraph{The majority.} Flags are the only place the design needs a
 threshold, and it is there for \emph{order}, not for stake: two blocks
 by two members (``move $d$ was not published'', ``here is move $d$'')
@@ -1707,6 +1720,20 @@ the flags still decide the contract, and the posting makes the lie
 provable, to be punished outside it (the roster's bond,
 Section~\ref{sec:roster}).
 
+Posting on Bitcoin before a deadline is the right tool for a different
+job: one large publication per dispute, not one per move.
+ESSPI~\cite{esspi} builds it for the program input of
+BitVMX~\cite{bitvmx}: a pre-signed kick-off transaction has an output
+that the prover must spend, with a transaction carrying the input,
+before a relative timelock expires, or a pre-signed penalty takes the
+funds. Script is convinced of availability by the timelock, not by a
+proof of inclusion. Its authors observe that an inclusion proof, to be
+safe at high value, must admit counter-proofs within a bounded time, so
+it too rests on transactions not being censored for long, and the
+timelock asks for nothing more. The venue's contracts rest on the same
+assumption: every claim, refutation and timeout supposes that a
+transaction can be confirmed within its window.
+
 Both modes show that a public
 record, not Script, is what makes the venue's honesty checkable. The
 question is where that record should live.
@@ -1812,8 +1839,21 @@ Bitcoin. The bonded, Bitcoin-collateralised validator set with one-time
 signatures is Linus's Coins and Stakechains~\cite{coins}; what is new
 here is that the venue settles no value and carries no asset, and that
 its attestations are read in Bitcoin Script. BitVM~\cite{bitvm} settles
-arbitrary computation on Bitcoin by bisection; we avoid on-chain
-bisection by giving each game a family of single-step disprove leaves.
+arbitrary computation on Bitcoin by bisection, and BitVMX~\cite{bitvmx}
+does so for a RISC-V CPU whose execution trace is a hash chain. There
+the search itself is on chain: a dispute is a graph of transactions
+pre-signed by both parties at setup, emulating covenants, in which each
+move of the search (the prover's hashes, the challenger's choice) is a
+transaction, the parties' data are carried in
+Winternitz signatures that link the rounds, and each round is guarded
+by a relative timelock that a party who does not answer loses by. This
+is ForceMove played on Bitcoin with the rounds as moves. It needs no
+trust beyond Bitcoin's eventual freedom from censorship, and a dispute
+costs a number of transactions, and of timelock waits, logarithmic in
+the length of the trace. We avoid on-chain bisection by giving each
+game a family of single-step disprove leaves; the same search could
+instead be played as a venue game, with only its final step on chain,
+which we leave to future work.
 StackSat-128~\cite{stacksat} is a Script-friendly hash designed for the
 proof-of-work alternative. The attestation primitive is that of Discreet
 Log Contracts~\cite{dlc}: an oracle publishes anticipation points in
@@ -1867,6 +1907,12 @@ which their statements can be judged.
 \bibitem{coins} R.~Linus. Coins: a billion Bitcoin users, 2020; R.~Linus and B.~Tse, Stakechains, CoDecFin 2022.
 
 \bibitem{bitvm} R.~Linus. BitVM: compute anything on Bitcoin, 2023.
+
+\bibitem{bitvmx} S.~D.~Lerner, R.~Amela, S.~Mishra, M.~Jonas and J.~\'Alvarez Cid-Fuentes. BitVMX: a CPU for universal computation on Bitcoin, 2024. \url{https://arxiv.org/abs/2405.06842}
+
+\bibitem{cycling} A.~Riard. Replacement cycling attacks on the Lightning Network, 2023. \url{https://github.com/ariard/mempool-research/blob/2023-10-replacement-paper/replacement-cycling.pdf}
+
+\bibitem{esspi} S.~D.~Lerner, M.~Jonas and A.~Futoransky. ESSPI: ECDSA/Schnorr signed program input for BitVMX, 2025. \url{https://arxiv.org/abs/2503.02772}
 
 \bibitem{stacksat} AbdelStark. StackSat-128, 2025. \url{https://github.com/starkware-bitcoin/stacksat128}
 
