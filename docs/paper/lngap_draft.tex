@@ -1800,10 +1800,12 @@ seconds to minutes. Against a move window of a minute, both are large,
 and ``it was late'' or ``it never reached me'' can be sustained. Against a
 window of hours, as for a daily storage proof or a withdrawal claim,
 they are not: a mover can send its entry to every member, repeatedly
-and by several routes, and obtain third-party timestamps of its
-existence (OpenTimestamps~\cite{ots}, say) for nothing, and a majority
-that then claims not to have seen it in time claims something no one
-will believe, though Script still cannot tell. This is the reliance
+and by several routes, and post it where many independent parties see
+it, and a majority that then claims not to have seen it in time claims
+something no one will believe, though Script still cannot tell. (What
+counts here is publication, the entry placed before others, not a proof
+of its existence: a timestamp shows that the mover held the entry, not
+that anyone received it.) This is the reliance
 Bitcoin itself makes: flood-fill propagation is unreliable at the scale
 of seconds and dependable at the scale of hours, and nobody can stop a
 signal that has hours to spread. The venue is a binding agent of the
