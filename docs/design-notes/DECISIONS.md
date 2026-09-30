@@ -2853,6 +2853,22 @@ a prover that lies about a read, with execution consistent with the
 lie, passes. Z2's scenarios (a faked write; a failing halt) exercise
 only the execution.
 
+**Update (same day): S1 and S2 built.** The claimant's disproves now
+cover EntryPoint, ProgramCounter, Opcode (per code chunk),
+AddressesSections, FutureRead, InitializedData (per data chunk, the
+registers included), UninitializedData and Halt. The fields the heads
+could not hold (the claimed hash, the reads' last-write steps, the
+claim) travel as 64 bytes of extra data whose BLAKE3 digest the new
+head carries; a leaf that reads them checks the digest in Script (the
+prove leaf included: 156 KB, 40 kvB). Still open: InputData, ReadValue
+(a second search) and the equivocations, which need the search's moves
+on the venue. Two bugs in BitVMX (rev 299009c6) found on the way, both
+worked around here: its code and data chunks are placed at the wrong
+addresses after a section's first chunk (its Opcode and InitializedData
+challenges fire on honest steps of larger programs), and its
+uninitialised ranges include the loader-initialised registers (its
+UninitializedData challenge fires on an honest first read of sp).
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

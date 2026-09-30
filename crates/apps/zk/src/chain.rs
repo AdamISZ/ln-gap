@@ -39,12 +39,14 @@ impl FinalOutput {
         Ok(FinalOutput { tree, prove_name: proof.name.clone(), prove, timeout, delta, delta_prime })
     }
 
-    /// The prover's proof: the pair reveal under the mover's pair key over
-    /// (prior head, new head), then the prover's signature.
-    pub fn prove_tx(&self, op: OutPoint, prev: &TxOut, pay: TxOut, prover: &Keypair, pair_key: &WotsSecret, prior: &[u8; 48], new: &[u8; 48]) -> Result<Transaction> {
+    /// The prover's proof: the final step's extra data (checked against
+    /// the new head's digest), the pair reveal under the mover's pair key
+    /// over (prior head, new head), then the prover's signature.
+    pub fn prove_tx(&self, op: OutPoint, prev: &TxOut, pay: TxOut, prover: &Keypair, pair_key: &WotsSecret, step: &crate::FinalStep, prior: &[u8; 48], new: &[u8; 48]) -> Result<Transaction> {
         let mut tx = build_spend(op, &Timelock::csv(self.delta), vec![pay]);
         let sig = sign_tapscript(prover, &tx, 0, std::slice::from_ref(prev), &self.prove)?;
-        let mut w = disprove_witness(&pair_key.sign(&[prior.as_slice(), new.as_slice()].concat()).map_err(|e| anyhow!("{e}"))?);
+        let mut w = step.extra_witness();
+        w.extend(disprove_witness(&pair_key.sign(&[prior.as_slice(), new.as_slice()].concat()).map_err(|e| anyhow!("{e}"))?));
         w.push(sig.as_ref().to_vec());
         tx.input[0].witness = tapscript_witness(&w, &self.prove, &self.tree.control_block(&self.prove_name)?);
         Ok(tx)

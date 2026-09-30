@@ -13,12 +13,26 @@
 //!   pc, one leaf per code chunk of BitVMX's `CHUNK_SIZE` words;
 //! - `zk_addresses_sections`: a read, the write or the pc is outside the
 //!   section its memory witness allows, or misaligned.
+//!
+//! S2: the challenges that read the final step's extra data (the claimed
+//! hash, the reads' last-write steps, the prover's claim), each checking
+//! the new head's digest first (`leaf_with_extra`). One leaf per read
+//! (`_1`, `_2`) where BitVMX takes an unsigned read selector:
+//!
+//! - `zk_future_read_<r>`: read r's last write is after the agreed step;
+//! - `zk_initialized_<k>_<r>`: read r was never written and its value is
+//!   not the program's initialised data (per data chunk);
+//! - `zk_uninitialized_<r>`: read r was never written, its address is
+//!   uninitialised memory, and its value is not zero;
+//! - `zk_halt`: the disputed step is the claimed last step, and it is not a
+//!   success halt (ecall exit with 0) or its hash is not the claimed final
+//!   hash.
 
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use bitcoin::ScriptBuf;
-use bitcoin_script_riscv::riscv::challenges::{addresses_sections_challenge, entry_point_challenge, opcode_challenge, program_counter_challenge};
+use bitcoin_script_riscv::riscv::challenges::{addresses_sections_challenge, entry_point_challenge, future_read_challenge, halt_challenge, initialized_challenge, opcode_challenge, program_counter_challenge, uninitialized_challenge};
 use bitcoin_script_stack::stack::StackTracker;
 use bitvmx_cpu_definitions::constants::CHUNK_SIZE;
 use bitvmx_cpu_definitions::memory::{Chunk, SectionDefinition};
@@ -37,12 +51,27 @@ pub struct ProgramInfo {
     pub read_only: SectionDefinition,
     pub registers: SectionDefinition,
     pub code: SectionDefinition,
+    pub data_chunks: Vec<Chunk>,
+    pub uninitialized: SectionDefinition,
 }
 
 impl ProgramInfo {
     /// From a BitVMX program definition (its ELF).
     pub fn load(pdf: &str) -> Result<ProgramInfo> {
-        let p = ProgramDefinition::from_config(pdf)?.load_program().map_err(|e| anyhow!("{e}"))?;
+        let pd = ProgramDefinition::from_config(pdf)?;
+        let p = pd.load_program().map_err(|e| anyhow!("{e}"))?;
+        // The registers are initialised by the loader (the stack pointer is
+        // not zero), but BitVMX's get_uninitialized_ranges (rev 299009c6)
+        // lists their section as uninitialised, so its UninitializedData
+        // challenge fires on an honest first read of the stack pointer. Here
+        // the register section is initialised data, holding the loader's
+        // values, and is not among the uninitialised ranges.
+        let regs = p.sections.iter().find(|s| s.registers).ok_or_else(|| anyhow!("no register section"))?;
+        let (rstart, rend) = (regs.start, regs.start + regs.size - 1);
+        let mut data_chunks = chunks(&p.sections, |s| s.initialized && !s.is_code);
+        data_chunks.push(Chunk { base_addr: rstart, data: (0..regs.size / 4).map(|i| p.registers.get(i)).collect() });
+        let mut uninitialized = p.get_uninitialized_ranges(&pd);
+        uninitialized.ranges.retain(|&(a, b)| b < rstart || a > rend);
         Ok(ProgramInfo {
             entry: p.pc.get_address(),
             code_chunks: chunks(&p.sections, |s| s.is_code),
@@ -50,6 +79,8 @@ impl ProgramInfo {
             read_only: p.read_only_sections.clone(),
             registers: p.register_sections.clone(),
             code: p.code_sections.clone(),
+            data_chunks,
+            uninitialized,
         })
     }
 }
@@ -211,6 +242,125 @@ pub fn addresses_leaf(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> PosLe
 pub fn s1_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
     let mut v = vec![entry_point_leaf(l, key, info), program_counter_leaf(l, key), addresses_leaf(l, key, info)];
     v.extend(opcode_leaves(l, key, info));
+    v
+}
+
+// ----- S2: the leaves that read the extra data -----
+
+fn step16(from_head: impl Iterator<Item = Src>) -> Vec<Src> {
+    std::iter::repeat(Src::Konst(0)).take(8).chain(from_head).collect()
+}
+
+fn agreed16(n: usize) -> Vec<Src> {
+    step16(digs(word_digits(n, N_AGREED)))
+}
+
+fn x_word64(off: usize) -> Vec<Src> {
+    x_nibbles(off, 8).collect()
+}
+
+/// The two reads as BitVMX's challenges take them: address, value, last
+/// write step (16 nibbles), for read 1 then read 2.
+fn reads_src(p: usize) -> Vec<Src> {
+    let mut v: Vec<Src> = digs(word_digits(p, P_R1A)).chain(digs(word_digits(p, P_R1V))).collect();
+    v.extend(x_word64(X_LS1));
+    v.extend(digs(word_digits(p, P_R2A)).chain(digs(word_digits(p, P_R2V))));
+    v.extend(x_word64(X_LS2));
+    v
+}
+
+/// The selected read: (address, value, last write step).
+fn read_sel(f: &FinalStep, r: u8) -> (u32, u32, u64) {
+    if r == 1 {
+        (f.read.read_1_addr, f.read.read_1_value, f.last_step_1)
+    } else {
+        (f.read.read_2_addr, f.read.read_2_value, f.last_step_2)
+    }
+}
+
+/// Never written (BitVMX's LAST_STEP_INIT).
+pub const NEVER: u64 = u64::MAX;
+
+/// Native mirror (needs the extra data).
+pub fn future_read_fires(f: &FinalStep, r: u8) -> bool {
+    let (_, _, ls) = read_sel(f, r);
+    ls != NEVER && u64::from(f.agreed_step) < ls
+}
+
+pub fn future_read_leaf(l: &Layout, key: &WotsPublic, r: u8) -> PosLeaf {
+    let (_, n) = offsets(l);
+    let mut src = agreed16(n);
+    src.extend(x_word64(X_LS1));
+    src.extend(x_word64(X_LS2));
+    src.push(Src::Konst(i64::from(r)));
+    PosLeaf { name: format!("zk_future_read_{r}"), script: leaf_with_extra(l, key, &[(src, tracked(future_read_challenge))]), fires: Arc::new(|_, _| false) }
+}
+
+/// Native mirror: read r never written, its address in chunk `c`, its
+/// value not the chunk's word there.
+pub fn initialized_fires(f: &FinalStep, r: u8, c: &Chunk) -> bool {
+    let (a, v, ls) = read_sel(f, r);
+    ls == NEVER && a >= c.base_addr && a % 4 == 0 && ((a - c.base_addr) / 4) < c.data.len() as u32 && c.data[((a - c.base_addr) / 4) as usize] != v
+}
+
+pub fn initialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+    let (p, _) = offsets(l);
+    let mut v = vec![];
+    for (k, c) in info.data_chunks.iter().enumerate() {
+        for r in [1u8, 2] {
+            let mut src = reads_src(p);
+            src.push(Src::Konst(i64::from(r)));
+            let chunk = c.clone();
+            v.push(PosLeaf { name: format!("zk_initialized_{k}_{r}"), script: leaf_with_extra(l, key, &[(src, tracked(|st| initialized_challenge(st, &chunk)))]), fires: Arc::new(|_, _| false) });
+        }
+    }
+    v
+}
+
+/// Native mirror: read r never written, its address uninitialised, its
+/// value not zero.
+pub fn uninitialized_fires(f: &FinalStep, r: u8, info: &ProgramInfo) -> bool {
+    let (a, v, ls) = read_sel(f, r);
+    ls == NEVER && in_sections(a, &info.uninitialized) && v != 0
+}
+
+pub fn uninitialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+    let (p, _) = offsets(l);
+    [1u8, 2]
+        .into_iter()
+        .map(|r| {
+            let mut src = reads_src(p);
+            src.push(Src::Konst(i64::from(r)));
+            let sections = info.uninitialized.clone();
+            PosLeaf { name: format!("zk_uninitialized_{r}"), script: leaf_with_extra(l, key, &[(src, tracked(|st| uninitialized_challenge(st, &sections)))]), fires: Arc::new(|_, _| false) }
+        })
+        .collect()
+}
+
+/// Native mirror: the disputed step is the claimed last step, and it is
+/// not an ecall exit (93) with code 0, or its hash is not the claimed final
+/// hash.
+pub fn halt_fires(f: &FinalStep) -> bool {
+    u64::from(f.agreed_step) + 1 == f.claim_last_step && (f.read.read_1_value != 93 || f.read.read_2_value != 0 || f.read.opcode != 0x73 || f.hash != f.claim_last_hash)
+}
+
+pub fn halt_leaf(l: &Layout, key: &WotsPublic) -> PosLeaf {
+    let (p, n) = offsets(l);
+    let mut src = x_word64(X_CLS);
+    src.extend(agreed16(n));
+    src.extend(digs(word_digits(p, P_R1V)));
+    src.extend(digs(word_digits(p, P_R2V)));
+    src.extend(opcode_digits(p, n));
+    src.extend(x_nibbles(X_HASH, 20));
+    src.extend(x_nibbles(X_CLH, 20));
+    PosLeaf { name: "zk_halt".into(), script: leaf_with_extra(l, key, &[(src, tracked(halt_challenge))]), fires: Arc::new(|_, _| false) }
+}
+
+/// All of S2's leaves for a program.
+pub fn s2_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+    let mut v = vec![future_read_leaf(l, key, 1), future_read_leaf(l, key, 2), halt_leaf(l, key)];
+    v.extend(uninitialized_leaves(l, key, info));
+    v.extend(initialized_leaves(l, key, info));
     v
 }
 

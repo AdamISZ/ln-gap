@@ -206,7 +206,7 @@ fn main() -> Result<()> {
     let (op, prev) = rt.fund(&out.tree.script_pubkey(), Amount::from_sat(1_000_000))?;
     rt.mine(u64::from(DELTA))?;
     let (prior, new) = (f.prior_head(GAME, D - 1, mover_at(D - 1)), f.new_head(GAME, D, mover_at(D)));
-    let proof_tx = out.prove_tx(op, &prev, out.pay_back(Amount::from_sat(990_000)), &prover, &pair, &prior, &new)?;
+    let proof_tx = out.prove_tx(op, &prev, out.pay_back(Amount::from_sat(990_000)), &prover, &pair, &f, &prior, &new)?;
     match rt.test_accept(&proof_tx) {
         Ok(_) => {
             let (txid, h) = rt.send_and_confirm(&proof_tx)?;

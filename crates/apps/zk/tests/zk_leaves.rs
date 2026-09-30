@@ -70,6 +70,7 @@ fn trace() -> Vec<FinalStep> {
                 hash: h20(h),
                 witness: 0,
                 agreed_step: 0,
+                ..Default::default()
             };
             prev = s.hash;
             s
@@ -92,7 +93,9 @@ fn truthy(v: &[u8]) -> bool {
 /// Run a leaf in the simulator: (spendable, peak stack).
 fn run(leaf: &PosLeaf, sk: &WotsSecret, s: &FinalStep) -> (bool, usize) {
     let (p, n) = heads(s);
-    match lngap_script32::sim::run_peak(leaf.script.as_script(), reveal(sk, &p, &n)) {
+    let mut w = s.extra_witness();
+    w.extend(reveal(sk, &p, &n));
+    match lngap_script32::sim::run_peak(leaf.script.as_script(), w) {
         Ok((st, peak)) => {
             assert_eq!(st.len(), 1, "{}: cleanstack", leaf.name);
             (truthy(&st[0]), peak)
@@ -133,7 +136,8 @@ fn step_hash_reproduces_the_emulator() {
 fn prove_leaf_for(sk: &WotsSecret, i: usize) -> PosLeaf {
     let s = trace()[i];
     let ins = riscv_decode::decode(s.read.opcode).unwrap();
-    let holds = Arc::new(move |p: &[u8; 48], n: &[u8; 48]| FinalStep::parse(p, n) == s);
+    let sh = heads(&s);
+    let holds = Arc::new(move |p: &[u8; 48], n: &[u8; 48]| (*p, *n) == sh);
     prove_leaf(&Layout::at(D, GAME, mover_at(D)), &sk.public(), &ins, s.read.micro, holds)
 }
 
@@ -189,7 +193,9 @@ fn final_step_on_regtest() {
         let mut w = match parked {
             Some(s) => {
                 let (p, n) = heads(s);
-                reveal(&sk, &p, &n)
+                let mut w = s.extra_witness();
+                w.extend(reveal(&sk, &p, &n));
+                w
             }
             None => vec![],
         };

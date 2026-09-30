@@ -38,10 +38,9 @@ fn digest(data: &[u8]) -> [u8; 20] {
 /// the 40-nibble digest on top: fails unless equal.
 fn check_script(n: u32) -> ScriptBuf {
     let mut st = StackTracker::new();
-    let msg = st.define(n * 2, "msg");
-    let dg = st.define(40, "digest");
+    let _ = st.define(n * 2, "msg");
+    let _ = st.define(40, "digest");
     st.to_altstack();
-    let _ = msg;
     let h = blake3::blake3(&mut st, n, 5);
     let dg = st.from_altstack();
     let _ = dg;

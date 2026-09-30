@@ -95,7 +95,8 @@ fn prove_leaf_for(sk: &WotsSecret, s: &FinalStep) -> Option<PosLeaf> {
 fn proves(sk: &WotsSecret, s: &FinalStep) -> bool {
     let Some(leaf) = prove_leaf_for(sk, s) else { return false };
     let (p, n) = heads(s);
-    let w = disprove_witness(&sk.sign(&[p.as_slice(), n.as_slice()].concat()).unwrap());
+    let mut w = s.extra_witness();
+    w.extend(disprove_witness(&sk.sign(&[p.as_slice(), n.as_slice()].concat()).unwrap()));
     matches!(lngap_script32::sim::run(leaf.script.as_script(), w), Ok(st) if st.len() == 1 && st[0] == [1])
 }
 
@@ -137,7 +138,7 @@ fn resolved_on_regtest() {
         let (op, prev) = rt.fund(&out.tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
         rt.mine(u64::from(DELTA)).unwrap();
         let (p, n) = heads(&s.final_step);
-        let proof = out.prove_tx(op, &prev, out.pay_back(Amount::from_sat(900_000)), &prover, &sk, &p, &n).unwrap();
+        let proof = out.prove_tx(op, &prev, out.pay_back(Amount::from_sat(900_000)), &prover, &sk, &s.final_step, &p, &n).unwrap();
         if honest {
             let (txid, h) = rt.send_and_confirm(&proof).unwrap();
             println!("{name}: the prover proves step {} ({}): {txid} at {h}, {} vB", s.step, pl.name, proof.vsize());

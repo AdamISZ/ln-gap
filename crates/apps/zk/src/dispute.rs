@@ -53,8 +53,9 @@ fn h20(hex_str: &str) -> Result<[u8; 20]> {
     hex::decode(hex_str)?.try_into().map_err(|_| anyhow!("a step hash is 20 bytes: {hex_str}"))
 }
 
-/// A BitVMX trace record with its hashes, as a [`FinalStep`].
-pub fn final_step(t: &TraceRWStep, step_hash: &str, next_hash: &str) -> Result<FinalStep> {
+/// A BitVMX trace record with its hashes and the prover's claim (last
+/// step, final hash), as a [`FinalStep`].
+pub fn final_step(t: &TraceRWStep, step_hash: &str, next_hash: &str, claim_last_step: u64, claim_last_hash: &str) -> Result<FinalStep> {
     Ok(FinalStep {
         prev_hash: h20(step_hash)?,
         read: Read {
@@ -76,6 +77,10 @@ pub fn final_step(t: &TraceRWStep, step_hash: &str, next_hash: &str) -> Result<F
         hash: h20(next_hash)?,
         witness: t.witness.unwrap_or(0),
         agreed_step: u32::try_from(t.step_number - 1).map_err(|_| anyhow!("step beyond 32 bits"))?,
+        last_step_1: t.read_1.last_step,
+        last_step_2: t.read_2.last_step,
+        claim_last_step,
+        claim_last_hash: h20(claim_last_hash)?,
     })
 }
 
@@ -113,6 +118,6 @@ pub fn search(pdf: &str, input: &[u8], dir: &Path, prover: &Behaviour, verifier:
     if trace.step_number != step + 1 {
         bail!("the final trace is of step {} but the last agreed step is {step}", trace.step_number);
     }
-    let final_step = final_step(&trace, &step_hash, &next_hash)?;
+    let final_step = final_step(&trace, &step_hash, &next_hash, claim.1, &claim.2)?;
     Ok(Some(Searched { claim, rounds, step: trace.step_number, trace, final_step }))
 }
