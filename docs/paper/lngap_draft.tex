@@ -1708,10 +1708,13 @@ what the majority decides, and what it holds.
 \item \emph{Who the members are.} A federation's members must be known,
   since users trust them by name and their legal exposure is part of
   the security, which is also what makes them compellable. The venue's
-  members need no legal identity at all: each is a bonded output and a
-  key, and should be pseudonymous. Compelling one achieves little, since
-  it holds nothing; the most it can be made to do is misstate the time
-  of a move in a contract it serves, under its own key.
+  members need no legal identity: each is a bonded output and a key.
+  Whether they are pseudonymous members of an open roster or identified
+  operators with reputations at stake is a choice for the roster and the
+  contracting parties, and committees can mix the two; the design does
+  not choose. Either way, compelling a member achieves little, since it
+  holds nothing; the most it can be made to do is misstate the time of a
+  move in a contract it serves, under its own key.
 \end{itemize}
 The machinery of the preceding sections exists to shrink what the
 majority decides. Script judges content, one-time signatures bind each
@@ -1789,10 +1792,10 @@ than enforcement, making misbehaviour publicly verifiable
 This section describes extensions that are not yet implemented. They
 address the one threat of Section~\ref{sec:security} that the design
 leaves to economics alone: a colluding majority of the venue. There are
-three levers: \emph{whose} majority it is (a committee drawn per
-contract from a bonded roster), \emph{how large} it must be to steal
-(two-sided votes and a void zone), and whether its lie \emph{can be
-shown} (publication on Bitcoin, or an audit layer).
+two levers: \emph{whose} majority it is (a committee drawn per
+contract from a bonded roster), and whether its lie \emph{can be
+shown} (publication on Bitcoin, or an audit layer). The threshold
+itself stays a bare majority (Section~\ref{sec:voidzone} says why).
 
 \subsection{The threshold adversary}
 \label{sec:threshold}
@@ -1878,12 +1881,10 @@ pre-signed graph embeds its points.
 roster, not a majority of one set. If it controls a fraction $f$ of the
 roster, the chance that a committee of a few dozen has a colluding
 majority is small while $f$ is well below a half, and it falls
-exponentially with the committee's size; with the void zone of
-Section~\ref{sec:voidzone}, where theft needs two thirds, committees of
-a few dozen suffice even when $f$ approaches a third. Collusion now
+exponentially with the committee's size. Collusion now
 takes one of two forms, and both cost more than before. A \emph{broad}
 attack, taking many contracts at once, needs a share of the whole
-roster near a half (or two thirds): what a fixed venue's majority
+roster near a half: what a fixed venue's majority
 already posed, spread over a larger set. A \emph{targeted} attack,
 bribing a particular committee after the draw, reaches only the
 contract that committee serves. The aggregate gain $G$ of
@@ -1952,34 +1953,34 @@ venue:
   needs the record of the audit layer below.
 \end{itemize}
 
-\subsection{Two-sided votes and a void zone}
+\subsection{The threshold: why a bare majority}
 \label{sec:voidzone}
 
-Two changes to the contract, not yet implemented, raise the size of
-coalition that can steal.
+A suggestion, not built: \emph{two-sided votes}. Today a member's
+silence counts in effect as ``published'', so members protecting a late
+move need only stay quiet, indistinguishable from members that are
+offline. If each member instead held two one-bit keys per move,
+``published in time'' and ``not published in time'', and revealed one,
+a colluder would have to sign a false statement rather than hide behind
+silence, turning a deniable omission into an attributable lie; and a
+member revealing both would contradict itself provably.
 
-\emph{Two-sided votes.} Today a member makes one statement per move,
-the flag (``not published in time''), and a member that says nothing
-counts in effect as saying the move was published; a colluder
-protecting a late move can simply stay silent, indistinguishable from an
-offline member. With two-sided votes each member holds two one-bit keys
-per move, ``published in time'' and ``not published in time'', and
-reveals one of them. A colluder must then sign a false statement rather
-than hide behind silence; an offline member counts for neither side; and
-a member that reveals both has contradicted itself, provably, even in
-Script.
-
-\emph{A void zone.} Today a single threshold decides: at least $t$ flags
-and the claimant wins, otherwise the refutation stands. With two
-thresholds, at least two thirds voting ``not published'' pays the
-claimant, at most one third pays the mover, and anything in between
-refunds both stakes. Stealing then needs two thirds of the committee in
-either direction; a coalition between one and two thirds can only force
-a refund. This is the familiar trade of Byzantine agreement, one third
-to block progress and two thirds to break safety. In the contract it
-costs a second set of $n$ points in the vote-counting leaf and one more
-leaf, the refund; its price in play is that an honest winner can be
-griefed into a refund by a sizeable minority.
+Two-sided votes suggest a higher threshold: two thirds of ``not
+published'' pays the claimant, two thirds of ``published'' the mover,
+and anything between refunds both stakes, so that stealing in either
+direction needs two thirds. We do not adopt it, because a refund is not
+a neutral outcome. The party most willing to bribe members is the one
+about to lose, and to it a refund is an escape: with the middle zone, a
+coalition of just over a third converts a loss into a refund, where
+today changing the outcome needs a majority. Other middle outcomes fare
+no better: burning both stakes invites griefing by the same third, a
+default to either side lowers that side's opponent's bar instead, and an
+appeal to a further committee only postpones the choice. With two
+outcomes and a decision that must always be reached, a two-thirds bar
+in both directions needs a third outcome, and every third outcome is an
+escape, a punishment or a postponement. The bare majority stays; the
+cost of an attack is raised instead by the other levers of this
+section.
 
 \subsection{Why not publish on Bitcoin?}
 
@@ -2107,7 +2108,7 @@ the fact.}
 
 \subsection{What remains}
 
-A committee majority, now two thirds, can still take a pot. With an
+A committee majority can still take a pot. With an
 audit layer it can do so only provably, at the cost of every colluder's
 franchise; security remains economic at the top, like proof of work,
 but the attack is no longer deniable. One step further is possible: if
