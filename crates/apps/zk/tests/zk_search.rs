@@ -18,23 +18,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bitcoin::key::Keypair;
-use bitcoin::script::Builder;
-use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
+use bitcoin::Amount;
 use bitvmx_cpu_definitions::trace::{TraceStep, TraceWrite};
 use emulator::decision::challenge::{prover_execute, ForceCondition};
 use emulator::executor::utils::{FailConfiguration, FailExecute};
 use emulator::loader::program_definition::ProgramDefinition;
-use lngap_btc::keys::{xonly, Seed};
+use lngap_btc::keys::Seed;
 use lngap_btc::regtest::Regtest;
-use lngap_btc::script::BuilderExt;
-use lngap_btc::sighash::sign_tapscript;
-use lngap_btc::taptree::{Leaf, TapTree};
-use lngap_btc::tx::{build_spend, Timelock};
-use lngap_btc::witness::tapscript_witness;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_pos::instance::mover_at;
 use lngap_pos::refute::{disprove_witness, pair_key};
 use lngap_pos::ttt::{Layout, PosLeaf};
+use lngap_zk::chain::FinalOutput;
 use lngap_zk::dispute::{search, Behaviour, Searched};
 use lngap_zk::*;
 
@@ -138,37 +133,20 @@ fn resolved_on_regtest() {
     for (name, s, honest) in cases {
         // the final step's output: the proof of this step's class, the timeout
         let pl = prove_leaf_for(&sk, &s.final_step).expect("a decodable opcode");
-        let prove = {
-            let mut b = Builder::new().csv(DELTA).checksigverify(&xonly(&prover)).into_script().into_bytes();
-            b.extend_from_slice(pl.script.as_bytes());
-            ScriptBuf::from_bytes(b)
-        };
-        let timeout = Builder::new().csv(DELTA + DELTA_PRIME).checksig(&xonly(&claimant)).into_script();
-        let tree = TapTree::new(vec![Leaf::new(pl.name.clone(), prove.clone(), Timelock::csv(DELTA)), Leaf::new("timeout", timeout.clone(), Timelock::csv(DELTA + DELTA_PRIME))]).unwrap();
-        let spend = |op: OutPoint, prev: &TxOut, leaf: &str, script: &ScriptBuf, lock: Timelock, key: &Keypair, parked: bool| -> Transaction {
-            let mut tx = build_spend(op, &lock, vec![TxOut { value: Amount::from_sat(900_000), script_pubkey: tree.script_pubkey() }]);
-            let sig = sign_tapscript(key, &tx, 0, std::slice::from_ref(prev), script).unwrap();
-            let mut w = if parked {
-                let (p, n) = heads(&s.final_step);
-                disprove_witness(&sk.sign(&[p.as_slice(), n.as_slice()].concat()).unwrap())
-            } else {
-                vec![]
-            };
-            w.push(sig.as_ref().to_vec());
-            tx.input[0].witness = tapscript_witness(&w, script, &tree.control_block(leaf).unwrap());
-            tx
-        };
-        let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
+        let out = FinalOutput::new(&pl, &prover, &claimant, DELTA, DELTA_PRIME).unwrap();
+        let (op, prev) = rt.fund(&out.tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
         rt.mine(u64::from(DELTA)).unwrap();
-        let proof = spend(op, &prev, &pl.name, &prove, Timelock::csv(DELTA), &prover, true);
+        let (p, n) = heads(&s.final_step);
+        let proof = out.prove_tx(op, &prev, out.pay_back(Amount::from_sat(900_000)), &prover, &sk, &p, &n).unwrap();
         if honest {
             let (txid, h) = rt.send_and_confirm(&proof).unwrap();
             println!("{name}: the prover proves step {} ({}): {txid} at {h}, {} vB", s.step, pl.name, proof.vsize());
         } else {
             let err = rt.test_accept(&proof).expect_err("no proof of a wrong step");
             println!("{name}: no proof of step {} ({}): {err}", s.step, pl.name);
+            let to = out.timeout_tx(op, &prev, out.pay_back(Amount::from_sat(900_000)), &claimant).unwrap();
+            rt.test_accept(&to).expect_err("the timeout waits for delta + delta'");
             rt.mine(u64::from(DELTA_PRIME)).unwrap();
-            let to = spend(op, &prev, "timeout", &timeout, Timelock::csv(DELTA + DELTA_PRIME), &claimant, false);
             let (txid, h) = rt.send_and_confirm(&to).unwrap();
             println!("{name}: the claimant's timeout: {txid} at {h}");
         }
