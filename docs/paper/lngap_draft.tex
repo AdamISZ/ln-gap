@@ -59,7 +59,7 @@
 
 \section{Abstract}
 
-We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection), based on the use of a proof of publication ledger governed by a threshold of validators. The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry in the ledger, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing of entries in the ledger require only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trust-minimised: they rely on the honesty of a majority of the PoP ledger validators (a committee that can be drawn at random, per contract, from a large bonded roster), whose misbehaviour is attributable and who themselves are not required to know anything about the bilateral contract details, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by bonds (timelocked funds, whose owners lose their future fees when fraud is attributed, and which can optionally be made burnable).
+We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection), based on a \emph{venue}: a committee of validators that acts as a public clock for each contract, not as a ledger. The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing entries requires only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trust-minimised: they rely on the honesty of a majority of the venue's validators (a committee that can be drawn at random, per contract, from a large bonded roster), whose misbehaviour is attributable and who themselves are not required to know anything about the bilateral contract details, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by bonds (timelocked funds, whose owners lose their future fees when fraud is attributed, and which can optionally be made burnable).
 
 \section{Introduction}
 
@@ -78,6 +78,8 @@ This is basically ``\underline{Filecoin without an altcoin}'', as designed in th
 Suppose you want to play a game on Lightning, like chess, for a monetary reward, but don't want to have to trust anyone; the money should move specifically according to the agreed game rules.
 
 I mention chess not because it's a good game to bet on (it isn't!) but because it's a game that's sufficiently complex that expressing it in onchain transactions (most specifically, proving a that move is illegal; proving that a move is legal would be way worse!) gets very expensive and we want to avoid it.
+
+That such games can be played on chain at all, in today's Bitcoin, was shown by Poelstra~\cite{poelstrastate}: each player signs the next game state with a one-time (Lamport) signature, which Script can read, and a script checks that successive states are related by the rules, so tic-tac-toe needs 27 pre-signed transactions rather than one per path through the game tree (about 550,000), and the same approach extends in principle to chess. His distinction between ``Small Script'', expressive arithmetic on 32-bit values that cannot see the transaction, and ``Big Script'', which can, through \texttt{OP\_CHECKSIG}, is a useful lens for what follows: the predicates that judge a move here are Small Script over one-time-signed state, and only the payout is Big Script. What that work leaves open is the one-move-per-transaction pace of play on chain, which is the subject of the rest of this section.
 
 One approach to doing this offchain is called ForceMove~\cite{forcemove}. The idea is relatively simple: behave optimistically, and fallback to onchain transactions as the arbiter if your opponent does not follow the rules you agreed to. The reason for its name is that, once on-chain, the opponent is \emph{forced to move} by having a timeout expressed in the blockchain's consensus logic. So in Bitcoin this would mean that the Script controlling the funds has a shape like: 
 
@@ -166,15 +168,30 @@ the arrows are spending conditions, not messages.}
 \end{figure}
 
 
-\subsection{Building a proof of publication ledger}
+\subsection{From a proof of publication ledger to a venue}
 
-We can build a single-use seal using Bitcoin itself. That is of course a well known primitive by now, and exemplified in the simple, but useful, OpenTimestamps project~\cite{ots}. As discussed earlier, it's not practical to use this to adjudicate onchain, because Bitcoin SPV proofs in Script are not practical. If we make a separate proof of publication ledger, we could use proof of work as a consensus mechanism for deciding a canonical chain, or we could use a set of bonded validators, where the security assumption is: if members of the quorum equivocate on the state, their bond can be slashed. This is the equivalent economic security assumption of the reorg threat in the proof of work variant. Let's consider PoW and bonded validator\footnote{We are not calling it proof of stake, because while the consensus algorithm may be similar, it's a notably different security construction than one in which the stake is the tokens of the ledger itself; here the ``stake'' is the bond \emph{in Bitcoin}, a timelocked slashable-to-burn output on the Bitcoin blockchain itself.}.
+The design began, as this section does, from the idea of a separate
+proof of publication ledger, and the options below are ledgers. It
+turned out that a ledger is more than a two-party contract needs. No
+order across moves or across contracts is used, and no reader other
+than the two players ever consults a contract's record, so no history
+needs to be unique: what each move needs is that it was made available,
+and a decision whether that happened by its due time. Uniqueness of a
+move comes from the mover's own one-time key, not from the record. We
+therefore call the service a \emph{venue}, and the combination of
+publication with deadlines a \emph{public clock}
+(Section~\ref{sec:beyond}); a committee can be drawn per contract
+(Section~\ref{sec:roster}), and uniqueness in the sense of a
+single-use seal is needed only for facts that many contracts share
+(Section~\ref{sec:shared}).
+
+Bitcoin itself gives proof of publication. That is of course a well known primitive by now, and exemplified in the simple, but useful, OpenTimestamps project~\cite{ots}. As discussed earlier, it's not practical to use this to adjudicate onchain, because Bitcoin SPV proofs in Script are not practical. If we make a separate one, we could use proof of work as a consensus mechanism for deciding a canonical chain, or we could use a set of bonded validators, where the security assumption is: if members of the quorum equivocate on the state, their bond can be slashed. This is the equivalent economic security assumption of the reorg threat in the proof of work variant. Let's consider PoW and bonded validator\footnote{We are not calling it proof of stake, because while the consensus algorithm may be similar, it's a notably different security construction than one in which the stake is the tokens of the ledger itself; here the ``stake'' is the bond \emph{in Bitcoin}, a timelocked slashable-to-burn output on the Bitcoin blockchain itself.}.
 
 \subsubsection{Proof of Work}
 
 As already noted, proving inclusion in Bitcoin's PoW chain with its SHA2 linked chain of headers is not practical in Bitcoin Script, without new opcodes (for example CAT for Merkle trees; we defer the details to many other papers and discussions). But since we are designing from scratch, we are not limited to that.
 
-Considering that arithmetic in Bitcoin Script is more or less limited to ``Little Script'' which operates on 4 byte numbers, what we can do is design the proof of work algorithm to use nibble arithmetic only. This is realized in our sample code, in the \texttt{n4bit} crate of the proof of concept~\cite{lngapcode}. Note that there had already been a very similar construction made in 2025 by AbdelStark, see StackSat-128~\cite{stacksat}. So in general terms, imagine the proof of work hashing uses this nibble based algo, such that proving a hash chain is correct in Bitcoin Script is actually feasible. This would mean a contract participant can post something to the proof of publication ledger, and if their counterparty challenges, saying ``you didn't publish anything'', they can prove that in fact they did, in Script, thus winning the dispute over the pot.
+Considering that arithmetic in Bitcoin Script is more or less limited to what Poelstra calls ``Small Script''~\cite{poelstrastate}, which operates on 4 byte numbers, what we can do is design the proof of work algorithm to use nibble arithmetic only. This is realized in our sample code, in the \texttt{n4bit} crate of the proof of concept~\cite{lngapcode}. Note that there had already been a very similar construction made in 2025 by AbdelStark, see StackSat-128~\cite{stacksat}. So in general terms, imagine the proof of work hashing uses this nibble based algo, such that proving a hash chain is correct in Bitcoin Script is actually feasible. This would mean a contract participant can post something to the proof of publication ledger, and if their counterparty challenges, saying ``you didn't publish anything'', they can prove that in fact they did, in Script, thus winning the dispute over the pot.
 
 Consider reorgs and canonical history: the key feature of proof of work is that the canonical history is defined by the heaviest chain. So imagine: Alice says ``Bob didn't publish his move'', then Bob says ``yes I did: it's in this PoP ledger block at this height, and here's the header chain back to genesis/checkpoint''. Alice can counter-refute: ``no you didn't: here's an alternate header chain with more weight, proving that yours is not canonical''. This is of course both necessary but also shows the fragility: necessary because otherwise Bob can "mine" a super-cheap chain that costs almost no PoW, fragile because without the kind of enormous weight of something like Bitcoin's PoW chain, reorgs could be easy and frequent even without adversarial behavior.
 
@@ -184,28 +201,28 @@ The least desirable aspect of the PoW option is in there: it's that this costs s
 
 \subsubsection{Bonded validator quorum}
 
-The alternative is to reach consensus over a quorum, on the blocks of the proof of publication ledger.
+The alternative is to have a quorum of bonded validators decide what was published.
 
 It turns out that with careful thought, it's possible to construct a version of this that is both sufficiently efficient to enforce the necessary rules in Script, and also that has the right kind of both positive and negative incentives, purely measured in bitcoin, without inserting a new altcoin.
 
-A naive idea of how to do this hits a snag: Bitcoin Script can read Winternitz signatures in a couple of kilobytes; weighty but OK. It cannot, directly, read Schnorr or BLS signatures on arbitrary messages (the former without CHECKSIGFROMSTACK, the latter .. well that would be a much bigger consensus update!). The latter two can support an aggregated signature; the former (Winternitz, or Lamport) cannot. To assess 66 out of 100 Winternitz signatures in a Bitcoin signature seems patently absurd.
+A naive idea of how to do this hits a snag: Bitcoin Script can read Winternitz signatures in a couple of kilobytes; weighty but OK. It cannot, directly, read Schnorr or BLS signatures on arbitrary messages (the former without CHECKSIGFROMSTACK, the latter .. well that would be a much bigger consensus update!). An aggregate signature (FROST, BLS) would let a whole quorum be checked at once, but it cannot say which members signed; and to assess 66 out of 100 Winternitz signatures in a Bitcoin script seems patently absurd.
 
-Therefore we consider the natural question: can you reproduce the one-time nature of hash-based OTS schemes in an elliptic curve context? We claim that you can, using something we'll call EC-OTS; the detailed construction is in Section~\ref{sec:graph:math}. That construction might be of independent interest, since it gives the same basic effect as a hash-based WOTS, but using EC curve points instead.
+Both problems go away once we look at what the validators actually have to say. The quorum never has to sign the \emph{content} of a move. One member attests the entry (the positive statement, 1 of $n$), and the quorum says only one bit per move: ``not published by its due time''. A one-bit statement costs one key per member, a point whose secret the member reveals when the statement holds, and $t$ of $n$ such reveals are counted in Script with \texttt{OP\_CHECKSIGADD}, each naming the member who made it. The threshold is a count of named one-bit signatures, not a threshold signature, so it is attributable by construction. (A hash preimage per member would serve equally well for the count.)
 
-But taking that construction and saying ``we'll have a $\frac{2}{3}$ threshold attest to state updates in an EC OTS verifiable in Script'' really doesn't give you what you need.
+The content attestation, by the one member, must also be read by Script, and here too a hash-based one-time signature would suffice: a table of preimages per (chunk, value), revealing those for the entry's values. We use instead an elliptic-curve version of the same one-time idea, which we call EC-OTS (Section~\ref{sec:graph:math}): the venue publishes an \emph{anticipation point} per (chunk, value) and seals an entry by revealing the discrete logs of the points it selects, and Script checks possession of each revealed scalar with one \texttt{OP\_CHECKSIG}. The reason for the curve is not Script but payment. Scalars and points add, so the attestation of a whole entry by a particular member collapses into a single point: the sum of the points the entry selects plus that member's proposer point, whose discrete log becomes known only when that member seals exactly that entry. That is an ordinary adaptor point, so the mover can pay the member for sealing, atomically, with a pre-signed transaction that the member's scalar completes (Section~\ref{sec:graph:fee}). This is the shape of a DLC, whose anticipation points exist so that transactions can be made conditional on an oracle's outcome; here the outcome is ``this entry was sealed, by this member'', and the transaction is the member's fee. Hash preimages do not add, and a lock on a whole entry's worth of them would be a special output checking every one in Script, not a point a payment can be locked to.
 
-What you need:
+What you need, then:
 
 \begin{itemize}
-\item \textbf{Liveness} : can never be promised, just like in a proof of work chain, but if \emph{any} member of the validator can enter your publication in a slot, then some approximate ``1 of $n$ liveness'' can be claimed, and this is an acceptable security model.
-\item \textbf{A large enough quorum}: Credibility of the above as well as what follows, requires some relatively large, heterogeneous and ideally permissionless-entry set of validators. This naturally leads to thinking of FROST-style thresholds, with O(1) publication, but (see next entry) that is not actually viable and so we go with a trick to make thresholds of 50 of 100 be viable. Even figures 10 times higher than that are \emph{theoretically} possible, but in practice we would not go much higher.\footnote{Section~\ref{sec:accountable} returns to this: a large, dynamic set need not be verified in Script at all, if its role is to make a small, Script-legible committee accountable.}
-\item \textbf{Fraud is attributable}: this is the reason why a naive FROST-style threshold is unworkable: by its nature, such a threshold signature cannot reveal which members of the validator set committed the fraud. And punishing the entire set of such members when only a threshold have committed the fraud, is clearly unworkable. To make fraud attribution feasible we use what we call a ``one-bit signature'':  $t$ of $n$ OP\_CHECKSIGADD operations can prove that a binary true/false was attested to. More on that in a moment.
-\item \textbf{Positve incentives in bitcoin}: this is possible in a more general ``sidechain'' model (pay fees to move around coins on the sidechain), but this is not a sidechain, nor any kind of blockchain: the only consensus maintained on the ledger is the canonical history of publications; the semantics of the publications are none of its business. Here we have validators post bonds on bitcoin (timelocked coins) and receive fees for its publication efforts, atomically with those publications, over Lightning channels, using adaptors. This incentivizes honest participation and disincentivizes fraud or dishonesty.
+\item \textbf{Liveness} : can never be promised, just like in a proof of work chain, but if \emph{any} member of the validator set can enter your publication in a slot, then some approximate ``1 of $n$ liveness'' can be claimed, and this is an acceptable security model.
+\item \textbf{A large enough quorum}: Credibility of the above as well as what follows, requires some relatively large, heterogeneous and ideally permissionless-entry set of validators. At one key per member per move, a quorum of 50 of 100 is practical in Script. Even figures 10 times higher than that are \emph{theoretically} possible, but in practice we would not go much higher.\footnote{Section~\ref{sec:accountable} returns to this: a large, dynamic set need not be verified in Script at all, if its role is to make a small, Script-legible committee accountable.}
+\item \textbf{Fraud is attributable}: this is why the quorum's statements are one-bit signatures by named members and not a threshold signature. A FROST-style signature by its nature cannot reveal which members of the validator set committed the fraud, and punishing the entire set when only a threshold of it committed the fraud is clearly unworkable.
+\item \textbf{Positive incentives in bitcoin}: this is possible in a more general ``sidechain'' model (pay fees to move around coins on the sidechain), but this is not a sidechain, nor any kind of blockchain: the only thing the validators decide is whether each publication was made in time; the semantics of the publications are none of their business. Here we have validators post bonds on bitcoin (timelocked coins) and receive fees for their publication efforts, atomically with those publications, over Lightning channels, using the adaptor points above. This incentivizes honest participation and disincentivizes fraud or dishonesty.
 \end{itemize}
 
-You may be wondering why we insist on \emph{attributable} fraud. Without attribution, users of the ledger cannot discern which members they do not want to use in future, if something fraudulent is published. With attribution, a member caught contradicting itself is ejected: it loses its future fees while its bonded coins (coins locked to a CLTV output) sit out their timelock. It's possible to go further, as an option: equivocation evidence can be made to unlock the bonded coins to anyone, but without covenants this is not a simple burn, it is a miner fee-race burn: since the evidence is public, any miner can include its own spend paying the whole bond as fee, so the money game-theoretically ends up with the miner of the first eligible block, and the cheater recovers it only by mining that block itself. We do not make this the baseline (Section~\ref{sec:venue}).
+You may be wondering why we insist on \emph{attributable} fraud. Without attribution, users of the venue cannot discern which members they do not want to use in future, if something fraudulent is published. With attribution, a member caught contradicting itself is ejected: it loses its future fees while its bonded coins (coins locked to a CLTV output) sit out their timelock. It's possible to go further, as an option: equivocation evidence can be made to unlock the bonded coins to anyone, but without covenants this is not a simple burn, it is a miner fee-race burn: since the evidence is public, any miner can include its own spend paying the whole bond as fee, so the money game-theoretically ends up with the miner of the first eligible block, and the cheater recovers it only by mining that block itself. We do not make this the baseline (Section~\ref{sec:venue}).
 
-\subsection{What the proof of publication ledger attests to}
+\subsection{What the venue attests to}
 
 We'll continue to use the two simple motivating examples: tic-tac-toe, and chess. We'll discuss external facts, i.e. something not limited to a 2 player game, in Section~\ref{sec:beyond}.
 
@@ -400,13 +417,11 @@ to the whole world, visibly; the venue attests per contract, so a
 colluding majority can act against one contract silently. Submission
 is private between mover and member, so a false flag is attributable
 but, without a public record, not provably false, where a blatant price
-lie is evident to all. Price oracles are blind to their users; the
-venue's members see each contract's identifier and timetable, which
-also gives a briber someone to approach. And a price DLC needs its
+lie is evident to all. And a price DLC needs its
 oracle once, at maturity, while a game needs the venue at every move.
 The self-certifying property also covers only the positive fact: for
-absence, nobody can produce evidence unless posting is mandatory, and
-the venue's trust concentrates there.
+absence, nobody can produce evidence unless every entry goes to a
+public record, and the venue's trust concentrates there.
 
 \begin{center}
 \small
@@ -418,8 +433,7 @@ can the interested party produce proof? & no & yes, for publication (not for abs
 manipulating the underlying & a real attack & not applicable, apart from network attacks \\
 what the oracle decides & the payout directly & timing only; content is cryptographic \\
 can a lie be aimed at one contract? & no: it is broadcast & yes, silently (mitigated by sampling, Section~\ref{sec:roster}) \\
-publicly checkable by default & yes, for blatant lies & no; needs \texttt{OP\_RETURN} or an audit layer \\
-oracle's knowledge of its users & none & knows each contract exists \\
+publicly checkable by default & yes, for blatant lies & no; needs an audit layer (Section~\ref{sec:audit}) \\
 liveness needed & once, at maturity & at every move \\
 \bottomrule
 \end{tabular}
@@ -1663,26 +1677,42 @@ costs a second set of $n$ points in the vote-counting leaf and one more
 leaf, the refund; its price in play is that an honest winner can be
 griefed into a refund by a sizeable minority.
 
-\subsection{Publishing on Bitcoin}
+\subsection{Why not publish on Bitcoin?}
 
-A mover who fears the venue can publish its entry on Bitcoin, in an
-\texttt{OP\_RETURN}, confirmed with median-time-past before the move's
-due time. This proves nothing to Script, but it removes the excuse:
-if members are required to watch for the venue's tagged entries on
-Bitcoin, flagging a move that Bitcoin shows as published is a lie that
-anyone with a node can see. Optional posting protects only the mover,
-against false flags; absence has no witness when posting is optional. If
-posting is \emph{mandatory}, absence becomes checkable too (no tagged
-entry for the move before its due time), and both attacks become
-publicly verifiable. But mandatory posting puts every move on Bitcoin in
-the honest case, which is what ForceMove avoids: the dispute stays
-$O(1)$, but the honest game pays per move, and the cadence must allow
-for confirmation times and fee spikes. It is a niche mode for slow,
-high-value games, not a default. It shows, however, that the venue's
-honesty \emph{can} be made publicly checkable; the question is where the
-record should live.
+The obvious public record is Bitcoin itself. A mover posts its entry in
+an \texttt{OP\_RETURN}, confirmed with median-time-past before the
+move's due time, and members are required to watch for such postings.
+Publication is self-certifying (Section~\ref{sec:oracle}), so flagging a
+move that Bitcoin shows as published becomes a lie anyone with a node
+can see; if posting is mandatory, absence becomes checkable too.
+
+Mandatory posting is not a solution. It puts every move on Bitcoin in
+the honest case, which is the per-move cost the venue exists to avoid.
+The cost is not quite that of an on-chain game, since a posting carries
+the entry and not the verification of the move, which for a game with
+weighty rules is most of the cost; but it is still a transaction per
+move, with confirmation times and fee spikes setting the pace of play.
+
+Posting only in distress is more reasonable, as an option. With a long
+move window, say two hours, a mover that sees no seal within minutes of
+submitting, where it expects one within seconds, posts its entry then.
+This happens rarely, and the price is paid in long timeouts rather than
+fees. Its reach is limited in two ways. It answers a false flag, since
+the posting shows anyone with a node that the move was published in
+time; it does not answer the opposite lie, a majority that covers for a
+mover by sealing its late move or withholding its flags, because when
+posting is optional a missing posting proves nothing, and absence still
+has no public witness. And the evidence is for observers, not Script:
+the flags still decide the contract, and the posting makes the lie
+provable, to be punished outside it (the roster's bond,
+Section~\ref{sec:roster}).
+
+Both modes show that a public
+record, not Script, is what makes the venue's honesty checkable. The
+question is where that record should live.
 
 \subsection{A third layer}
+\label{sec:audit}
 
 The record need not live on Bitcoin, and it need not be verified in
 Script. Its only purpose is to let observers judge the venue after the
@@ -1721,6 +1751,18 @@ witness-cosigned transparency logs~\cite{ct} and
 OpenTimestamps~\cite{ots}. Script never verifies the audit layer, so the
 limit Script places on quorum size no longer limits the size of the
 trusted set; it limits only each contract's committee.
+
+The audit layer can be an existing blockchain chosen for cheap
+postings: the mover posts each entry there, and the chain's own
+timestamps and finality become the record against which the committee
+is judged. What that chain must offer is availability of the posting,
+finality within the claim margin, and freedom from censorship within
+the move window, since a mover whose posting is excluded until its due
+time forfeits. It does not remove the committee: Script cannot read the
+other chain's consensus, so someone must still attest, in keys that
+Script checks, what the chain shows. The contract remains denominated
+in bitcoin while the timeliness of its moves rests on another system's
+trust model, much as a DLC's payout rests on its oracle.
 
 \begin{figure}[H]
 \centering
@@ -1809,6 +1851,8 @@ which their statements can be judged.
 \begin{thebibliography}{99}
 
 \bibitem{lightning} J.~Poon and T.~Dryja. The Bitcoin Lightning Network: Scalable off-chain instant payments, 2016. \url{https://lightning.network/lightning-network-paper.pdf}
+
+\bibitem{poelstrastate} A.~Poelstra. Script state from Lamport signatures. Blockstream blog, 3 July 2024. \url{https://blog.blockstream.com/script-state-from-lamport-signatures/}
 
 \bibitem{forcemove} T.~Close and A.~Stewart. ForceMove: an $n$-party state channel protocol. Magmo, 2018.
 
