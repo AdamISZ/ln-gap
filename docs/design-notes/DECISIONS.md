@@ -2828,6 +2828,23 @@ transaction. The separate trace-hash disprove (Z1's first leaf) and the
 inverted execution leaves are dropped: the proof covers the hash, and
 the inverted leaves were the incomplete construction.
 
+**What the proof does not cover (2026-09-30, from the Z2 harness).**
+The prover's proof is complete for what BitVMX's execution script
+checks: the write follows from the reads under the opcode, and the hash
+chain. It says nothing about whether the reads themselves are true.
+BitVMX gives the verifier the other challenges at the final step, and
+here they are the claimant's disproves on the same output (after
+`delta`, beside `not_timely`), none built yet: the pc read follows the
+previous step's written pc (ProgramCounter); the opcode is the
+program's instruction at that pc (Opcode, against a ROM commitment);
+a read value is the last value written to its address (ReadValue,
+after a second n-ary search for the last write); plus EntryPoint, Halt,
+InputData, InitializedData, UninitializedData, RomData,
+AddressesSections, FutureRead and the equivocations. Until they exist,
+a prover that lies about a read, with execution consistent with the
+lie, passes. Z2's scenarios (a faked write; a failing halt) exercise
+only the execution.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

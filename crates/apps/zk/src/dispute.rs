@@ -1,0 +1,117 @@
+//! Z2: a disputed execution between two in-process parties, narrowed to
+//! one step by BitVMX's n-ary search (their `decision` module, unchanged),
+//! and handed to the final-step output of D59.
+//!
+//! The sequence is BitVMX's: the prover executes and claims `Halt(0)` at
+//! its last step with its last hash; the verifier re-executes and decides
+//! whether to challenge; they alternate rounds (the prover's hashes at
+//! the round's points, the verifier's choice of segment); then the prover
+//! reveals the full trace of the first step they disagree on, with the
+//! agreed hash before it and its own hash after. BitVMX would then run
+//! the prover's execution proof and the verifier's other challenges; here
+//! the step becomes a [`FinalStep`], whose proof is `zk_prove_<class>`.
+//!
+//! The rounds run in-process. On the venue they would be the game's
+//! moves; that needs heads larger than 48 bytes (a round carries three
+//! 20-byte hashes), which is the graph integration's work, not this one.
+
+use std::path::Path;
+
+use anyhow::{anyhow, bail, Result};
+use bitvmx_cpu_definitions::trace::TraceRWStep;
+use emulator::decision::challenge::{prover_execute, prover_final_trace, prover_get_hashes_for_round, verifier_check_execution, verifier_choose_segment, ForceCondition};
+use emulator::decision::nary_search::NArySearchType;
+use emulator::executor::utils::FailConfiguration;
+use emulator::loader::program_definition::ProgramDefinition;
+use emulator::ExecutionResult;
+
+use crate::{FinalStep, Read, Step};
+
+/// How a party behaves.
+#[derive(Clone, Debug, Default)]
+pub struct Behaviour {
+    /// BitVMX's fault injection (a fake trace at a step, a wrong hash, ...).
+    pub fail: Option<FailConfiguration>,
+}
+
+/// The outcome of the search.
+#[derive(Clone, Debug)]
+pub struct Searched {
+    /// The prover's execution: its result, last step and last hash.
+    pub claim: (ExecutionResult, u64, String),
+    /// Each round: the prover's hashes and the verifier's choice.
+    pub rounds: Vec<(Vec<String>, u32)>,
+    /// The disputed step's number.
+    pub step: u64,
+    /// The prover's full trace of it.
+    pub trace: TraceRWStep,
+    /// The step, as the final heads carry it.
+    pub final_step: FinalStep,
+}
+
+fn h20(hex_str: &str) -> Result<[u8; 20]> {
+    hex::decode(hex_str)?.try_into().map_err(|_| anyhow!("a step hash is 20 bytes: {hex_str}"))
+}
+
+/// A BitVMX trace record with its hashes, as a [`FinalStep`].
+pub fn final_step(t: &TraceRWStep, step_hash: &str, next_hash: &str) -> Result<FinalStep> {
+    Ok(FinalStep {
+        prev_hash: h20(step_hash)?,
+        read: Read {
+            mem_witness: t.mem_witness.byte(),
+            read_1_addr: t.read_1.address,
+            read_1_value: t.read_1.value,
+            read_2_addr: t.read_2.address,
+            read_2_value: t.read_2.value,
+            pc: t.read_pc.pc.get_address(),
+            micro: t.read_pc.pc.get_micro(),
+            opcode: t.read_pc.opcode,
+        },
+        write: Step {
+            write_addr: t.trace_step.get_write().address,
+            write_value: t.trace_step.get_write().value,
+            pc: t.trace_step.get_pc().get_address(),
+            micro: t.trace_step.get_pc().get_micro(),
+        },
+        hash: h20(next_hash)?,
+        witness: t.witness.unwrap_or(0),
+    })
+}
+
+/// Run the dispute over `pdf` (a BitVMX program definition) on `input`,
+/// with each party's checkpoints under `dir`. `force` makes the verifier
+/// challenge a valid execution (a dishonest challenger). Returns `None` if
+/// the verifier does not challenge.
+pub fn search(pdf: &str, input: &[u8], dir: &Path, prover: &Behaviour, verifier: &Behaviour, force: ForceCondition) -> Result<Option<Searched>> {
+    let p_dir = format!("{}/prover/", dir.display());
+    let v_dir = format!("{}/verifier/", dir.display());
+    std::fs::create_dir_all(&p_dir)?;
+    std::fs::create_dir_all(&v_dir)?;
+    let e = |e: emulator::EmulatorError| anyhow!("{e}");
+
+    let claim = prover_execute(pdf, input.to_vec(), &p_dir, &p_dir, true, prover.fail.clone(), false).map_err(e)?;
+    let Some(_) = verifier_check_execution(pdf, input.to_vec(), &v_dir, &v_dir, claim.1, &claim.2, force, verifier.fail.clone(), false).map_err(e)? else {
+        return Ok(None);
+    };
+
+    let rounds_total = ProgramDefinition::from_config(pdf)?.nary_def().total_rounds();
+    let mut rounds = vec![];
+    let mut decision = 0u32;
+    for round in 1..=rounds_total {
+        let hashes = prover_get_hashes_for_round(pdf, &p_dir, &p_dir, round, decision, prover.fail.clone(), NArySearchType::ConflictStep).map_err(e)?;
+        decision = verifier_choose_segment(pdf, &v_dir, &v_dir, round, hashes.clone(), verifier.fail.clone(), NArySearchType::ConflictStep).map_err(e)?;
+        rounds.push((hashes, decision));
+    }
+    // the last decision names the last agreed step; the disputed one follows
+    let (trace, step_hash, next_hash, step) = prover_final_trace(pdf, &p_dir, &p_dir, decision + 1, prover.fail.clone())
+        .map_err(e)?
+        .as_final_trace_with_hashes_and_step()
+        .map_err(|e| anyhow!("{e:?}"))?;
+    // `step` is the last agreed step (its hash is `step_hash`); the trace
+    // is the disputed step after it
+    if trace.step_number != step + 1 {
+        bail!("the final trace is of step {} but the last agreed step is {step}", trace.step_number);
+    }
+    let final_step = final_step(&trace, &step_hash, &next_hash)?;
+    Ok(Some(Searched { claim, rounds, step: trace.step_number, trace, final_step }))
+}

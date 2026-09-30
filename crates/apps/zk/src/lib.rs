@@ -21,6 +21,8 @@
 //! two word0s), in [`FinalStep`]'s layout. In Z2 the search's last round
 //! produces these heads.
 
+pub mod dispute;
+
 use std::sync::Arc;
 
 use bitcoin::opcodes::all::*;
