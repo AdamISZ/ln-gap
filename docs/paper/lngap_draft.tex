@@ -1426,6 +1426,115 @@ graph, and settlement at a variable price (either a grid of pre-signed
 splits, one per price bucket, or payouts decomposed into binary-weighted
 outputs).
 
+\section{Arbitrary programs: disputing a zero-knowledge verifier}
+\label{sec:zk}
+
+Every game so far has a hand-written disprove family: the rules are
+small enough that each way of breaking them fits a leaf. An arbitrary
+program has no such family, and its execution is far too long for any
+script. BitVMX~\cite{bitvmx} gives the standard answer for Bitcoin. The
+program runs on a RISC-V CPU whose execution trace is a hash chain,
+$h_i = \mathrm{BLAKE3}(h_{i-1} \,\|\, w_i)$ truncated to 20 bytes, where
+$w_i$ is step $i$'s 13-byte write record (address, value, next program
+counter, micro-step). A prover claims that the program halts with
+success at step $N$ with final hash $h_N$. A challenger who disagrees
+runs an $n$-ary search with the prover: in each round the prover posts
+the hashes at $n-1$ evenly spaced steps of the disputed interval, and the
+challenger picks the sub-interval where they first diverge from its own.
+After about $\log_n N$ rounds the dispute is one step, whose predecessor
+hash both parties accept, and a single-step check decides it. In
+BitVMX every move of the search is a Bitcoin transaction. Here the
+moves are the game's moves on the venue, like any other: a stalled
+round is an absence claim, and only the last step reaches the chain.
+
+\paragraph{The last step is proved, not disproved.} BitVMX's step
+scripts are written for the prover: a chain of assertions (the opcode
+is of this instruction class, the reads come from the registers the
+opcode names, the memory witness matches) followed by an equality
+between the committed write and the computed one. Inverting only the
+final equality gives a disprove leaf that is sound but not complete: an
+assertion that fails aborts the spend, and Script has no conditional
+way to succeed after one, so a read record inconsistent with its opcode
+fires no leaf. At the final step we therefore use BitVMX's orientation.
+The prover's refutation parks the disputed step's record across the
+pair of heads, and the refuted output offers the prover a
+\texttt{prove} leaf per instruction class after $\delta$ (BitVMX's
+script unchanged, then the step's hash checked with BitVMX's BLAKE3),
+and the claimant a timeout after $\delta+\delta'$. The rest of BitVMX's
+verifier challenges become the claimant's disproves on the same output:
+the program counter read is the previous step's written one, the opcode
+is the program's instruction at that address, a read value is the last
+value written there (after a second search for the write), the halt,
+and reads of the input and of initialised memory. These are not yet
+built; until they are, a prover that lies about a read value, with an
+execution consistent with the lie, passes.
+
+\paragraph{What the proof of concept does.} The program is BitVMX's
+Groth16 verifier, a RISC-V build of a pairing-based verifier, checking
+a RISC0~\cite{risc0} proof that a STARK receipt of a guest program is
+valid. On a genuine proof it halts with success after 478{,}727{,}216
+steps; an 8-ary search takes ten rounds to reach the final
+\texttt{ecall}, and the prover's proof of it confirms on regtest at
+$22{,}736$ vB (a \texttt{prove} leaf is about 86\,KB of script, peak
+stack 700). With one bit of the proof flipped the verifier halts with
+failure, the prover cannot prove the halting step, and the claimant's
+timeout confirms at $137$ vB. The search itself runs between the two
+parties in one process, using BitVMX's own search code, not yet as venue
+moves: a round carries $n-1$ hashes of 20 bytes (seven in the 8-ary
+search above), more than our 48-byte heads hold, so it needs either larger heads or a head that carries a
+digest of data travelling in the entry body. (The verifier program's
+public constants are set to the RISC0 version of the available proof.)
+
+\subsection{Claims that carry their own proof}
+\label{sec:zkclaims}
+
+A zero-knowledge verifier changes what a first move can be: not ``I
+am owed $X$'' but ``I am owed $X$, and here is a proof''. This bears on
+shared facts (Section~\ref{sec:shared}), whose difficulty was that
+their truth could only be attested.
+
+If a claim's truth is a function of data fixed when the contract opens
+(the program or verifying key, the keys of any issuer, a genesis
+commitment) and of the prover's own witness, no fact is shared between
+contracts at run time. The venue attests only when each contract's
+moves were published, and the aggregate gain that bounds a shared
+fact's security does not arise; the per-contract majority on timing
+remains, as for any game.
+
+A bridge is not wholly of that kind. An entitlement to withdraw is a
+fact about a history that many parties extend after the contract opens,
+and setup can fix only the rules for recognising that history. Two
+questions remain. The first is which history is canonical. If that is
+decided by proof of work, as for a rollup anchored in Bitcoin, it is
+self-certifying: accumulated work is evidence, not testimony, like
+publication. The claim quotes a chain of headers and a challenger may
+answer with a heavier one, as a move of the game, so the question is
+settled by the game and the venue's clock rather than by the venue
+vouching for a fact. This is how BitVM2 bridges treat it~\cite{bitvm2},
+and why ESSPI's authors note that an inclusion proof must admit
+counter-proofs within a bounded time~\cite{esspi}. If the history is
+decided instead by a committee's signatures, their keys are one more
+setup fact, and the trust moves to that committee. The second question
+is uniqueness: an entitlement proved in two contracts would be paid
+twice, which is the shared-fact failure again. It is answered inside
+the proven statement, by binding the entitlement to the contract that
+pays it (the contract's identifier a public input of the proof). A
+stale history is not a separate danger if a withdrawal is a permanent
+burn on the other system, since every canonical history containing the
+burn will do.
+
+Zero-knowledge claims therefore do not abolish shared facts; they
+convert them into setup facts, self-certifying evidence and bindings
+inside the proven statement, none of which the venue has to attest. A
+shared fact is a problem for this design only when its truth can merely
+be attested; when it can be proved, it is one more move of the game.
+The practical costs remain: the claim carries the proof, 256 bytes and
+its public inputs, which again needs more than a 48-byte head; the
+other system's data must be available to the claimant and to any
+challenger; and a counter-proof must be published before its deadline,
+the same assumption on the venue's timing and on Bitcoin's liveness as
+everywhere else.
+
 \section{Security}
 \label{sec:security}
 
@@ -1881,7 +1990,7 @@ costs a number of transactions, and of timelock waits, logarithmic in
 the length of the trace. We avoid on-chain bisection by giving each
 game a family of single-step disprove leaves; the same search could
 instead be played as a venue game, with only its final step on chain,
-which we leave to future work.
+which Section~\ref{sec:zk} develops for a zero-knowledge verifier.
 StackSat-128~\cite{stacksat} is a Script-friendly hash designed for the
 proof-of-work alternative. The attestation primitive is that of Discreet
 Log Contracts~\cite{dlc}: an oracle publishes anticipation points in
@@ -1937,6 +2046,10 @@ which their statements can be judged.
 \bibitem{fidelity} C.~Belcher. Design for improving JoinMarket's resistance to sybil attacks using fidelity bonds, 2019. \url{https://gist.github.com/chris-belcher/18ea0e6acdb885a2bfbdee43dcd6b5af}; and JoinMarket, \emph{Fidelity bonds} (documentation). \url{https://github.com/JoinMarket-Org/joinmarket-clientserver/blob/master/docs/fidelity-bonds.md}
 
 \bibitem{bitvm} R.~Linus. BitVM: compute anything on Bitcoin, 2023.
+
+\bibitem{risc0} RISC Zero. The RISC Zero zkVM and its Groth16 receipts. \url{https://dev.risczero.com}
+
+\bibitem{bitvm2} R.~Linus, L.~Aumayr, A.~Zamyatin, A.~Pelosi, Z.~Avarikioti and M.~Maffei. BitVM2: bridging Bitcoin to second layers, 2024. \url{https://bitvm.org/bitvm_bridge.pdf}
 
 \bibitem{bitvmx} S.~D.~Lerner, R.~Amela, S.~Mishra, M.~Jonas and J.~\'Alvarez Cid-Fuentes. BitVMX: a CPU for universal computation on Bitcoin, 2024. \url{https://arxiv.org/abs/2405.06842}
 
