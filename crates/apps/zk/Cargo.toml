@@ -27,4 +27,5 @@ bitvmx-cpu-definitions = { git = "https://github.com/FairgateLabs/BitVMX-CPU", r
 bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-stack", tag = "v0.6.0" }
 
 [dev-dependencies]
+rand.workspace = true
 lngap-script32 = { path = "../../script32" }
