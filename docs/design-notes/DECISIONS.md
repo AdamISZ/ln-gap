@@ -1773,6 +1773,14 @@ DESIGN, agreed; nothing built.
   contradicting quorum — never for an on-chain race. The threshold size
   says how many franchises must be thrown away to rewrite; the deterrent
   is t x (forfeited fee stream + time value of the lock).
+  CORRECTION (2026-09-30, the user): that sum double-counts. An ejected
+  member's coins sit out their term either way, so the lock's time value
+  is the price of the franchise, already paid; the deterrent is the
+  forfeited fee stream alone. The lock bounds it from below and
+  publicly (a member locks only if its fees repay the time value), and
+  competition pushes the two together (Stakechains 3.3). Only a burn of
+  the principal adds a separate loss. The paper's condition is now
+  t * PV(F)/n > G.
 
 **What this removes.** The D46 fee race and the D38 evidence leaves stop
 being part of the venue design: the member's bond is a plain CLTV lock

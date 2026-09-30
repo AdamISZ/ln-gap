@@ -505,6 +505,10 @@ time value, not a slashable deposit in the baseline design: a member
 caught contradicting itself (an unsigned seal; a lock completed
 without the matching seal; a seal against its own flag) is
 ejected, losing its future fee stream while its lock sits out its term.
+The lock is not a second penalty beside the lost fees: the coins sit
+out their term whether or not the member cheats, so their time value is
+the price of the franchise, paid on entry, and what ejection takes is
+the franchise itself.
 A venue may additionally attach evidence leaves to the bond, spendable
 by anyone holding a proof of equivocation; without covenants such a
 spend is a fee race, so the bond ends as miner fee, a burn in effect.
@@ -531,11 +535,17 @@ as a direction for future work.
 \paragraph{The resulting condition.} An equivocation that needs $t$
 members is irrational when
 \[
-  t \cdot \Bigl(\frac{\mathrm{PV}(F)}{n} + L\Bigr) \;>\; G,
+  t \cdot \frac{\mathrm{PV}(F)}{n} \;>\; G,
 \]
 where $\mathrm{PV}(F)$ is the present value of the venue's total fee
-stream, $L$ the time value of one member's lock, and $G$ the value the
-equivocation can extract. $G$ is an aggregate even for two-party games:
+stream over the members' remaining terms and $G$ the value the
+equivocation can extract. The lock enters as a bound, not a term: a
+member locks only if it expects its fees to repay the time value $L$ of
+its lock, so $\mathrm{PV}(F)/n \ge L$ for members who joined, and $L$
+can be read off the chain by anyone; competition for membership pushes
+the two together, as Linus argues for Stakechains~\cite{coins}. Only
+the optional evidence leaves, which burn the principal, add a loss of
+a different kind. $G$ is an aggregate even for two-party games:
 a colluding majority can act against every contract it serves within
 one dispute window, and pays its franchise once. It needs a colluding
 player in each contract, and a hub, which is the counterparty of many
@@ -1556,9 +1566,9 @@ flags, so the late refutation stands. The majority threshold balances
 the two, each needing about half of the members. This resembles a
 majority attack on a proof-of-work chain, with three differences. The
 venue's attackers are named (every flag and every seal carries a
-member's key), where a miner is anonymous. Their cost is sunk (a
-timelocked bond, a franchise of future fees), where hash power can be
-rented for the attack. And the attack can target a single contract,
+member's key), where a miner is anonymous. What they stake is a
+franchise of future fees, bought with a timelocked bond that cannot be
+rented for the attack, where hash power can. And the attack can target a single contract,
 silently, where a reorganisation is public.
 
 What makes the attack hard to punish is not anonymity but the nature of
@@ -1654,15 +1664,17 @@ venue:
   whose lock expires before a contract's last deadline is not eligible
   for that contract.
 \item \emph{Sizing per contract.} A targeted bribe must pay a majority
-  of the committee at least what each member stands to lose: the time
-  value of its lock and its expected future fees. The players can check
-  this against their pot at open, and a contract with a larger pot can
+  of the committee at least what each member stands to lose: its
+  expected fees for the rest of its term. Those fees are not visible,
+  but the time value of the member's remaining lock is, and it bounds
+  them from below (a member locks only if its fees repay it). The
+  players can check that bound against their pot at open, and a contract with a larger pot can
   require a larger committee or a larger minimum bond. The condition of
   Section~\ref{sec:venue} becomes a per-contract parameter rather than
   one inequality for the whole venue.
 \item \emph{Assembling versus using.} As in Section~\ref{sec:venue},
-  the baseline bond is a sacrifice of time value, lost through ejection,
-  and ejection needs an objective fault. A timeliness lie is
+  the baseline bond buys a franchise that ejection takes away, and
+  ejection needs an objective fault. A timeliness lie is
   attributable but not falsifiable
   (Section~\ref{sec:threshold}), so the bond makes a colluding
   majority costly to \emph{assemble}; making it costly to \emph{use}
