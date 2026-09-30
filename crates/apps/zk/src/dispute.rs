@@ -75,6 +75,7 @@ pub fn final_step(t: &TraceRWStep, step_hash: &str, next_hash: &str) -> Result<F
         },
         hash: h20(next_hash)?,
         witness: t.witness.unwrap_or(0),
+        agreed_step: u32::try_from(t.step_number - 1).map_err(|_| anyhow!("step beyond 32 bits"))?,
     })
 }
 

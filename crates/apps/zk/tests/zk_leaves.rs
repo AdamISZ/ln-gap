@@ -69,6 +69,7 @@ fn trace() -> Vec<FinalStep> {
                 write: Step { write_addr: wa, write_value: wv, pc: wpc, micro: wm },
                 hash: h20(h),
                 witness: 0,
+                agreed_step: 0,
             };
             prev = s.hash;
             s

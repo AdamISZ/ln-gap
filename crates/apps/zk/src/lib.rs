@@ -21,6 +21,7 @@
 //! two word0s), in [`FinalStep`]'s layout. In Z2 the search's last round
 //! produces these heads.
 
+pub mod challenges;
 pub mod chain;
 pub mod dispute;
 
@@ -87,6 +88,9 @@ pub struct FinalStep {
     pub write: Step,
     pub hash: [u8; 20],
     pub witness: u32,
+    /// The last step both parties agree on (the disputed step is the next
+    /// one): BitVMX's "conflict step".
+    pub agreed_step: u32,
 }
 
 // Payload byte offsets (head byte = 4 + offset; each head's bytes 0..4 are
@@ -110,6 +114,7 @@ const N_WPC: usize = 10;
 const N_WMICRO: usize = 14;
 const N_HASH: usize = 15;
 const N_WITNESS: usize = 35;
+const N_AGREED: usize = 39;
 
 impl FinalStep {
     /// The prior head (at depth `d - 1`, by `mover`).
@@ -139,6 +144,7 @@ impl FinalStep {
         n[N_WADDR..N_WADDR + 13].copy_from_slice(&self.write.to_bytes());
         n[N_HASH..N_HASH + 20].copy_from_slice(&self.hash);
         n[N_WITNESS..N_WITNESS + 4].copy_from_slice(&self.witness.to_be_bytes());
+        n[N_AGREED..N_AGREED + 4].copy_from_slice(&self.agreed_step.to_be_bytes());
         h
     }
 
@@ -162,6 +168,7 @@ impl FinalStep {
             write: Step { write_addr: w(n, N_WADDR), write_value: w(n, N_WVAL), pc: w(n, N_WPC), micro: n[N_WMICRO] },
             hash: n[N_HASH..N_HASH + 20].try_into().unwrap(),
             witness: w(n, N_WITNESS),
+            agreed_step: w(n, N_AGREED),
         }
     }
 }
@@ -203,15 +210,32 @@ fn low_digit(head: usize, off: usize) -> impl Iterator<Item = usize> {
     std::iter::once(head + 8 + 2 * off + 1)
 }
 
-/// The leaf body: verify the pair signature (192 digits left, the prior
-/// head's digit 0 deepest); PICK `src` to the altstack, last first; drop
-/// the register file; bring them back (`src[0]` deepest); run `check`;
-/// push 1.
+/// A leaf input: a file digit, or a constant nibble.
+#[derive(Clone, Copy, Debug)]
+pub enum Src {
+    Dig(usize),
+    Konst(i64),
+}
+
+/// The leaf body over file digits only.
 fn leaf_script(l: &Layout, key: &WotsPublic, src: &[usize], check: &ScriptBuf) -> ScriptBuf {
+    let src: Vec<Src> = src.iter().map(|&j| Src::Dig(j)).collect();
+    leaf_script_src(l, key, &src, check)
+}
+
+/// The leaf body: verify the pair signature (192 digits left, the prior
+/// head's digit 0 deepest; any extra witness items lie below them); PICK
+/// `src` (or push its constants) to the altstack, last first; drop the
+/// register file; bring them back (`src[0]` deepest); run `check`; push 1.
+pub(crate) fn leaf_script_src(l: &Layout, key: &WotsPublic, src: &[Src], check: &ScriptBuf) -> ScriptBuf {
     let file = l.file;
     let mut b = Builder::new().wots_verify(key);
-    for &j in src.iter().rev() {
-        b = b.push_int((file - 1 - j) as i64).push_opcode(OP_PICK).push_opcode(OP_TOALTSTACK);
+    for s in src.iter().rev() {
+        b = match *s {
+            Src::Dig(j) => b.push_int((file - 1 - j) as i64).push_opcode(OP_PICK),
+            Src::Konst(v) => b.push_int(v),
+        }
+        .push_opcode(OP_TOALTSTACK);
     }
     for _ in 0..file / 2 {
         b = b.push_opcode(OP_2DROP);
@@ -311,9 +335,10 @@ mod tests {
             write: Step { write_addr: 7, write_value: 8, pc: 9, micro: 10 },
             hash: [0x22; 20],
             witness: 11,
+            agreed_step: 12,
         };
         let (p, n) = (s.prior_head(1, 1, Role::User), s.new_head(1, 2, Role::Hub));
         assert_eq!(FinalStep::parse(&p, &n), s);
-        assert!(n[4 + N_WITNESS + 4..].iter().all(|b| *b == 0));
+        assert!(n[4 + N_AGREED + 4..].iter().all(|b| *b == 0));
     }
 }
