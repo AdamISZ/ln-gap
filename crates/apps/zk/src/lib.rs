@@ -1,25 +1,21 @@
 //! ZKP verification as a venue game (DEMOS_PLAN.md section 3).
 //!
-//! Z1: BitVMX terminal challenges as LN-GAP disprove leaves. In BitVMX an
-//! execution trace is a hash chain, `h_i = BLAKE3(h_{i-1} || write_i)[..20]`,
-//! where `write_i` is the step's 13-byte write record (write address,
-//! write value, next pc, micro-step). A search between prover and
-//! challenger narrows a dispute to one step, whose record is then checked:
+//! Z1: the last step of a disputed BitVMX execution, on the LN-GAP
+//! graph. In BitVMX an execution trace is a hash chain,
+//! `h_i = BLAKE3(h_{i-1} || write_i)[..20]`, where `write_i` is the step's
+//! 13-byte write record (write address, write value, next pc,
+//! micro-step). A search between prover and challenger narrows a dispute
+//! to one step, which the prover must then prove (D59): the step's read
+//! record and write are what the instruction does (BitVMX's verification
+//! script for the instruction class, unchanged), and its claimed hash is
+//! `h_i` (BitVMX's BLAKE3, with an equality). If no proof appears in its
+//! window, the claimant takes the output by timeout.
 //!
-//! - `zk_trace_hash`: the claimed `h_i` is not the hash of `h_{i-1}` and
-//!   the step's write record (BitVMX's `trace_hash_challenge`, unchanged);
-//! - `zk_exec_<instruction>`: the step's read record is consistent with
-//!   its opcode (the instruction class, the register addresses, the memory
-//!   witness: BitVMX's own assertions) and the committed write differs
-//!   from the write the instruction computes (BitVMX's `execute_step`,
-//!   unchanged, with its final equality inverted). One leaf per
-//!   instruction class, as BitVMX has one verification script per class.
-//!
-//! The values come from the parked pair of a refutation, as every disprove
-//! leaf's do: each leaf re-verifies the mover's Winternitz signature over
-//! the pair (leaving the 192 digits on the stack), gathers the digits its
-//! BitVMX script reads, in that script's order, drops the rest, and runs
-//! the script (Apache-2.0, FairgateLabs/BitVMX-CPU).
+//! The values come from the pair the prover's refutation parked: the
+//! `zk_prove_<class>` leaf re-verifies the prover's Winternitz signature
+//! over the pair (leaving the 192 digits on the stack), gathers the digits
+//! BitVMX's scripts read, in their order, drops the rest, and runs them
+//! (Apache-2.0, FairgateLabs/BitVMX-CPU).
 //!
 //! The final step's record spans both heads (88 payload bytes after the
 //! two word0s), in [`FinalStep`]'s layout. In Z2 the search's last round
@@ -30,9 +26,8 @@ use std::sync::Arc;
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
 use bitcoin::ScriptBuf;
-use bitcoin_script_riscv::riscv::instruction_mapping::requires_witness;
-use bitcoin_script_riscv::riscv::instructions::{execute_step, ProgramSpec};
-use bitcoin_script_riscv::riscv::trace::{STraceRead, STraceStep};
+use bitcoin_script_functions::hash::blake3;
+use bitcoin_script_riscv::riscv::instruction_mapping::{generate_verification_script, get_key_from_instruction_and_micro, requires_witness};
 use bitcoin_script_stack::stack::StackTracker;
 use lngap_channel::Role;
 use lngap_lamport::winternitz::{WotsExt, WotsPublic};
@@ -41,9 +36,6 @@ use riscv_decode::Instruction;
 
 /// Head bytes (the venue's fixed head size).
 pub const HEAD_BYTES: usize = 48;
-
-/// The trace-hash leaf's name.
-pub const TRACE_HASH: &str = "zk_trace_hash";
 
 /// Where the emulator puts the registers (the Groth16 ELF's layout).
 pub const BASE_REGISTER_ADDRESS: u32 = 0xF000_0000;
@@ -173,7 +165,7 @@ impl FinalStep {
 
 /// `BLAKE3(prev || step)` truncated to 20 bytes: BitVMX's step hash.
 pub fn step_hash(prev: &[u8; 20], step: &Step) -> [u8; 20] {
-    let mut h = blake3::Hasher::new();
+    let mut h = ::blake3::Hasher::new();
     h.update(prev);
     h.update(&step.to_bytes());
     let mut out = [0u8; 20];
@@ -181,10 +173,11 @@ pub fn step_hash(prev: &[u8; 20], step: &Step) -> [u8; 20] {
     out
 }
 
-/// The trace-hash leaf's native mirror.
-pub fn trace_hash_fires(prior: &[u8; HEAD_BYTES], new: &[u8; HEAD_BYTES]) -> bool {
+/// Whether the pair's claimed hash is the step hash of its prior hash
+/// and write (half of what a proof shows).
+pub fn hash_holds(prior: &[u8; HEAD_BYTES], new: &[u8; HEAD_BYTES]) -> bool {
     let s = FinalStep::parse(prior, new);
-    step_hash(&s.prev_hash, &s.write) != s.hash
+    step_hash(&s.prev_hash, &s.write) == s.hash
 }
 
 // ----- digit selection -----
@@ -230,76 +223,60 @@ fn leaf_script(l: &Layout, key: &WotsPublic, src: &[usize], check: &ScriptBuf) -
     script
 }
 
-fn offsets(l: &Layout) -> (usize, usize) {
-    (l.prior.expect("the zk leaves read a prior head: depth >= 2"), l.new)
-}
-
-// ----- the trace-hash leaf -----
-
-/// BitVMX's trace-hash challenge, compiled: consumes 106 nibbles (the prev
-/// hash deepest, the claimed hash on top) and fails unless the hash
-/// differs.
-pub fn trace_hash_script() -> ScriptBuf {
+/// The step-hash check: consumes the prev hash (40 nibbles, deepest), the
+/// write record (write address, value, pc: 8 each; micro: 2) and the
+/// claimed hash (40, on top); fails unless BLAKE3 of the first 33 bytes
+/// is the claimed hash. BitVMX's `trace_hash_challenge` with its final
+/// inequality an equality.
+pub fn hash_script() -> ScriptBuf {
     let mut st = StackTracker::new();
-    bitcoin_script_riscv::riscv::challenges::trace_hash_challenge(&mut st);
-    st.get_script()
-}
-
-/// The `zk_trace_hash` disprove leaf over the parked pair (depth >= 2).
-pub fn trace_hash_leaf(l: &Layout, key: &WotsPublic) -> PosLeaf {
-    let (p, n) = offsets(l);
-    // prev hash (40), then the write record and the claimed hash, which
-    // sit contiguously in the new head (26 + 40)
-    let d = n + 8 + 2 * N_WADDR;
-    let src: Vec<usize> = (p + 8 + 2 * P_PREV..p + 8 + 2 * P_PREV + 40).chain(d..d + 66).collect();
-    PosLeaf { name: TRACE_HASH.into(), script: leaf_script(l, key, &src, &trace_hash_script()), fires: Arc::new(|p, h| trace_hash_fires(p, h)) }
-}
-
-// ----- the execution leaves -----
-
-/// The leaf name of an instruction class's execution leaf.
-pub fn exec_name(key: &str) -> String {
-    format!("zk_exec_{}", key.to_lowercase())
-}
-
-/// BitVMX's verification script for `instruction` at `micro`, with its
-/// final comparison inverted: consumes the write record (write address,
-/// value, pc: 8 nibbles each; micro: 1), the witness if the class needs
-/// one (8), then the read record (memory witness 2, read 1 address and
-/// value, read 2 address and value, pc: 8 each; micro 1; opcode 8, on
-/// top). Fails if BitVMX's assertions fail (a read record inconsistent
-/// with the opcode); otherwise succeeds iff some field of the committed
-/// write differs from the computed one.
-pub fn exec_script(instruction: &Instruction, micro: u8) -> ScriptBuf {
-    let mut st = StackTracker::new();
-    let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
-    let commit = STraceStep::define(&mut st);
-    let witness = requires_witness(instruction).then(|| st.define(8, "witness"));
-    let read = STraceRead::define(&mut st);
-    let result = execute_step(&mut st, &read, &commit, witness, instruction, micro, program).expect("a BitVMX instruction class");
-    // BitVMX's compare_trace_step asserts equality field by field (micro,
-    // pc, value, address); a disprove fires iff any differs. The one-nibble
-    // micro is compared by hand (equality() mishandles size-1 variables).
-    st.move_var(commit.micro);
-    st.move_var(result.micro);
-    st.op_numnotequal();
+    let prev_hash = st.define(40, "prev_hash");
+    let write_add = st.define(8, "write_add");
+    let write_data = st.define(8, "write_data");
+    let write_pc = st.define(8, "write_pc");
+    let write_micro = st.define(2, "write_micro");
+    let hash = st.define(40, "hash");
     st.to_altstack();
-    for (c, r) in [(commit.program_counter, result.program_counter), (commit.write_1_value, result.write_1_value), (commit.write_1_add, result.write_1_add)] {
-        st.equality(c, true, r, true, false, false);
-        st.from_altstack();
-        st.op_boolor();
-        st.to_altstack();
-    }
-    st.from_altstack();
-    st.op_verify();
+    st.explode(prev_hash);
+    st.explode(write_add);
+    st.explode(write_data);
+    st.explode(write_pc);
+    st.explode(write_micro);
+    let _ = hash;
+    let result = blake3::blake3(&mut st, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    let claimed = st.from_altstack();
+    st.equals(result, true, claimed, true);
     st.get_script()
 }
 
-/// The execution leaf for `instruction` (a representative of its class)
-/// at micro-step `micro`, named `zk_exec_<key>` with BitVMX's key.
-pub fn exec_leaf(l: &Layout, key: &WotsPublic, instruction: &Instruction, micro: u8, fires: Arc<dyn Fn(&[u8; HEAD_BYTES], &[u8; HEAD_BYTES]) -> bool + Send + Sync>) -> PosLeaf {
-    let (p, n) = offsets(l);
-    let mut src: Vec<usize> = vec![];
+/// The proof for one instruction class: BitVMX's verification script for
+/// `instruction` at `micro`, unchanged (it consumes the write record, the
+/// witness if the class needs one, then the read record with the opcode
+/// on top, and fails unless the write is what the instruction does with
+/// those reads), then [`hash_script`].
+pub fn prove_script(instruction: &Instruction, micro: u8) -> ScriptBuf {
+    let mut bytes = generate_verification_script(instruction, micro, BASE_REGISTER_ADDRESS, requires_witness(instruction)).into_bytes();
+    bytes.extend_from_slice(hash_script().as_bytes());
+    ScriptBuf::from_bytes(bytes)
+}
+
+/// The leaf name of an instruction class's proof, from BitVMX's key.
+pub fn prove_name(instruction: &Instruction, micro: u8) -> String {
+    format!("zk_prove_{}", get_key_from_instruction_and_micro(instruction, micro).to_lowercase())
+}
+
+/// The prover's `zk_prove_<class>` leaf over the parked pair (depth >= 2),
+/// for `instruction`'s class at micro-step `micro`. `holds` is its native
+/// mirror (a proof exists for the pair), which needs an executor.
+pub fn prove_leaf(l: &Layout, key: &WotsPublic, instruction: &Instruction, micro: u8, holds: Arc<dyn Fn(&[u8; HEAD_BYTES], &[u8; HEAD_BYTES]) -> bool + Send + Sync>) -> PosLeaf {
+    let p = l.prior.expect("the proof reads a prior head: depth >= 2");
+    let n = l.new;
+    // the hash check's inputs (deepest): prev hash, then the write record
+    // and the claimed hash, contiguous in the new head
+    let d = n + 8 + 2 * N_WADDR;
+    let mut src: Vec<usize> = (p + 8 + 2 * P_PREV..p + 8 + 2 * P_PREV + 40).chain(d..d + 66).collect();
+    // then the verification script's: the write record, the witness, the
+    // read record (the opcode on top: its high half in the prior head)
     src.extend(word_digits(n, N_WADDR));
     src.extend(word_digits(n, N_WVAL));
     src.extend(word_digits(n, N_WPC));
@@ -314,11 +291,9 @@ pub fn exec_leaf(l: &Layout, key: &WotsPublic, instruction: &Instruction, micro:
     src.extend(word_digits(p, P_R2V));
     src.extend(word_digits(p, P_PC));
     src.extend(low_digit(p, P_MICRO));
-    // the opcode: its high half in the prior head, its low half in the new
     let (hi, lo) = (p + 8 + 2 * P_OPHI, n + 8 + 2 * N_OPLO);
     src.extend((hi..hi + 4).chain(lo..lo + 4));
-    let name = exec_name(&bitcoin_script_riscv::riscv::instruction_mapping::get_key_from_instruction_and_micro(instruction, micro));
-    PosLeaf { name, script: leaf_script(l, key, &src, &exec_script(instruction, micro)), fires }
+    PosLeaf { name: prove_name(instruction, micro), script: leaf_script(l, key, &src, &prove_script(instruction, micro)), fires: holds }
 }
 
 #[cfg(test)]

@@ -1,30 +1,29 @@
-//! Z1 (DEMOS_PLAN.md section 3): BitVMX terminal challenges as LN-GAP
-//! disprove leaves, over the first five steps of the Groth16 verifier ELF
-//! (`zkverifier-new-mul.elf` on the repo's sample input, from `emulator
-//! execute --trace --debug`: addi, jal, addi, sw, sw).
+//! Z1 (DEMOS_PLAN.md section 3, D59): the last step of a disputed BitVMX
+//! execution is proved by the prover, over the first steps of the Groth16
+//! verifier ELF (`zkverifier-new-mul.elf` on the repo's sample input, from
+//! `emulator execute --trace --debug`: addi, jal, addi, sw, sw).
 //!
 //! - the native step hash reproduces the emulator's;
-//! - `zk_trace_hash` agrees with its mirror on honest steps and on
-//!   corrupted ones (the claimed hash, the write record, the prior hash);
-//! - the execution leaves (addi, jal, sw): an honest step does not fire;
-//!   each corrupted write field (address, value, pc, micro) fires; a leaf
-//!   of the wrong instruction class never fires (BitVMX's opcode
-//!   assertions); and a read record inconsistent with its opcode (a wrong
-//!   register address) does not fire either, with the write corrupted
-//!   too: the gap the inversion leaves, recorded here;
-//! - peak stack under 1,000 for every leaf and case;
-//! - on regtest, with the challenger's key in front as in every disprove
-//!   leaf: honest steps are not disprovable, and a corrupted hash and a
-//!   corrupted addi result are disproved and confirmed.
+//! - the proof leaves (addi, jal, sw): an honest step proves; no
+//!   corruption does, whether of the write (address, value, pc, micro),
+//!   the claimed hash, the prior hash, a read the instruction uses (its
+//!   register address or its value: the read record inconsistent with the
+//!   opcode that the disprove orientation could not catch), or the
+//!   opcode; and no class's leaf proves another class's step;
+//! - peak stack under 1,000;
+//! - on regtest, the final step's output as D59 shapes it (the prover's
+//!   proof after delta, the claimant's timeout after delta + delta'): an
+//!   honest step is proved, not before delta; a cheated one cannot be,
+//!   and the claimant takes it by timeout, not before delta + delta'.
 
 use std::sync::Arc;
 
 use bitcoin::key::Keypair;
-use bitcoin::opcodes::all::OP_CHECKSIGVERIFY;
 use bitcoin::script::Builder;
-use bitcoin::{Amount, ScriptBuf, Transaction, TxOut};
+use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use lngap_btc::keys::{xonly, Seed};
 use lngap_btc::regtest::Regtest;
+use lngap_btc::script::BuilderExt;
 use lngap_btc::sighash::sign_tapscript;
 use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
@@ -36,8 +35,10 @@ use lngap_pos::ttt::{Layout, PosLeaf};
 use lngap_zk::*;
 
 const GAME: u16 = 1;
-/// The depth of the parked pair (the leaves need a prior head).
+/// The depth of the parked pair (the proof reads a prior head).
 const D: u32 = 2;
+const DELTA: u16 = 2;
+const DELTA_PRIME: u16 = 3;
 
 /// Step 0's hash, then each step's trace line: read 1 (address, value),
 /// read 2 (address, value), pc, micro, opcode, write (address, value,
@@ -87,7 +88,7 @@ fn truthy(v: &[u8]) -> bool {
     v.iter().enumerate().any(|(i, b)| *b != 0 && !(i == v.len() - 1 && *b == 0x80))
 }
 
-/// Run a leaf in the simulator: (fired, peak stack).
+/// Run a leaf in the simulator: (spendable, peak stack).
 fn run(leaf: &PosLeaf, sk: &WotsSecret, s: &FinalStep) -> (bool, usize) {
     let (p, n) = heads(s);
     match lngap_script32::sim::run_peak(leaf.script.as_script(), reveal(sk, &p, &n)) {
@@ -99,15 +100,24 @@ fn run(leaf: &PosLeaf, sk: &WotsSecret, s: &FinalStep) -> (bool, usize) {
     }
 }
 
-/// The write-record corruptions: address, value, pc, micro.
+/// Every corruption of step `s` that makes it wrong. The reads are
+/// corrupted only when the instruction uses them (jal reads nothing).
 fn corruptions(s: &FinalStep) -> Vec<(&'static str, FinalStep)> {
-    let w = s.write;
-    vec![
+    let (w, r) = (s.write, s.read);
+    let mut v = vec![
         ("write address", FinalStep { write: Step { write_addr: w.write_addr ^ 4, ..w }, ..*s }),
         ("write value", FinalStep { write: Step { write_value: w.write_value ^ 0x100, ..w }, ..*s }),
         ("next pc", FinalStep { write: Step { pc: w.pc ^ 8, ..w }, ..*s }),
         ("micro", FinalStep { write: Step { micro: w.micro ^ 1, ..w }, ..*s }),
-    ]
+        ("claimed hash", FinalStep { hash: [0x5a; 20], ..*s }),
+        ("prior hash", FinalStep { prev_hash: [0xa5; 20], ..*s }),
+        ("opcode's rd", FinalStep { read: Read { opcode: r.opcode ^ (1 << 7), ..r }, ..*s }),
+    ];
+    if r.read_1_addr != 0 {
+        v.push(("read 1 register", FinalStep { read: Read { read_1_addr: r.read_1_addr ^ 4, ..r }, ..*s }));
+        v.push(("read 1 value", FinalStep { read: Read { read_1_value: r.read_1_value ^ 0x10, ..r }, ..*s }));
+    }
+    v
 }
 
 #[test]
@@ -117,123 +127,95 @@ fn step_hash_reproduces_the_emulator() {
     }
 }
 
-#[test]
-fn trace_hash_leaf_agrees_with_its_mirror() {
-    let sk = pair_key([7; 32]);
-    let leaf = trace_hash_leaf(&Layout::at(D, GAME, mover_at(D)), &sk.public());
-    println!("{}: {} B of script ({} B BitVMX's challenge)", leaf.name, leaf.script.len(), trace_hash_script().len());
-    let mut peak = 0;
-    for s in trace() {
-        let mut cases = vec![(s, false)];
-        let mut bad = s;
-        bad.hash[19] ^= 1;
-        cases.push((bad, true));
-        cases.extend(corruptions(&s).into_iter().map(|(_, c)| (c, true)));
-        let mut bp = s;
-        bp.prev_hash[0] ^= 0x80;
-        cases.push((bp, true));
-        for (c, fires) in cases {
-            let (p, n) = heads(&c);
-            assert_eq!((leaf.fires)(&p, &n), fires, "mirror");
-            let (ran, pk) = run(&leaf, &sk, &c);
-            assert_eq!(ran, fires, "script vs mirror");
-            peak = peak.max(pk);
-        }
-    }
-    println!("peak stack: {peak}");
-    assert!(peak <= 1000);
-}
-
-/// The execution leaf for step `i`'s instruction class. Its mirror, for
-/// these cases (the step's honest read record): the committed write is
-/// not the emulator's.
-fn exec_leaf_for(sk: &WotsSecret, i: usize) -> PosLeaf {
+/// The proof leaf for step `i`'s instruction class. Its mirror, for these
+/// cases: the pair is exactly the emulator's step `i`.
+fn prove_leaf_for(sk: &WotsSecret, i: usize) -> PosLeaf {
     let s = trace()[i];
     let ins = riscv_decode::decode(s.read.opcode).unwrap();
-    let honest = s.write;
-    let fires = Arc::new(move |p: &[u8; 48], n: &[u8; 48]| FinalStep::parse(p, n).write != honest);
-    exec_leaf(&Layout::at(D, GAME, mover_at(D)), &sk.public(), &ins, s.read.micro, fires)
+    let holds = Arc::new(move |p: &[u8; 48], n: &[u8; 48]| FinalStep::parse(p, n) == s);
+    prove_leaf(&Layout::at(D, GAME, mover_at(D)), &sk.public(), &ins, s.read.micro, holds)
 }
 
 #[test]
-fn exec_leaves() {
+fn proofs() {
     let sk = pair_key([8; 32]);
     let steps = trace();
     // steps 1 (addi), 2 (jal), 4 (sw)
-    let leaves: Vec<(usize, PosLeaf)> = [0, 1, 3].iter().map(|&i| (i, exec_leaf_for(&sk, i))).collect();
+    let leaves: Vec<(usize, PosLeaf)> = [0, 1, 3].iter().map(|&i| (i, prove_leaf_for(&sk, i))).collect();
     let mut peak = 0;
     for (i, leaf) in &leaves {
         let s = steps[*i];
-        println!("{}: {} B of script", leaf.name, leaf.script.len());
-        let (ran, pk) = run(leaf, &sk, &s);
-        assert!(!ran, "{}: fired on the honest step {}", leaf.name, i + 1);
+        let (ok, pk) = run(leaf, &sk, &s);
+        println!("{}: {} B of script, peak stack {pk}", leaf.name, leaf.script.len());
+        assert!(ok, "{}: the honest step {} does not prove", leaf.name, i + 1);
         peak = peak.max(pk);
         for (what, c) in corruptions(&s) {
             let (p, n) = heads(&c);
-            assert!((leaf.fires)(&p, &n));
-            let (ran, pk) = run(leaf, &sk, &c);
-            assert!(ran, "{}: did not fire on a corrupted {what} at step {}", leaf.name, i + 1);
-            peak = peak.max(pk);
+            assert!(!(leaf.fires)(&p, &n));
+            assert!(!run(leaf, &sk, &c).0, "{}: proved step {} with a corrupted {what}", leaf.name, i + 1);
         }
-        // a leaf of another class never fires on this step, honest or not
         for (j, other) in &leaves {
-            if j == i {
-                continue;
+            if j != i {
+                assert!(!run(other, &sk, &s).0, "{} proved step {} ({})", other.name, i + 1, leaf.name);
             }
-            for (_, c) in corruptions(&s) {
-                assert!(!run(other, &sk, &c).0, "{} fired on step {} ({})", other.name, i + 1, leaf.name);
-            }
-        }
-        // the gap: a read record inconsistent with the opcode (read 1 from
-        // the wrong register) is caught by BitVMX's assertion, which in the
-        // inverted leaf means no fire, even with the write corrupted
-        let mut bad = corruptions(&s)[1].1;
-        if s.read.read_1_addr != 0 {
-            bad.read.read_1_addr ^= 4;
-            assert!(!run(leaf, &sk, &bad).0, "{}: fired on an inconsistent read record", leaf.name);
         }
     }
-    println!("peak stack: {peak}");
-    assert!(peak <= 1000);
+    assert!(peak <= 1000, "peak stack {peak}");
 }
 
 #[test]
-fn leaves_on_regtest() {
+fn final_step_on_regtest() {
     let rt = Regtest::start().unwrap();
     let sk = pair_key([9; 32]);
-    let challenger: Keypair = Seed::from_label("zk challenger").keypair("pay");
-    let l = Layout::at(D, GAME, mover_at(D));
-    let steps = trace();
+    let prover: Keypair = Seed::from_label("zk prover").keypair("pay");
+    let claimant: Keypair = Seed::from_label("zk claimant").keypair("pay");
+    let step = trace()[0];
+    let pl = prove_leaf_for(&sk, 0);
 
-    let spend = |pl: &PosLeaf, s: &FinalStep| -> Transaction {
-        // the challenger's key in front, as refuted_tree does for every leaf
-        let mut bytes = Builder::new().push_x_only_key(&xonly(&challenger)).push_opcode(OP_CHECKSIGVERIFY).into_script().into_bytes();
-        bytes.extend_from_slice(pl.script.as_bytes());
-        let script = ScriptBuf::from_bytes(bytes);
-        let name = format!("disprove_{}", pl.name);
-        let tree = TapTree::new(vec![Leaf::new(name.clone(), script.clone(), Timelock::NONE)]).unwrap();
-        let control = tree.control_block(&name).unwrap();
-        let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
-        let mut tx = build_spend(op, &Timelock::NONE, vec![TxOut { value: Amount::from_sat(900_000), script_pubkey: tree.script_pubkey() }]);
-        let sig = sign_tapscript(&challenger, &tx, 0, std::slice::from_ref(&prev), &script).unwrap();
-        let (p, n) = heads(s);
-        let mut w = reveal(&sk, &p, &n);
+    // the final step's refuted output, as D59 shapes it
+    let prove = {
+        let mut b = Builder::new().csv(DELTA).checksigverify(&xonly(&prover)).into_script().into_bytes();
+        b.extend_from_slice(pl.script.as_bytes());
+        ScriptBuf::from_bytes(b)
+    };
+    let timeout = Builder::new().csv(DELTA + DELTA_PRIME).checksig(&xonly(&claimant)).into_script();
+    let pname = pl.name.clone();
+    let tree = TapTree::new(vec![Leaf::new(pname.clone(), prove.clone(), Timelock::csv(DELTA)), Leaf::new("timeout", timeout.clone(), Timelock::csv(DELTA + DELTA_PRIME))]).unwrap();
+
+    let spend = |op: OutPoint, prev: &TxOut, name: &str, script: &ScriptBuf, lock: Timelock, key: &Keypair, parked: Option<&FinalStep>| -> Transaction {
+        let mut tx = build_spend(op, &lock, vec![TxOut { value: Amount::from_sat(900_000), script_pubkey: tree.script_pubkey() }]);
+        let sig = sign_tapscript(key, &tx, 0, std::slice::from_ref(prev), script).unwrap();
+        let mut w = match parked {
+            Some(s) => {
+                let (p, n) = heads(s);
+                reveal(&sk, &p, &n)
+            }
+            None => vec![],
+        };
         w.push(sig.as_ref().to_vec());
-        tx.input[0].witness = tapscript_witness(&w, &script, &control);
+        tx.input[0].witness = tapscript_witness(&w, script, &tree.control_block(name).unwrap());
         tx
     };
 
-    let th = trace_hash_leaf(&l, &sk.public());
-    let ex = exec_leaf_for(&sk, 0);
-    for (leaf, honest, cheat) in [
-        (&th, steps[2], FinalStep { hash: [0x5a; 20], ..steps[2] }),
-        (&ex, steps[0], corruptions(&steps[0])[1].1),
-    ] {
-        let err = rt.test_accept(&spend(leaf, &honest)).expect_err("an honest step must not be disprovable");
-        println!("{}: honest step rejected ({err})", leaf.name);
-        let tx = spend(leaf, &cheat);
-        rt.test_accept(&tx).expect("a corrupted step is disprovable");
-        let (txid, height) = rt.send_and_confirm(&tx).unwrap();
-        println!("{}: disproved, {txid} confirmed at {height}: {} vB, leaf {} B", leaf.name, tx.vsize(), leaf.script.len() + 35);
-    }
+    // an honest step: proved after delta, not before
+    let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
+    let tx = spend(op, &prev, &pname, &prove, Timelock::csv(DELTA), &prover, Some(&step));
+    println!("honest proof before delta: {}", rt.test_accept(&tx).expect_err("CSV"));
+    rt.mine(u64::from(DELTA)).unwrap();
+    rt.test_accept(&tx).expect("an honest step proves");
+    let (txid, h) = rt.send_and_confirm(&tx).unwrap();
+    println!("{}: proved, {txid} confirmed at {h}: {} vB, leaf {} B", pl.name, tx.vsize(), prove.len());
+
+    // a cheated step (read 1's value inconsistent with the write): no
+    // proof; the claimant's timeout after delta + delta', not before
+    let cheat = corruptions(&step).into_iter().find(|(w, _)| *w == "read 1 value").unwrap().1;
+    let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
+    rt.mine(u64::from(DELTA)).unwrap();
+    let tx = spend(op, &prev, &pname, &prove, Timelock::csv(DELTA), &prover, Some(&cheat));
+    println!("cheated proof: {}", rt.test_accept(&tx).expect_err("a cheated step must not prove"));
+    let to = spend(op, &prev, "timeout", &timeout, Timelock::csv(DELTA + DELTA_PRIME), &claimant, None);
+    println!("timeout before delta + delta': {}", rt.test_accept(&to).expect_err("CSV"));
+    rt.mine(u64::from(DELTA_PRIME)).unwrap();
+    let (txid, h) = rt.send_and_confirm(&to).unwrap();
+    println!("timeout: the claimant takes it, {txid} confirmed at {h}: {} vB", to.vsize());
 }

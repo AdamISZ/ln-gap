@@ -19,6 +19,7 @@ anyhow.workspace = true
 hex.workspace = true
 blake3 = "1"
 riscv-decode = "0.2.3"
+bitcoin-script-functions = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-functions", tag = "v0.6.0" }
 bitcoin-script-riscv = { git = "https://github.com/FairgateLabs/BitVMX-CPU", rev = "299009c65e635327025ee13ffe1e1f1671bd0615" }
 bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-stack", tag = "v0.6.0" }
 

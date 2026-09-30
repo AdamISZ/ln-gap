@@ -2770,6 +2770,64 @@ resignation; an agreed draw (updates 1-6, no chain transaction); an
 illegal move (e2e5) force-closed, claimed (197 vB), refuted
 (19,532 vB) and disproved by `chess_mover` (2,692 vB).
 
+## D59. The last step of a disputed computation is proved, not disproved
+
+Date: 2026-09-30. Context: Z1 of DEMOS_PLAN.md section 3 (`lngap-zk`,
+commits 4999b3f and 4f90b5f); OFFCHAIN_BISECTION.md section 12. Agreed
+with the user.
+
+**The problem.** BitVMX's per-instruction verification scripts are
+written for the prover: a chain of assertions (the opcode is of this
+class, the reads come from the registers the opcode names, the memory
+witness matches, ...) and then an equality between the committed write
+and the computed one. Z1 built disprove leaves by inverting only that
+final equality. They are sound (a wrong-class leaf never fires; honest
+steps never fire) but not complete: an assertion that fails aborts the
+spend, and Script has no conditional successful exit (`OP_RETURN` fails
+the spend; `OP_SUCCESSx` is decided by a scan before execution, so it
+is unconditional, and non-standard). A step whose read record is
+inconsistent with its opcode (read 1 from the wrong register, with a
+write consistent with that read) fired no leaf in the test. A cheating
+prover could use exactly that.
+
+**Options.**
+
+1. A disprove kind per assertion, written by us, non-aborting (the
+   chess pattern: kinds that each fire on one violation). One dispute
+   pattern for every game; completeness rests on an audit of every
+   assertion in the 73 scripts. The long-term candidate for one
+   universal architecture.
+2. BitVMX's orientation at the last step: the prover proves the step
+   with BitVMX's script as written, or the claimant wins by timeout.
+   Complete by construction for everything BitVMX's scripts check.
+3. A mechanical rewrite: each `...VERIFY` becomes a failure flag. Code
+   after a failed check runs on data it assumed valid and can abort for
+   another reason (a bad PICK depth, a table read out of range), so it
+   needs its own audit.
+
+**Decision: 2**, for now: least of our own code in the part that decides
+correctness. At the final step of a computation dispute the refuted
+output P_d carries:
+
+- the claimant's disprove family (the search's bookkeeping kinds) and
+  `not_timely`, after `delta`, as for every game;
+- `prove_<class>`, the mover's, after `delta`: its payment key, the
+  pair signature re-verified, then BitVMX's verification script for the
+  instruction class unchanged, then the step hash
+  (BLAKE3(h_{i-1} || write)[..20] == h_i, BitVMX's own BLAKE3 with an
+  equality). One leaf per class; a wrong class fails BitVMX's own
+  opcode assertion;
+- `timeout`, the claimant's, after `delta + delta'`.
+
+As with today's disprove and split windows, the leaves' timelocks only
+say "after"; each side must act in its window, and after `delta +
+delta'` the proof and the timeout race. The honest prover pays for one
+more transaction than in the disprove orientation (the deposit, D56,
+covers it); the dispute is still claim, refutation, then one more
+transaction. The separate trace-hash disprove (Z1's first leaf) and the
+inverted execution leaves are dropped: the proof covers the hash, and
+the inverted leaves were the incomplete construction.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
