@@ -185,7 +185,7 @@ publication with deadlines a \emph{public clock}
 single-use seal is needed only for facts that many contracts share
 (Section~\ref{sec:shared}).
 
-Bitcoin itself gives proof of publication. That is of course a well known primitive by now, and exemplified in the simple, but useful, OpenTimestamps project~\cite{ots}. As discussed earlier, it's not practical to use this to adjudicate onchain, because Bitcoin SPV proofs in Script are not practical. If we make a separate one, we could use proof of work as a consensus mechanism for deciding a canonical chain, or we could use a set of bonded validators, where the security assumption is: if members of the quorum equivocate on the state, their bond can be slashed. This is the equivalent economic security assumption of the reorg threat in the proof of work variant. Let's consider PoW and bonded validator\footnote{We are not calling it proof of stake, because while the consensus algorithm may be similar, it's a notably different security construction than one in which the stake is the tokens of the ledger itself; here the ``stake'' is the bond \emph{in Bitcoin}, a timelocked slashable-to-burn output on the Bitcoin blockchain itself.}.
+Bitcoin itself gives proof of publication, for data placed on chain, where every node sees it. Its better-known relative is proof of existence, exemplified in the simple, but useful, OpenTimestamps project~\cite{ots}, which commits only a hash: it shows that someone held the data at a time, not that anyone else saw it. As discussed earlier, it's not practical to use this to adjudicate onchain, because Bitcoin SPV proofs in Script are not practical. If we make a separate one, we could use proof of work as a consensus mechanism for deciding a canonical chain, or we could use a set of bonded validators, where the security assumption is: if members of the quorum equivocate on the state, their bond can be slashed. This is the equivalent economic security assumption of the reorg threat in the proof of work variant. Let's consider PoW and bonded validator\footnote{We are not calling it proof of stake, because while the consensus algorithm may be similar, it's a notably different security construction than one in which the stake is the tokens of the ledger itself; here the ``stake'' is the bond \emph{in Bitcoin}, a timelocked slashable-to-burn output on the Bitcoin blockchain itself.}.
 
 \subsubsection{Proof of Work}
 
@@ -2095,8 +2095,8 @@ larger set, which is the point.
 ForceMove~\cite{forcemove} and state channels are the paradigm we
 modify; Lightning~\cite{lightning} the base we build on. Single-use seals
 and proof of publication are due to Todd~\cite{toddseals}, and
-OpenTimestamps~\cite{ots} is their simplest deployment; RGB~\cite{rgb}
-builds client-side-validated assets on them, and its companion Prime
+OpenTimestamps~\cite{ots}, also his, deploys the related proof of existence (a timestamp, not a publication); RGB~\cite{rgb}
+builds client-side-validated assets on single-use seals, and its companion Prime
 design places commitments in a dedicated header chain anchored to
 Bitcoin. The bonded, Bitcoin-collateralised validator set with one-time
 signatures is Linus's Coins and Stakechains~\cite{coins}; what is new
