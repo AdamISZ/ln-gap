@@ -301,8 +301,10 @@ move any funds, and can freeze them. The venue holds no coins and
 decides one bit per move, whether it was published in time; it cannot
 forge a move, which the player signs, nor change a rule, which Script
 enforces, nor stop anyone leaving, since every user's funds sit in its
-own channel and a unilateral close is always available. A federation is
-trusted with the money; the venue only with the clock.
+own channel and a unilateral close is always available. A federation's
+majority can take or freeze everything in its custody, on its own; the
+venue's can at worst tip one disputed contract, by misstating the time
+of a move, for one party to it and against the other.
 Section~\ref{sec:security} develops the comparison.
 
 The proof of concept has one fixed set of members;
