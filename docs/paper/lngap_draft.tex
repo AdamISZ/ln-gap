@@ -1541,6 +1541,45 @@ challenger; and a counter-proof must be published before its deadline,
 the same assumption on the venue's timing and on Bitcoin's liveness as
 everywhere else.
 
+\subsection{Channels instead of bridges}
+\label{sec:bridges}
+
+A bridge moves bitcoin into a system that can express richer programs;
+this design moves the programs to the bitcoin. Most of the globality of
+a bridge follows from the first choice. Its deposits are pooled in
+jointly controlled outputs, and the pool's contract cannot see Bitcoin,
+so every withdrawal must convince it, through a proof, that the deposits
+and the other system's state lie on the canonical chain; the setup grows
+with the operators and the deposits, and the pool nets the risk of
+everyone who used it.
+
+In a channel the funds never leave Bitcoin. A deposit is a funding
+output that each party checks with its own node, as in Lightning, so no
+script is ever shown that a deposit happened; each user's claim is
+backed by the collateral in its own channel, and a unilateral close
+puts it on chain with the contract attached. Nothing is pegged, so
+nothing is pegged out. What many parties share is reached through hubs:
+a statement about the hub's own accounting is a bilateral claim against
+the hub, provable in the user's contract (Section~\ref{sec:zkclaims}),
+and a fact of another channel, such as a payment made through the hub,
+crosses by Lightning's own device, a secret whose revelation in one
+channel is evidence in the next. Every fact a contract needs is then
+bilateral, fixed at setup, self-certifying, bound inside a proven
+statement, or a revealed secret, and the venue attests the content of
+none of them.
+
+The price is locality. The venue's majority assumption holds per
+contract; liquidity is locked per channel, without the netting that
+makes a pool capital-efficient; and a contract can resolve only local
+state, so an application that needs a total order across many parties
+(price-time priority, first-come registration, an auction among many
+bidders) places that order with a hub, whose misbehaviour is then
+bounded by each channel's collateral rather than threatening a pool. In
+return there is far less pooled risk, and far less computation and
+on-chain weight in a dispute: nothing outside the channel is ever
+proved to Script, and a dispute stays within a constant number of
+transactions.
+
 \section{Security}
 \label{sec:security}
 
