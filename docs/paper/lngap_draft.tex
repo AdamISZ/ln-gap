@@ -1793,6 +1793,26 @@ by a majority is therefore attributable (we know who flagged) but not
 falsifiable (nobody can show the flag was false). Punishment by ejection
 needs an objective basis, and there is none.
 
+How much that matters depends on the timescale. A timing lie is
+deniable only within what nobody can measure: the disagreement between
+clocks, which is seconds, and the vagaries of delivery, which are
+seconds to minutes. Against a move window of a minute, both are large,
+and ``it was late'' or ``it never reached me'' can be sustained. Against a
+window of hours, as for a daily storage proof or a withdrawal claim,
+they are not: a mover can send its entry to every member, repeatedly
+and by several routes, and obtain third-party timestamps of its
+existence (OpenTimestamps~\cite{ots}, say) for nothing, and a majority
+that then claims not to have seen it in time claims something no one
+will believe, though Script still cannot tell. This is the reliance
+Bitcoin itself makes: flood-fill propagation is unreliable at the scale
+of seconds and dependable at the scale of hours, and nobody can stop a
+signal that has hours to spread. The venue is a binding agent of the
+same kind, not very strong, but strong enough: it turns the imprecise
+public fact that something was widely published well before a deadline
+into one bit that Script can read. Its timing assumption is therefore
+weakest for fast contracts and weak only in principle for slow ones,
+and many of the valuable applications are slow.
+
 \subsection{Committees drawn from a roster}
 \label{sec:roster}
 
