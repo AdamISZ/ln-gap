@@ -38,6 +38,7 @@ use lngap_n4bit::DIGEST_BYTES;
 pub mod blackjack;
 pub mod bond;
 pub mod chess;
+pub mod ext;
 pub mod fee;
 pub mod graph;
 pub mod refute;

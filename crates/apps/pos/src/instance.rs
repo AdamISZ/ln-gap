@@ -89,6 +89,9 @@ pub enum Game {
     Chess,
     /// D57: the share commitments ride in [`PosInstance::bj`].
     Blackjack,
+    /// D60: a computation search (lngap-zk); its leaves ride in
+    /// [`PosInstance::family`].
+    Zk,
 }
 
 impl Game {
@@ -99,6 +102,8 @@ impl Game {
             Game::Ttt => 3,
             Game::Chess => 42,
             Game::Blackjack => 44,
+            // D60: the head's bytes 4..48, as blackjack's
+            Game::Zk => 44,
         }
     }
     /// The first depth a terminal exhibit exists at, if the game has the
@@ -113,7 +118,7 @@ impl Game {
     pub fn min_exhibit_depth(self) -> Option<u32> {
         match self {
             Game::Ttt => Some(MIN_EXHIBIT_DEPTH),
-            Game::Chess | Game::Blackjack => None,
+            Game::Chess | Game::Blackjack | Game::Zk => None,
         }
     }
 }
@@ -255,6 +260,8 @@ pub struct PosInstance {
     pub registry: Registry,
     /// Blackjack's share commitments, both sides', pinned at open (D57).
     pub bj: Option<lngap_blackjack::Commitments>,
+    /// An outside family's leaves (`Game::Zk`).
+    pub family: Option<std::sync::Arc<dyn crate::ext::Family>>,
 }
 
 impl PosInstance {
@@ -280,7 +287,7 @@ impl PosInstance {
         // HubWins 1 / Draw 2); chess's Draw split can never fire on this
         // graph (chess.rs's resolution fragment).
         let outcomes = Contract::outcomes(&TicTacToe);
-        Ok(PosInstance { id, value, deposit: Amount::ZERO, deadline, game_id, game, t0, ell, margin, keys, outcomes, registry, bj: None })
+        Ok(PosInstance { id, value, deposit: Amount::ZERO, deadline, game_id, game, t0, ell, margin, keys, outcomes, registry, bj: None, family: None })
     }
 
     /// Give each side a dispute deposit `d` inside the contract value
@@ -297,6 +304,20 @@ impl PosInstance {
         ensure!(self.game == Game::Blackjack, "share commitments are blackjack's");
         self.bj = Some(c);
         Ok(self)
+    }
+
+    /// Attach an outside family's leaves (`Game::Zk`).
+    pub fn with_family(mut self, f: std::sync::Arc<dyn crate::ext::Family>) -> Result<PosInstance> {
+        ensure!(self.game == Game::Zk, "an outside family plays Game::Zk");
+        if let Some(fd) = f.final_depth() {
+            ensure!(fd == self.max_depth(), "the family's final depth {fd} is not the instance's last {}", self.max_depth());
+        }
+        self.family = Some(f);
+        Ok(self)
+    }
+
+    fn family(&self) -> Result<&dyn crate::ext::Family> {
+        self.family.as_deref().ok_or_else(|| anyhow::anyhow!("a Game::Zk instance needs its family"))
     }
 
     /// Both stakes together: the value less both deposits.
@@ -339,10 +360,14 @@ impl PosInstance {
         let keys: Vec<WotsPublic> = self.keys.iter().map(|k| k.state.clone()).collect();
         let game = self.game;
         let bj = self.bj.clone();
+        let family = self.family.clone();
         std::sync::Arc::new(move |d: u32, entry: &[u8]| {
             let Some(pk) = d.checked_sub(1).and_then(|i| keys.get(i as usize)) else { return false };
             if game == Game::Blackjack {
                 return bj.as_ref().is_some_and(|c| crate::blackjack::entry_ok(pk, c, d, entry));
+            }
+            if game == Game::Zk {
+                return family.as_ref().is_some_and(|f| f.entry_ok(d, pk, entry));
             }
             let head = lngap_factchain::entry_head(entry);
             let (msg, sigs) = match game {
@@ -361,7 +386,7 @@ impl PosInstance {
                     let sigs: Vec<[u8; 20]> = entry[48..].chunks(20).map(|c| c.try_into().expect("20 bytes")).collect();
                     (crate::chess::auth_message(&head), sigs)
                 }
-                Game::Blackjack => unreachable!("handled above"),
+                Game::Blackjack | Game::Zk => unreachable!("handled above"),
             };
             crate::refute::check_entry_sig(pk, &msg, &sigs)
         })
@@ -410,6 +435,11 @@ impl PosInstance {
             let pk = &self.depth_keys(d).state;
             leaves.push(graph::equiv_leaf(ctx, &format!("equiv_{d}"), pk, mover_at(d).other()));
         }
+        if self.game == Game::Zk {
+            for (name, pk, holder) in self.family()?.equiv_keys() {
+                leaves.push(graph::equiv_leaf(ctx, &name, &pk, holder.other()));
+            }
+        }
         TapTree::new(leaves)
     }
 
@@ -439,7 +469,7 @@ impl PosInstance {
     /// splits. (The tic-tac-toe exhibit output's tree is this tree too, so
     /// a late terminal exhibit dies the same way.)
     pub fn refuted_tree(&self, ctx: &CommitCtx, d: u32) -> Result<TapTree> {
-        graph::refuted_tree(ctx, self.game, &self.layout(d), self.depth_keys(d), &self.outcomes, self.registry.flags(d), self.registry.threshold, self.bj.as_ref())
+        graph::refuted_tree_ext(ctx, self.game, &self.layout(d), self.depth_keys(d), &self.outcomes, self.registry.flags(d), self.registry.threshold, self.bj.as_ref(), self.family.as_deref())
     }
 
     /// Payout outputs for `payout` of `v` to the parties' payout scripts.
@@ -499,6 +529,11 @@ impl PosInstance {
         // blackjack a refund (D57: the draw)
         let r = match self.game {
             Game::Blackjack => self.outcomes.iter().find(|o| o.code == 2).cloned().expect("the draw outcome"),
+            // D60: silence until the deadline is acceptance
+            Game::Zk => {
+                let c = self.family()?.settle_code();
+                self.outcomes.iter().find(|o| o.code == c).cloned().ok_or_else(|| anyhow::anyhow!("no outcome {c}"))?
+            }
             _ => Contract::resolution(&TicTacToe, &Board::empty()),
         };
         // settle is the no-dispute fallback: each deposit returns to its
@@ -577,6 +612,14 @@ impl PosInstance {
                 &name,
                 format!("player equivocation at depth {d}: the mover forfeits"),
             )?);
+        }
+        // an outside family's further one-time keys (D61: the input keys):
+        // the same exhibit, paying the holder's counterparty
+        if self.game == Game::Zk {
+            for (name, _, holder) in self.family()?.equiv_keys() {
+                let tx = build_spend(outpoint, &tree0.leaf(&name)?.timelock, vec![TxOut { value: self.value - fee, script_pubkey: ctx.key(holder.other()).payout_spk.clone() }]);
+                out.push(PresignedTx::new(name.clone(), tx, vec![prevout.clone()], &tree0, &name, format!("{name}: a double signature, the holder forfeits"))?);
+            }
         }
         Ok(out)
     }

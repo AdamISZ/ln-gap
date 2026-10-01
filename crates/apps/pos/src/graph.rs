@@ -91,7 +91,8 @@ fn authorship(b: Builder, game: Game, file: usize, head_off: usize, key: &WotsPu
     match game {
         Game::Ttt => ttt::authorship_fragment(b, file, head_off, key),
         Game::Chess => chess::authorship_fragment(b, file, head_off, key),
-        Game::Blackjack => crate::blackjack::authorship_fragment(b, file, head_off, key),
+        // D60: the head's bytes 4..48, as blackjack's
+        Game::Blackjack | Game::Zk => crate::blackjack::authorship_fragment(b, file, head_off, key),
     }
 }
 
@@ -178,7 +179,7 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
             let b = authorship(b, game, l.file, l.new, &keys.state);
             match game {
                 Game::Ttt => authorship(b, game, l.file, 0, &keys_prev.expect("a pair has a prior").state),
-                Game::Chess | Game::Blackjack => b,
+                Game::Chess | Game::Blackjack | Game::Zk => b,
             }
         }),
         None => refute::refute_leaf(table, &keys.refute, |b| authorship(b, game, l.file, 0, &keys.state)),
@@ -395,11 +396,33 @@ pub fn not_timely_witness(tx: &Transaction, input: usize, prevouts: &[TxOut], le
 /// (D50), then the mover's self-checking splits after `delta + delta'`.
 #[allow(clippy::too_many_arguments)]
 pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome], flags: &[XOnlyPublicKey], t: u32, bj: Option<&lngap_blackjack::Commitments>) -> Result<TapTree> {
+    refuted_tree_ext(ctx, game, l, keys, outcomes, flags, t, bj, None)
+}
+
+/// [`refuted_tree`] with an outside family (`Game::Zk`). Its splits: the
+/// mover wins a refuted depth after `delta + delta'` (R is "the refutation
+/// stands"); at the family's final depth the mover must instead PROVE
+/// (D59): its proofs after `delta + delta'`, the claimant's split after
+/// `delta + 2·delta'`. The other outcomes' splits are unspendable, so the
+/// graph's pre-signed skeletons for them never apply.
+#[allow(clippy::too_many_arguments)]
+pub fn refuted_tree_ext(
+    ctx: &CommitCtx,
+    game: Game,
+    l: &Layout,
+    keys: &PosDepthKeys,
+    outcomes: &[Outcome],
+    flags: &[XOnlyPublicKey],
+    t: u32,
+    bj: Option<&lngap_blackjack::Commitments>,
+    ext: Option<&dyn crate::ext::Family>,
+) -> Result<TapTree> {
     let challenger = ctx.key(l.mover.other()).payment;
     let family = match game {
         Game::Ttt => ttt::disprove_leaves(l, &keys.refute),
         Game::Chess => chess::disprove_leaves(l, &keys.refute),
         Game::Blackjack => crate::blackjack::disprove_leaves(l, &keys.refute, bj.ok_or_else(|| anyhow::anyhow!("a blackjack instance needs its share commitments"))?),
+        Game::Zk => ext.ok_or_else(|| anyhow::anyhow!("a Game::Zk instance needs its family"))?.disprove_leaves(l, &keys.refute),
     };
     let mut leaves = vec![];
     for pl in family {
@@ -414,11 +437,44 @@ pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys
     }
     leaves.push(not_timely_leaf(ctx, l, flags, t));
     let w = ctx.params.delta + ctx.params.delta_prime;
+    if game == Game::Zk {
+        let ext = ext.expect("checked above");
+        let last = ext.final_depth() == Some(l.depth);
+        let code = |r: Role| if r == Role::User { 0 } else { 1 };
+        if last {
+            let mover = ctx.key(l.mover).payment;
+            for (name, script) in ext.prove_leaves(l, &keys.refute) {
+                let mut b = Builder::new().csv(w).checksigverify(&mover);
+                for ins in script.instructions() {
+                    b = match ins.expect("valid script") {
+                        bitcoin::script::Instruction::Op(op) => b.push_opcode(op),
+                        bitcoin::script::Instruction::PushBytes(pb) => b.push_slice(pb),
+                    };
+                }
+                leaves.push(Leaf::new(name, b.into_script(), Timelock::csv(w)));
+            }
+        }
+        // the split that can pay: the mover's after w, or at the final
+        // depth the claimant's after w + delta' (the prover's window first)
+        let (payee, lock) = if last { (l.mover.other(), w + ctx.params.delta_prime) } else { (l.mover, w) };
+        for o in outcomes {
+            let name = format!("split_{}", o.name);
+            if o.code == code(payee) {
+                let b = ctx.two_of_two_verify(Builder::new().csv(lock));
+                leaves.push(Leaf::new(name, b.push_int(1).into_script(), Timelock::csv(lock)));
+            } else {
+                // never spendable (distinct per outcome: a tree's leaves differ)
+                leaves.push(Leaf::new(name, Builder::new().push_int(i64::from(o.code)).push_opcode(OP_RETURN).into_script(), Timelock::NONE));
+            }
+        }
+        return TapTree::new(leaves);
+    }
     for o in outcomes {
         let leaf = match game {
             Game::Ttt => ttt::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
             Game::Chess => chess::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
             Game::Blackjack => crate::blackjack::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
+            Game::Zk => unreachable!("handled above"),
         };
         leaves.push(leaf);
     }

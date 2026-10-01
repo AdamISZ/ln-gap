@@ -14,6 +14,7 @@ license.workspace = true
 lngap-lamport = { path = "../../lamport" }
 lngap-pos = { path = "../pos" }
 lngap-channel = { path = "../../channel" }
+lngap-blackjack = { path = "../blackjack" }
 lngap-btc = { path = "../../btc" }
 bitcoin.workspace = true
 anyhow.workspace = true
@@ -29,3 +30,4 @@ bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-scr
 [dev-dependencies]
 rand.workspace = true
 lngap-script32 = { path = "../../script32" }
+serde_json.workspace = true
