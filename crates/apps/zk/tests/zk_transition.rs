@@ -476,3 +476,25 @@ fn transition_leaf_on_regtest() {
     let (txid, h) = rt.send_and_confirm(&tx).unwrap();
     println!("malformed choice disproved: {txid} confirmed at {h}: {} vB, {} WU, leaf {} B; honest rejected ({err})", tx.vsize(), tx.weight().to_wu(), script.len());
 }
+
+/// What building the leaf costs (it is rebuilt per depth per contract: the
+/// pair key differs; the BLAKE3 body doesn't and could be cached).
+#[test]
+fn transition_leaf_build_time() {
+    let sk = pair_key([19; 32]);
+    let t = std::time::Instant::now();
+    let body = check_script(N as u32);
+    let t_body = t.elapsed();
+    let t = std::time::Instant::now();
+    let s = leaf(9, &sk.public());
+    let t_leaf = t.elapsed();
+    let t = std::time::Instant::now();
+    let _ =
+        bitcoin::taproot::TapLeafHash::from_script(&s, bitcoin::taproot::LeafVersion::TapScript);
+    let t_hash = t.elapsed();
+    println!(
+        "BLAKE3 body {} B in {t_body:?}; whole leaf {} B in {t_leaf:?}; tapleaf hash {t_hash:?}",
+        body.len(),
+        s.len()
+    );
+}
