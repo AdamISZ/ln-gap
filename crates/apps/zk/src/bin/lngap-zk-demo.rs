@@ -202,9 +202,15 @@ fn main() -> Result<()> {
     let proof = prove_leaf(&Layout::at(D, GAME, mover_at(D)), &pair.public(), &ins, f.read.micro, Arc::new(|_, _| true));
     let out = FinalOutput::new(&proof, &prover, &claimant, DELTA, DELTA_PRIME)?;
     say("   (the claim and the refutation that parks the final pair are the graph's usual first two transactions; here the refuted output is funded directly)");
-    say(format!("   the refuted output has two leaves: {} ({} B, after {DELTA} blocks) and timeout (the claimant's, after {} blocks)", out.prove_name, out.prove.len(), DELTA + DELTA_PRIME));
+    say(format!(
+        "   the refuted output has two leaves: {} ({} B, after {} blocks: the claimant's disproves come first) and timeout (the claimant's, after {} blocks)",
+        out.prove_name,
+        out.prove.len(),
+        out.prove_after(),
+        out.timeout_after()
+    ));
     let (op, prev) = rt.fund(&out.tree.script_pubkey(), Amount::from_sat(1_000_000))?;
-    rt.mine(u64::from(DELTA))?;
+    rt.mine(u64::from(out.prove_after()))?;
     let (prior, new) = (f.prior_head(GAME, D - 1, mover_at(D - 1)), f.new_head(GAME, D, mover_at(D)));
     let proof_tx = out.prove_tx(op, &prev, out.pay_back(Amount::from_sat(990_000)), &prover, &pair, &f, &prior, &new)?;
     match rt.test_accept(&proof_tx) {
@@ -218,7 +224,7 @@ fn main() -> Result<()> {
             rt.mine(u64::from(DELTA_PRIME))?;
             let to = out.timeout_tx(op, &prev, out.pay_back(Amount::from_sat(990_000)), &claimant)?;
             let (txid, h) = rt.send_and_confirm(&to)?;
-            say(format!("   after {} blocks the claimant takes the output: {txid} at height {h}, {} vB. The verifier wins.", DELTA + DELTA_PRIME, to.vsize()));
+            say(format!("   after {} blocks the claimant takes the output: {txid} at height {h}, {} vB. The verifier wins.", out.timeout_after(), to.vsize()));
         }
     }
     say(format!("\n   on chain: the refutation that parks the pair, then one transaction; {:.1?} in all", t0.elapsed()));

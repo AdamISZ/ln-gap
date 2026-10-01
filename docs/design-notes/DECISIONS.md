@@ -2869,6 +2869,16 @@ challenges fire on honest steps of larger programs), and its
 uninitialised ranges include the loader-initialised registers (its
 UninitializedData challenge fires on an honest first read of sp).
 
+**Amendment (2026-10-01): the windows.** As first built, the prover's
+proof and the claimant's disproves were both spendable after `delta`, so
+they raced. A prover whose step executes correctly on a false read (what
+S1/S2 catch) could broadcast its proof first and pre-empt the disprove.
+Now the order is the other games' (disproves, then the mover's splits):
+the claimant's disproves after `delta`, the prover's proof after `delta +
+delta'`, the claimant's timeout after `delta + 2·delta'`. Each window
+belongs to one side (`chain.rs`, `FinalOutput::prove_after`,
+`timeout_after`).
+
 **Amendment (2026-10-01): the class guard.** The prover chooses which
 `zk_prove_<class>` leaf to spend, and BitVMX's scripts for two classes
 never check the opcode: `op_nop` drops it and `op_ecall` reads a register.

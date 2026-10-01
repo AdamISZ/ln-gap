@@ -136,7 +136,7 @@ fn resolved_on_regtest() {
         let pl = prove_leaf_for(&sk, &s.final_step).expect("a decodable opcode");
         let out = FinalOutput::new(&pl, &prover, &claimant, DELTA, DELTA_PRIME).unwrap();
         let (op, prev) = rt.fund(&out.tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
-        rt.mine(u64::from(DELTA)).unwrap();
+        rt.mine(u64::from(out.prove_after())).unwrap();
         let (p, n) = heads(&s.final_step);
         let proof = out.prove_tx(op, &prev, out.pay_back(Amount::from_sat(900_000)), &prover, &sk, &s.final_step, &p, &n).unwrap();
         if honest {
@@ -146,7 +146,7 @@ fn resolved_on_regtest() {
             let err = rt.test_accept(&proof).expect_err("no proof of a wrong step");
             println!("{name}: no proof of step {} ({}): {err}", s.step, pl.name);
             let to = out.timeout_tx(op, &prev, out.pay_back(Amount::from_sat(900_000)), &claimant).unwrap();
-            rt.test_accept(&to).expect_err("the timeout waits for delta + delta'");
+            rt.test_accept(&to).expect_err("the timeout waits for delta + 2 delta'");
             rt.mine(u64::from(DELTA_PRIME)).unwrap();
             let (txid, h) = rt.send_and_confirm(&to).unwrap();
             println!("{name}: the claimant's timeout: {txid} at {h}");

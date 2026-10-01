@@ -11,10 +11,11 @@
 //!   opcode that the disprove orientation could not catch), or the
 //!   opcode; and no class's leaf proves another class's step;
 //! - peak stack under 1,000;
-//! - on regtest, the final step's output as D59 shapes it (the prover's
-//!   proof after delta, the claimant's timeout after delta + delta'): an
-//!   honest step is proved, not before delta; a cheated one cannot be,
-//!   and the claimant takes it by timeout, not before delta + delta'.
+//! - on regtest, the final step's output as D59 (amended) shapes it (the
+//!   claimant's disproves after delta, the prover's proof after delta +
+//!   delta', the claimant's timeout after delta + 2 delta'): an honest step
+//!   is proved, not in the claimant's window; a cheated one cannot be, and
+//!   the claimant takes it by timeout, not before delta + 2 delta'.
 
 use std::sync::Arc;
 
@@ -39,6 +40,10 @@ const GAME: u16 = 1;
 const D: u32 = 2;
 const DELTA: u16 = 2;
 const DELTA_PRIME: u16 = 3;
+/// D59 amended: the proof after the claimant's disprove window, the
+/// timeout after the prover's.
+const PROVE: u16 = DELTA + DELTA_PRIME;
+const TIMEOUT: u16 = DELTA + 2 * DELTA_PRIME;
 
 /// Step 0's hash, then each step's trace line: read 1 (address, value),
 /// read 2 (address, value), pc, micro, opcode, write (address, value,
@@ -179,13 +184,13 @@ fn final_step_on_regtest() {
 
     // the final step's refuted output, as D59 shapes it
     let prove = {
-        let mut b = Builder::new().csv(DELTA).checksigverify(&xonly(&prover)).into_script().into_bytes();
+        let mut b = Builder::new().csv(PROVE).checksigverify(&xonly(&prover)).into_script().into_bytes();
         b.extend_from_slice(pl.script.as_bytes());
         ScriptBuf::from_bytes(b)
     };
-    let timeout = Builder::new().csv(DELTA + DELTA_PRIME).checksig(&xonly(&claimant)).into_script();
+    let timeout = Builder::new().csv(TIMEOUT).checksig(&xonly(&claimant)).into_script();
     let pname = pl.name.clone();
-    let tree = TapTree::new(vec![Leaf::new(pname.clone(), prove.clone(), Timelock::csv(DELTA)), Leaf::new("timeout", timeout.clone(), Timelock::csv(DELTA + DELTA_PRIME))]).unwrap();
+    let tree = TapTree::new(vec![Leaf::new(pname.clone(), prove.clone(), Timelock::csv(PROVE)), Leaf::new("timeout", timeout.clone(), Timelock::csv(TIMEOUT))]).unwrap();
 
     let spend = |op: OutPoint, prev: &TxOut, name: &str, script: &ScriptBuf, lock: Timelock, key: &Keypair, parked: Option<&FinalStep>| -> Transaction {
         let mut tx = build_spend(op, &lock, vec![TxOut { value: Amount::from_sat(900_000), script_pubkey: tree.script_pubkey() }]);
@@ -204,24 +209,26 @@ fn final_step_on_regtest() {
         tx
     };
 
-    // an honest step: proved after delta, not before
+    // an honest step: proved after delta + delta' (the claimant's disprove
+    // window first), not before
     let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
-    let tx = spend(op, &prev, &pname, &prove, Timelock::csv(DELTA), &prover, Some(&step));
-    println!("honest proof before delta: {}", rt.test_accept(&tx).expect_err("CSV"));
+    let tx = spend(op, &prev, &pname, &prove, Timelock::csv(PROVE), &prover, Some(&step));
     rt.mine(u64::from(DELTA)).unwrap();
+    println!("honest proof in the claimant's window (after delta): {}", rt.test_accept(&tx).expect_err("CSV"));
+    rt.mine(u64::from(DELTA_PRIME)).unwrap();
     rt.test_accept(&tx).expect("an honest step proves");
     let (txid, h) = rt.send_and_confirm(&tx).unwrap();
     println!("{}: proved, {txid} confirmed at {h}: {} vB, leaf {} B", pl.name, tx.vsize(), prove.len());
 
     // a cheated step (read 1's value inconsistent with the write): no
-    // proof; the claimant's timeout after delta + delta', not before
+    // proof; the claimant's timeout after delta + 2 delta', not before
     let cheat = corruptions(&step).into_iter().find(|(w, _)| *w == "read 1 value").unwrap().1;
     let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
-    rt.mine(u64::from(DELTA)).unwrap();
-    let tx = spend(op, &prev, &pname, &prove, Timelock::csv(DELTA), &prover, Some(&cheat));
+    rt.mine(u64::from(PROVE)).unwrap();
+    let tx = spend(op, &prev, &pname, &prove, Timelock::csv(PROVE), &prover, Some(&cheat));
     println!("cheated proof: {}", rt.test_accept(&tx).expect_err("a cheated step must not prove"));
-    let to = spend(op, &prev, "timeout", &timeout, Timelock::csv(DELTA + DELTA_PRIME), &claimant, None);
-    println!("timeout before delta + delta': {}", rt.test_accept(&to).expect_err("CSV"));
+    let to = spend(op, &prev, "timeout", &timeout, Timelock::csv(TIMEOUT), &claimant, None);
+    println!("timeout before delta + 2 delta': {}", rt.test_accept(&to).expect_err("CSV"));
     rt.mine(u64::from(DELTA_PRIME)).unwrap();
     let (txid, h) = rt.send_and_confirm(&to).unwrap();
     println!("timeout: the claimant takes it, {txid} confirmed at {h}: {} vB", to.vsize());
