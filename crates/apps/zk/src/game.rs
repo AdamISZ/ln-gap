@@ -187,6 +187,12 @@ pub fn final_witness(state: &State, record: &Record) -> Vec<Vec<u8>> {
 /// top; an equality verify. The block must be alone on the main stack
 /// (BitVMX's gadget finds its tables by OP_DEPTH).
 pub fn block_check_script() -> ScriptBuf {
+    // key-independent and built once per process (two per leaf otherwise)
+    static S: std::sync::OnceLock<ScriptBuf> = std::sync::OnceLock::new();
+    S.get_or_init(build_block_check_script).clone()
+}
+
+fn build_block_check_script() -> ScriptBuf {
     let mut st = StackTracker::new();
     let _ = st.define(BLOCK as u32 * 2, "block");
     let _ = st.define(40, "digest");
@@ -201,6 +207,11 @@ pub fn block_check_script() -> ScriptBuf {
 /// address, value, pc: 8 each; micro: 2): fails unless BLAKE3 of prev ||
 /// write is the hash. The inputs must be alone on the main stack.
 pub fn step_hash_script() -> ScriptBuf {
+    static S: std::sync::OnceLock<ScriptBuf> = std::sync::OnceLock::new();
+    S.get_or_init(build_step_hash_script).clone()
+}
+
+fn build_step_hash_script() -> ScriptBuf {
     let mut st = StackTracker::new();
     let prev = st.define(40, "prev");
     let hash = st.define(40, "hash");
@@ -1001,7 +1012,8 @@ pub fn write_bytes(w: &Step) -> [u8; 13] {
 /// read names an earlier step (or none) but W wrote its address.
 pub fn read_value_fires(record: &Record, state: &State, w: &Step, r: u8) -> bool {
     let write_step = u64::from(state.base) + 1;
-    let (addr, value, ls) = if r == 1 { (record.read.read_1_addr, record.read.read_1_value, record.last_step_1) } else { (record.read.read_2_addr, record.read.read_2_value, record.last_step_2) };
+    let (addr, value, ls) =
+        if r == 1 { (record.read.read_1_addr, record.read.read_1_value, record.last_step_1) } else { (record.read.read_2_addr, record.read.read_2_value, record.last_step_2) };
     let never = crate::challenges::NEVER;
     let contradicts = (ls == write_step && (w.write_addr != addr || w.write_value != value)) || ((ls == never || ls < write_step) && w.write_addr == addr);
     u64::from(state.base) < u64::from(record.step) && contradicts && crate::step_hash(&state.lo, w) == state.hi

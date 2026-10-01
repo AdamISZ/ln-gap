@@ -21,8 +21,8 @@
 //! or the record (the last depth), then at depth 1 each input word (4
 //! bytes, big-endian) and its signature elements.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 
 use bitcoin::ScriptBuf;
 use bitcoin_script_riscv::riscv::instruction_mapping::{generate_verification_script, requires_witness};
@@ -44,6 +44,28 @@ pub struct ZkFamily {
     pub input_keys: Vec<WotsPublic>,
     /// One (opcode, micro-step) sample per instruction class in the code.
     pub classes: BTreeMap<String, (u32, u8)>,
+    /// Built leaf scripts, per (depth, refute key): they depend on nothing
+    /// else, while a graph is rebuilt per commitment version and per side
+    /// (and builds most depths' refuted trees twice, under the claim and
+    /// the counter). The context-dependent prefixes are added around them
+    /// by the graph, outside the cache.
+    cache: Mutex<Cache>,
+}
+
+#[derive(Default)]
+struct Cache {
+    disproves: HashMap<(u32, [u8; 32]), Arc<Vec<(String, ScriptBuf)>>>,
+    proofs: HashMap<(u32, [u8; 32]), Arc<Vec<(String, ScriptBuf)>>>,
+}
+
+/// A key's fingerprint for the cache.
+fn fingerprint(k: &WotsPublic) -> [u8; 32] {
+    let mut h = ::blake3::Hasher::new();
+    h.update(&k.params.message_digits.to_be_bytes());
+    for d in &k.digits {
+        h.update(d.as_ref());
+    }
+    *h.finalize().as_bytes()
 }
 
 impl std::fmt::Debug for ZkFamily {
@@ -68,7 +90,7 @@ pub fn code_classes(info: &ProgramInfo) -> BTreeMap<String, (u32, u8)> {
 impl ZkFamily {
     pub fn new(search: Search, info: ProgramInfo, input_keys: Vec<WotsPublic>) -> Arc<ZkFamily> {
         let classes = code_classes(&info);
-        Arc::new(ZkFamily { search, info, input_keys, classes })
+        Arc::new(ZkFamily { search, info, input_keys, classes, cache: Mutex::new(Cache::default()) })
     }
 }
 
@@ -101,8 +123,8 @@ pub fn encode_inputs(words: &[u32], sigs: &[WotsSig]) -> Vec<u8> {
     b
 }
 
-impl lngap_pos::ext::Family for ZkFamily {
-    fn disprove_leaves(&self, l: &Layout, refute: &WotsPublic) -> Vec<PosLeaf> {
+impl ZkFamily {
+    fn build_disproves(&self, l: &Layout, refute: &WotsPublic) -> Vec<PosLeaf> {
         let d = l.depth;
         let s = &self.search;
         if d == 1 {
@@ -131,11 +153,7 @@ impl lngap_pos::ext::Family for ZkFamily {
         }
     }
 
-    fn final_depth(&self) -> Option<u32> {
-        Some(self.search.depths())
-    }
-
-    fn prove_leaves(&self, l: &Layout, refute: &WotsPublic) -> Vec<(String, ScriptBuf)> {
+    fn build_proofs(&self, l: &Layout, refute: &WotsPublic) -> Vec<(String, ScriptBuf)> {
         self.classes
             .iter()
             .map(|(key, &(op, micro))| {
@@ -144,6 +162,39 @@ impl lngap_pos::ext::Family for ZkFamily {
                 (format!("zk_prove_{key}"), prove_script_d60(l, refute, key, &ScriptBuf::from_bytes(exec.into_bytes()), requires_witness(&ins)))
             })
             .collect()
+    }
+}
+
+impl lngap_pos::ext::Family for ZkFamily {
+    fn disprove_leaves(&self, l: &Layout, refute: &WotsPublic) -> Vec<PosLeaf> {
+        let key = (l.depth, fingerprint(refute));
+        let hit = self.cache.lock().unwrap().disproves.get(&key).cloned();
+        let leaves = match hit {
+            Some(v) => v,
+            None => {
+                let v: Arc<Vec<(String, ScriptBuf)>> = Arc::new(self.build_disproves(l, refute).into_iter().map(|p| (p.name, p.script)).collect());
+                self.cache.lock().unwrap().disproves.insert(key, v.clone());
+                v
+            }
+        };
+        leaves.iter().map(|(n, s)| pos_leaf(n.clone(), s.clone())).collect()
+    }
+
+    fn final_depth(&self) -> Option<u32> {
+        Some(self.search.depths())
+    }
+
+    fn prove_leaves(&self, l: &Layout, refute: &WotsPublic) -> Vec<(String, ScriptBuf)> {
+        let key = (l.depth, fingerprint(refute));
+        let hit = self.cache.lock().unwrap().proofs.get(&key).cloned();
+        match hit {
+            Some(v) => v.as_ref().clone(),
+            None => {
+                let v = self.build_proofs(l, refute);
+                self.cache.lock().unwrap().proofs.insert(key, Arc::new(v.clone()));
+                v
+            }
+        }
     }
 
     fn entry_ok(&self, d: u32, state_key: &WotsPublic, entry: &[u8]) -> bool {

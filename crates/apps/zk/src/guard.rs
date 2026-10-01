@@ -62,6 +62,18 @@ pub fn key_of(opcode: u32, micro: u8) -> Option<String> {
 
 /// The features (non-SYSTEM) that map to `key`.
 pub fn allowed(key: &str) -> BTreeSet<u32> {
+    // enumerated once per class per process
+    static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, BTreeSet<u32>>>> = std::sync::OnceLock::new();
+    let m = M.get_or_init(Default::default);
+    if let Some(v) = m.lock().unwrap().get(key) {
+        return v.clone();
+    }
+    let v = enumerate_allowed(key);
+    m.lock().unwrap().insert(key.to_string(), v.clone());
+    v
+}
+
+fn enumerate_allowed(key: &str) -> BTreeSet<u32> {
     let mut out = BTreeSet::new();
     for &major in &MAJORS {
         for f3 in 0..8u32 {
