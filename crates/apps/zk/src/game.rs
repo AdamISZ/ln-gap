@@ -349,3 +349,318 @@ pub fn prove_script_d60(l: &Layout, key: &WotsPublic, class: &str, exec: &Script
     script.push_opcode(OP_PUSHNUM_1);
     script
 }
+
+// ----- the game natively (step 2): moves, rules, the members' check -----
+
+/// BitVMX's initial step hash (the state's `lo` at the claim).
+pub fn initial_hash() -> [u8; 20] {
+    bitvmx_cpu_definitions::trace::generate_initial_step_hash().try_into().expect("20 bytes")
+}
+
+/// One sealed move: its head and the preimages its body carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    pub depth: u32,
+    pub head: [u8; HEAD_BYTES],
+    pub state: State,
+    /// At depth 1.
+    pub claim: Option<Claim>,
+    /// At the final depth.
+    pub record: Option<Record>,
+}
+
+impl Entry {
+    /// The body: the state, then the claim block or the record if any.
+    pub fn body(&self) -> Vec<u8> {
+        let mut b = self.state.to_bytes().to_vec();
+        if let Some(c) = &self.claim {
+            b.extend_from_slice(&c.to_bytes());
+        }
+        if let Some(r) = &self.record {
+            b.extend_from_slice(&r.to_bytes());
+        }
+        b
+    }
+    /// The head's second field: the midpoint or the record's digest.
+    pub fn second(&self) -> [u8; 20] {
+        self.head[4 + H_SECOND..4 + H_SECOND + 20].try_into().unwrap()
+    }
+    pub fn state_digest(&self) -> [u8; 20] {
+        self.head[4 + H_STATE..4 + H_STATE + 20].try_into().unwrap()
+    }
+}
+
+/// The search game's constants (D60).
+#[derive(Clone, Copy, Debug)]
+pub struct Search {
+    pub game_id: u16,
+    /// R: binary rounds; 2^R is BitVMX's `max_steps`.
+    pub rounds: u32,
+}
+
+impl Search {
+    /// The game's depths: 2R + 1.
+    pub fn depths(&self) -> u32 {
+        2 * self.rounds + 1
+    }
+    /// The round a verifier depth 2r answers, or a prover depth 2r - 1
+    /// opens (its midpoint).
+    pub fn round_of(depth: u32) -> u32 {
+        depth.div_ceil(2)
+    }
+    /// The base bit round r's right choice sets.
+    pub fn bit(&self, r: u32) -> u32 {
+        1 << (self.rounds - r)
+    }
+    /// That bit as (nibble index from the least significant, value in it).
+    pub fn base_nibble(&self, r: u32) -> (u32, u32) {
+        let b = self.rounds - r;
+        (b / 4, 1 << (b % 4))
+    }
+    fn entry(&self, depth: u32, state: State, second: [u8; 20], claim: Option<Claim>, record: Option<Record>) -> Entry {
+        let head = head(self.game_id, depth, lngap_pos::instance::mover_at(depth), &state.digest(), &second);
+        Entry { depth, head, state, claim, record }
+    }
+    /// Depth 1: the claim, with round 1's midpoint.
+    pub fn claim(&self, claim: Claim, mid: [u8; 20]) -> Entry {
+        let state = State { lo: initial_hash(), hi: claim.last_hash, base: 0, claim: claim.digest() };
+        self.entry(1, state, mid, Some(claim), None)
+    }
+    /// The verifier's choice at depth 2r: left (lo, mid) or right (mid, hi).
+    pub fn choice(&self, prior: &Entry, right: bool) -> Entry {
+        let d = prior.depth + 1;
+        let r = d / 2;
+        let (s, mid) = (prior.state, prior.second());
+        let state = if right { State { lo: mid, base: s.base | self.bit(r), ..s } } else { State { hi: mid, ..s } };
+        self.entry(d, state, [0; 20], None, None)
+    }
+    /// The prover's next midpoint at depth 2r + 1 (r < R).
+    pub fn midpoint(&self, prior: &Entry, mid: [u8; 20]) -> Entry {
+        self.entry(prior.depth + 1, prior.state, mid, None, None)
+    }
+    /// The prover's final move at depth 2R + 1: the record.
+    pub fn final_move(&self, prior: &Entry, record: Record) -> Entry {
+        self.entry(prior.depth + 1, prior.state, record.digest(), None, Some(record))
+    }
+
+    // the rules: each disprove kind's semantics (its leaf's mirror)
+
+    /// `zk_claim`: with the claim block opening the state's `claim`, the
+    /// state isn't (H0, the claimed last hash, base 0).
+    pub fn claim_fires(e: &Entry, claim: &Claim) -> bool {
+        let s = &e.state;
+        s.claim == claim.digest() && (s.lo != initial_hash() || s.hi != claim.last_hash || s.base != 0)
+    }
+    /// `zk_choice` at verifier depth 2r: the new state isn't one of the two
+    /// halves of the prior's interval at its midpoint.
+    pub fn choice_fires(&self, prior: &Entry, new: &Entry) -> bool {
+        let r = new.depth / 2;
+        let (s, n, mid) = (prior.state, new.state, prior.second());
+        let left = n.lo == s.lo && n.hi == mid && n.base == s.base;
+        // nibble-wise, as the leaf checks it: base's nibble holding bit r
+        // gains the bit by addition (no carry out of the nibble), the rest
+        // are unchanged
+        let (k, v) = self.base_nibble(r);
+        let nib = |x: u32, i: u32| (x >> (4 * i)) & 15;
+        let right_base = (0..8).all(|i| if i == k { nib(n.base, i) == nib(s.base, i) + v } else { nib(n.base, i) == nib(s.base, i) });
+        let right = n.lo == mid && n.hi == s.hi && right_base;
+        !((left || right) && n.claim == s.claim)
+    }
+    /// `zk_copied` at prover depths >= 3: the state digest isn't the
+    /// prior's.
+    pub fn copied_fires(prior_head: &[u8; HEAD_BYTES], new_head: &[u8; HEAD_BYTES]) -> bool {
+        prior_head[4 + H_STATE..4 + H_STATE + 20] != new_head[4 + H_STATE..4 + H_STATE + 20]
+    }
+
+    /// The members' check (D60, availability): the body opens the head's
+    /// digests (the state; the claim block at depth 1; the record at the
+    /// final depth). Not the rules.
+    pub fn body_opens(&self, depth: u32, head: &[u8; HEAD_BYTES], body: &[u8]) -> bool {
+        let want = BLOCK * (1 + usize::from(depth == 1) + usize::from(depth == self.depths()));
+        if body.len() != want {
+            return false;
+        }
+        let block = |i: usize| -> [u8; BLOCK] { body[i * BLOCK..(i + 1) * BLOCK].try_into().unwrap() };
+        let state = State::from_bytes(&block(0));
+        if head[4 + H_STATE..4 + H_STATE + 20] != state.digest() {
+            return false;
+        }
+        if depth == 1 && blake3_160(&block(1)) != state.claim {
+            return false;
+        }
+        if depth == self.depths() && head[4 + H_SECOND..4 + H_SECOND + 20] != blake3_160(&block(1)) {
+            return false;
+        }
+        true
+    }
+}
+
+/// A game played to its end from BitVMX's search (a binary program
+/// definition): the entries, depth 1 first, and the final step.
+pub fn play(searched: &crate::dispute::Searched, search: &Search) -> anyhow::Result<Vec<Entry>> {
+    let h = |s: &str| -> anyhow::Result<[u8; 20]> { hex::decode(s)?.try_into().map_err(|_| anyhow::anyhow!("a hash is 20 bytes")) };
+    anyhow::ensure!(searched.rounds.len() as u32 == search.rounds, "the search ran {} rounds, the game has {}", searched.rounds.len(), search.rounds);
+    let f = &searched.final_step;
+    let claim = Claim { last_step: f.claim_last_step, last_hash: f.claim_last_hash, input: [0; 20] };
+    let mut entries = vec![];
+    for (i, (hashes, bits)) in searched.rounds.iter().enumerate() {
+        anyhow::ensure!(hashes.len() == 1, "binary search: one hash per round");
+        let mid = h(&hashes[0])?;
+        let e = if i == 0 { search.claim(claim, mid) } else { search.midpoint(entries.last().unwrap(), mid) };
+        entries.push(e);
+        let c = search.choice(entries.last().unwrap(), *bits == 1);
+        entries.push(c);
+    }
+    let (_, _, record) = blocks(f);
+    let last = entries.last().unwrap();
+    anyhow::ensure!(last.state.base == f.agreed_step, "the game's base {} is not the search's agreed step {}", last.state.base, f.agreed_step);
+    entries.push(search.final_move(last, record));
+    Ok(entries)
+}
+
+// ----- the bookkeeping disproves in Script (step 3) -----
+
+/// Where a digest comes from: a head's payload (file nibbles), or the
+/// first block's own bytes (its nibbles).
+#[derive(Clone, Copy)]
+pub enum Dig {
+    /// The head at file offset `head`, payload offset `off`.
+    Head { head: usize, off: usize },
+    /// The first block, byte offset `off`.
+    FirstBlock(usize),
+}
+
+/// The leaf body over two blocks below the pair reveal (`[A, B, reveal]`,
+/// A deepest), after the pair signature: `verdict` (which pushes one item,
+/// the rule's result, picking from A, B and the file) goes to the
+/// altstack; then A is checked against `dig_a` and B against `dig_b`, each
+/// alone on the main stack (BitVMX's gadget), the other parked; then the
+/// verdict. Fires iff both blocks open and the verdict is true.
+pub fn two_block_leaf(l: &Layout, key: &WotsPublic, verdict: impl FnOnce(Tracked) -> Tracked, dig_a: Dig, dig_b: Dig) -> ScriptBuf {
+    let file = l.file;
+    let len = 4 * BLOCK + file;
+    let t = Tracked::new(Builder::new().wots_verify(key), len);
+    let mut t = verdict(t);
+    t.b = t.b.push_opcode(OP_TOALTSTACK);
+    t.len -= 1;
+    let idx = |d: Dig| -> Vec<usize> {
+        match d {
+            Dig::Head { head, off } => head_nibbles(head, off, 20).into_iter().map(|i| 4 * BLOCK + i).collect(),
+            Dig::FirstBlock(off) => block_nibbles(0, off, 20),
+        }
+    };
+    t = t.pick_all_alt(&idx(dig_b));
+    t = t.pick_all_alt(&idx(dig_a));
+    t = t.drop(file);
+    t = t.from_alt(40).roll_alt(2 * BLOCK, 40);
+    t = t.run(&block_check_script(), 2 * BLOCK + 40, 0);
+    t = t.from_alt(2 * BLOCK).from_alt(40);
+    t = t.run(&block_check_script(), 2 * BLOCK + 40, 0);
+    t = t.from_alt(1);
+    t.b.into_script()
+}
+
+/// Push (A[a + k] == B[b + k] for all k < n), AND-ed onto the item on top;
+/// `a`, `b` are bottom indices.
+fn and_eq_range(mut t: Tracked, a: usize, b: usize, n: usize) -> Tracked {
+    for k in 0..n {
+        t = Tracked { b: t.b.push_int((t.len - 1 - (a + k)) as i64).push_opcode(OP_PICK), len: t.len + 1 };
+        t = Tracked { b: t.b.push_int((t.len - 1 - (b + k)) as i64).push_opcode(OP_PICK), len: t.len + 1 };
+        t.b = t.b.push_opcode(OP_EQUAL).push_opcode(OP_BOOLAND);
+        t.len -= 2;
+    }
+    t
+}
+
+/// Push (item[a + k] == consts[k] for all k), AND-ed onto the top.
+fn and_eq_const(mut t: Tracked, a: usize, consts: &[u8]) -> Tracked {
+    for (k, &c) in consts.iter().enumerate() {
+        t = Tracked { b: t.b.push_int((t.len - 1 - (a + k)) as i64).push_opcode(OP_PICK), len: t.len + 1 };
+        t.b = t.b.push_int(c as i64).push_opcode(OP_EQUAL).push_opcode(OP_BOOLAND);
+        t.len -= 1;
+    }
+    t
+}
+
+fn nibbles_of(bytes: &[u8]) -> Vec<u8> {
+    bytes.iter().flat_map(|b| [b >> 4, b & 15]).collect()
+}
+
+impl Search {
+    /// `zk_choice` at verifier depth `d = 2r`. Witness below the reveal: the
+    /// prior state, then the new state. The midpoint is read from the prior
+    /// head.
+    pub fn choice_leaf(&self, key: &WotsPublic, d: u32) -> ScriptBuf {
+        let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
+        let p = l.prior.expect("a choice is at depth >= 2");
+        let r = d / 2;
+        let (s, n, f) = (0usize, 2 * BLOCK, 4 * BLOCK);
+        let mid = f + head_nibbles(p, H_SECOND, 20)[0];
+        let (k, v) = self.base_nibble(r);
+        let kpos = 2 * S_BASE + 7 - k as usize;
+        let verdict = |mut t: Tracked| {
+            // left: lo = lo, hi = mid, base = base
+            t.b = t.b.push_opcode(OP_PUSHNUM_1);
+            t.len += 1;
+            t = and_eq_range(t, n + 2 * S_LO, s + 2 * S_LO, 40);
+            t = and_eq_range(t, n + 2 * S_HI, mid, 40);
+            t = and_eq_range(t, n + 2 * S_BASE, s + 2 * S_BASE, 8);
+            // right: lo = mid, hi = hi, base gains the bit
+            t.b = t.b.push_opcode(OP_PUSHNUM_1);
+            t.len += 1;
+            t = and_eq_range(t, n + 2 * S_LO, mid, 40);
+            t = and_eq_range(t, n + 2 * S_HI, s + 2 * S_HI, 40);
+            for i in 0..8 {
+                let (a, b) = (n + 2 * S_BASE + i, s + 2 * S_BASE + i);
+                t = Tracked { b: t.b.push_int((t.len - 1 - a) as i64).push_opcode(OP_PICK), len: t.len + 1 };
+                t = Tracked { b: t.b.push_int((t.len - 1 - b) as i64).push_opcode(OP_PICK), len: t.len + 1 };
+                if 2 * S_BASE + i == kpos {
+                    t.b = t.b.push_int(v as i64).push_opcode(OP_ADD);
+                }
+                t.b = t.b.push_opcode(OP_EQUAL).push_opcode(OP_BOOLAND);
+                t.len -= 2;
+            }
+            t.b = t.b.push_opcode(OP_BOOLOR);
+            t.len -= 1;
+            // and the claim copied
+            t = and_eq_range(t, n + 2 * S_CLAIM, s + 2 * S_CLAIM, 40);
+            t.b = t.b.push_opcode(OP_NOT);
+            t
+        };
+        two_block_leaf(&l, key, verdict, Dig::Head { head: p, off: H_STATE }, Dig::Head { head: l.new, off: H_STATE })
+    }
+
+    /// `zk_claim` at depth 1. Witness below the reveal: the state, then the
+    /// claim block (opened against the state's `claim`).
+    pub fn claim_leaf(&self, key: &WotsPublic) -> ScriptBuf {
+        let l = Layout::at(1, self.game_id, lngap_pos::instance::mover_at(1));
+        let (s, c) = (0usize, 2 * BLOCK);
+        let h0 = nibbles_of(&initial_hash());
+        let verdict = |mut t: Tracked| {
+            t.b = t.b.push_opcode(OP_PUSHNUM_1);
+            t.len += 1;
+            t = and_eq_const(t, s + 2 * S_LO, &h0);
+            t = and_eq_range(t, s + 2 * S_HI, c + 2 * C_LAST_HASH, 40);
+            t = and_eq_const(t, s + 2 * S_BASE, &[0; 8]);
+            t.b = t.b.push_opcode(OP_NOT);
+            t
+        };
+        two_block_leaf(&l, key, verdict, Dig::Head { head: l.new, off: H_STATE }, Dig::FirstBlock(S_CLAIM))
+    }
+
+    /// `zk_copied` at prover depth `d >= 3`: the head's state digest isn't
+    /// the prior head's. No witness below the reveal.
+    pub fn copied_leaf(&self, key: &WotsPublic, d: u32) -> ScriptBuf {
+        let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
+        let p = l.prior.expect("depth >= 2");
+        let mut t = Tracked::new(Builder::new().wots_verify(key), l.file);
+        t.b = t.b.push_opcode(OP_PUSHNUM_1);
+        t.len += 1;
+        t = and_eq_range(t, head_nibbles(l.new, H_STATE, 20)[0], head_nibbles(p, H_STATE, 20)[0], 40);
+        t.b = t.b.push_opcode(OP_NOT).push_opcode(OP_TOALTSTACK);
+        t.len -= 1;
+        t = t.drop(l.file);
+        t = t.from_alt(1);
+        t.b.into_script()
+    }
+}
