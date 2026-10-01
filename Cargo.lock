@@ -1249,6 +1249,7 @@ dependencies = [
  "blake3",
  "emulator",
  "hex",
+ "lngap-blackjack",
  "lngap-btc",
  "lngap-channel",
  "lngap-lamport",
@@ -1256,6 +1257,7 @@ dependencies = [
  "lngap-script32",
  "rand 0.8.8",
  "riscv-decode",
+ "serde_json",
 ]
 
 [[package]]
