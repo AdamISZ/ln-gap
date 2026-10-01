@@ -109,17 +109,22 @@ struct World {
     sealed: std::collections::HashMap<u32, SealedBlock>,
     graph: Vec<PresignedTx>,
     pair_sig: Option<WotsSig>,
+    input: Vec<u8>,
 }
 
 impl World {
     fn open(rt: &Regtest, id: u32) -> World {
+        World::open_with(rt, id, &pdf(), &VALID)
+    }
+    /// For program `pdf` (a binary-search definition) on `input`.
+    fn open_with(rt: &Regtest, id: u32, pdf: &str, input: &[u8]) -> World {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label("zkg/user"));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label("zkg/hub"));
         let mut ks = [KeyStore::new(Seed::from_label(&format!("zkg/user-ks/{id}"))), KeyStore::new(Seed::from_label(&format!("zkg/hub-ks/{id}")))];
-        let rounds = ProgramDefinition::from_config(&pdf()).unwrap().nary_def().total_rounds() as u32;
+        let rounds = ProgramDefinition::from_config(pdf).unwrap().nary_def().total_rounds() as u32;
         let search = Search { game_id: GAME_ID, rounds };
         let m = search.total();
-        let info = ProgramInfo::load(&pdf()).unwrap();
+        let info = ProgramInfo::load(pdf).unwrap();
         let offer_u = instance::gen_pos_keys(&mut ks[0], Role::User, id, 1, m, Game::Zk).unwrap();
         let offer_h = instance::gen_pos_keys(&mut ks[1], Role::Hub, id, 1, m, Game::Zk).unwrap();
         let keys = instance::collect_keys(&offer_u, &offer_h, m).unwrap();
@@ -136,7 +141,7 @@ impl World {
         let params = ChannelParams { presign_fee: Amount::from_sat(80_000), ..ChannelParams::regtest(Amount::from_sat(600_000)) };
         let pubs = [user.public(), hub.public()];
         let _ = &family;
-        let mut w = World { user, hub, ks, input_keys, params, pubs, inst, search, miner, sealed: Default::default(), graph: vec![], pair_sig: None };
+        let mut w = World { user, hub, ks, input_keys, params, pubs, inst, search, miner, sealed: Default::default(), graph: vec![], pair_sig: None, input: input.to_vec() };
         let ctx = w.ctx();
         let tree = w.inst.tree(&ctx).unwrap();
         let (c_op, c_prev) = rt.fund(&tree.script_pubkey(), w.inst.value).unwrap();
@@ -167,7 +172,7 @@ impl World {
         let sig = self.ks[mover.idx()].sign_wots(&instance::state_label(id, 1, e.depth), &e.head[4..]).unwrap();
         let mut body = e.body();
         if e.depth == 1 {
-            let words = input_words(&VALID);
+            let words = input_words(&self.input);
             let sigs: Vec<_> = words.iter().zip(&self.input_keys).map(|(w, k)| k.sign(&input_message(*w)).unwrap()).collect();
             body.extend(encode_inputs(&words, &sigs));
         }
@@ -484,4 +489,57 @@ fn read_challenge_on_regtest() {
             c => panic!("{name}: unexpected {c:?}"),
         }
     }
+}
+
+/// Groth16 end to end (opt-in: ZK_GROTH16_DIR holding `groth16-binary.yaml`
+/// (nary_search 2), the ELF it names, and `input.hex`). The verifier's
+/// forced challenge of the genuine proof's execution, searched by BitVMX in
+/// binary (29 rounds), played as the game (59 depths in phase 1, 119 with
+/// the read challenge), every move sealed by the venue (the 168-byte input
+/// signed word by word at depth 1), then the final step forced out and
+/// proved on regtest.
+#[test]
+#[ignore]
+fn groth16_on_regtest() {
+    let Ok(gdir) = std::env::var("ZK_GROTH16_DIR") else { panic!("set ZK_GROTH16_DIR") };
+    let gpdf = format!("{gdir}/groth16-binary.yaml");
+    let input = hex::decode(std::fs::read_to_string(format!("{gdir}/input.hex")).unwrap().trim()).unwrap();
+    let t0 = std::time::Instant::now();
+    let dir = std::env::temp_dir().join(format!("lngap-zkg-{}-g16", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let s = search(&gpdf, &input, &dir, &Behaviour::default(), &Behaviour::default(), ForceCondition::ValidInputStepAndHash).unwrap().expect("the verifier challenges");
+    let _ = std::fs::remove_dir_all(&dir);
+    let ins = riscv_decode::decode(s.final_step.read.opcode).map(|i| format!("{i:?}")).unwrap_or_else(|_| "?".into());
+    println!("Groth16: the search ({} rounds) ends at step {} ({ins}), claim {:?}; {:.0?}", s.rounds.len(), s.step, s.claim.0, t0.elapsed());
+    let rt = Regtest::start().unwrap();
+    let t = std::time::Instant::now();
+    let mut w = World::open_with(&rt, 77, &gpdf, &input);
+    let m = w.search.depths();
+    let ctx = w.ctx();
+    let fin = w.inst.refuted_tree(&ctx, m).unwrap();
+    let n_prove = fin.leaves().iter().filter(|l| l.name.starts_with("zk_prove_")).count();
+    let n_dis = fin.leaves().iter().filter(|l| l.name.starts_with("disprove_")).count();
+    println!(
+        "  the contract: {} depths (proof at {m}); at {m}: {n_prove} prove leaves, {n_dis} disproves; graph {} pre-signed txs; keys, registry, trees and graph in {:.1?}",
+        w.search.total(),
+        w.graph.len(),
+        t.elapsed()
+    );
+    let entries = play(&s, &w.search).unwrap();
+    let t = std::time::Instant::now();
+    for e in &entries {
+        w.seal(e);
+    }
+    println!("  the venue sealed all {} moves of phase 1 in {:.1?}", entries.len(), t.elapsed());
+    rt.mine(u64::from(w.params.to_self_delay) + 2).unwrap();
+    w.claim(&rt, m);
+    let (p_op, p_prev) = w.refute(&rt, m);
+    let last = entries.last().unwrap();
+    let (state, record) = (last.state, last.record.unwrap());
+    let (delta, delta_p) = (ChannelParams::regtest(Amount::ONE_BTC).delta, ChannelParams::regtest(Amount::ONE_BTC).delta_prime);
+    rt.mine(u64::from(delta + delta_p) + 1).unwrap();
+    let proof = w.spend(m, p_op, &p_prev, &prove_name(&record), final_witness(&state, &record), vec![], Role::User);
+    let (txid, h) = rt.send_and_confirm(&proof).unwrap();
+    println!("  {} proves step {}: {txid} at {h}, {} vB. The prover wins. Total {:.0?}", prove_name(&record), s.step, proof.vsize(), t0.elapsed());
 }

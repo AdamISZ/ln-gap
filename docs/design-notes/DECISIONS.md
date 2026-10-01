@@ -3171,6 +3171,14 @@ about 36.7 kvB each. A channel update adding the 47-depth contract: 793
 pre-signed transactions, 3,172 signatures, 0.65 MB, 30 s (the big leaves
 rebuilt per commitment version and side; cache the trees per contract).
 
+**Groth16 end to end (same day).** The genuine proof's execution
+(478,727,216 steps) challenged and played as the game: 29 rounds, a
+119-depth contract (2,058 pre-signed transactions; 1,919 disproves and 62
+proofs at the last depth of phase 1), all 59 moves sealed, and on regtest
+the claim (220 vB), the refutation (36.7 kvB) and `zk_prove_ecall` (58.5
+kvB). On-chain cost is independent of the program's length; BitVMX's
+off-chain search took 519 s.
+
 **Residuals.** Round 1 of phase 2 is posted afresh rather than reused: a
 prover posting a different round-1 hash there than in phase 1 isn't
 caught as such (BitVMX doesn't offer it the chance); the search then
