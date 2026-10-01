@@ -2869,6 +2869,20 @@ challenges fire on honest steps of larger programs), and its
 uninitialised ranges include the loader-initialised registers (its
 UninitializedData challenge fires on an honest first read of sp).
 
+**Amendment (2026-10-01): the class guard.** The prover chooses which
+`zk_prove_<class>` leaf to spend, and BitVMX's scripts for two classes
+never check the opcode: `op_nop` drops it and `op_ecall` reads a register.
+So a prover could "prove" any step as a nop (no write, pc + 4): 1,244 of
+1,244 real non-nop steps of hello-world did (`tests/zk_game.rs`,
+`probe_nop_leaf_on_real_steps`). Every prove leaf now begins with a guard
+(`guard.rs`): the opcode's fixed fields and the micro-step must map to the
+leaf's class under BitVMX's own `get_key_from_instruction_and_micro`
+(allowed sets enumerated from it; SYSTEM opcodes matched exactly). Script
+== mirror over all 73 classes; all 393,272 (opcode, micro) pairs of the
+Groth16 verifier's code pass their own guard. Whether BitVMX's protocol
+layer (not in BitVMX-CPU) binds the class elsewhere is not known here;
+see upstream/bitvmx-cpu/README.md.
+
 ## D60. The computation search is a channel game: the state rides in the body, its digest in the head
 
 Date: 2026-10-01. Agreed with the user. Context:
@@ -2978,6 +2992,14 @@ digest checks plus BitVMX's execution script plus the step hash, for the
 heaviest classes; if over the stack limit, the record also carries `lo`
 and `hi` (two blocks) and a claimant's binding disprove compares them
 with the state.
+
+**Measured (same day, step 4's risk).** The prove leaf at this layout
+(the class guard, two digest checks, BitVMX's script, the step hash):
+about 228 KB, peak 948 for every class, on all 1,500 steps of hello-world
+(each proves with its class's leaf; corrupted hi, lo, write or opcode
+don't). On regtest, honest lw_0, sb_2 and ecall steps proved at about 58.5
+kvB each, under the 100 kvB standard limit. The record need not carry lo
+and hi.
 
 **Not in this decision:** InputData (step 5, against the claim block's
 input digest), ReadValue (step 8, a second search reusing this game),
