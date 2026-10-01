@@ -26,6 +26,7 @@ pub mod chain;
 pub mod dispute;
 pub mod game;
 pub mod guard;
+pub mod final_d60;
 
 use std::sync::Arc;
 

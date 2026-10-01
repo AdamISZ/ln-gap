@@ -2919,7 +2919,7 @@ even ones. With R rounds (2^R >= BitVMX's `max_steps`; Groth16 about 30):
 | depth | mover | move | head payload (bytes 4..48) |
 |---|---|---|---|
 | 1 | prover | claim, with round 1's midpoint | state digest 20, mid 20, zero 4 |
-| 2r (1 <= r <= R) | verifier | round r's choice | state digest 20, zero 24 |
+| 2r (1 <= r <= R) | verifier | round r's choice | state digest 20, claim digest 20, zero 4 (amended below) |
 | 2r + 1 (1 <= r < R) | prover | round r + 1's midpoint | state digest 20, mid 20, zero 4 |
 | 2R + 1 | prover | the disputed step's record | state digest 20, record digest 20, zero 4 |
 
@@ -3010,6 +3010,33 @@ about 228 KB, peak 948 for every class, on all 1,500 steps of hello-world
 don't). On regtest, honest lw_0, sb_2 and ecall steps proved at about 58.5
 kvB each, under the 100 kvB standard limit. The record need not carry lo
 and hi.
+
+**Amendments (same day, step 4): the final depth's disproves fit in two
+blocks.** Hashing a block needs it alone on the main stack, so the other
+blocks wait on the altstack. Three 64-byte blocks don't fit under the
+1,000 limit; two do. Halt as first written read all three (the claim's last
+step and hash, the record's reads and opcode, the state's base and hi).
+So:
+
+- the record also carries the step (`step`, bytes 59..63: the last
+  agreed step, = the state's `base`), so that most disproves read the
+  record alone; `zk_record_step` (state, record) holds the prover to it;
+- the verifier's heads carry the claim block's digest in their second
+  field, and `zk_choice` also checks it against the new state's `claim`.
+  The final depth's prior head is the verifier's, so the claim block is
+  opened against it, without the state;
+- Halt is split in two, each running BitVMX's `halt_challenge` unchanged
+  with constants for the fields it doesn't read: `zk_halt_hash` (state,
+  claim block: the disputed step is the claimed last and its hash isn't
+  the claimed final hash) and `zk_halt_exit` (record, claim block: the
+  disputed step is the claimed last and isn't an ecall exit with 0).
+
+The port (`final_d60.rs`) has 17 leaves for hello-world (1,881 for
+Groth16, almost all of them opcode leaves). Script == mirror on 45
+sampled steps with a malformation aimed at each leaf (622 fired, 7,011
+held); none fires on an honest step. Peak 974 (`zk_program_counter`:
+state, record and the previous step's hash); the rest are at most 916.
+On regtest: program_counter 58.2 kvB, halt_exit 40.7, record_step 40.3.
 
 **Not in this decision:** InputData (step 5, against the claim block's
 input digest), ReadValue (step 8, a second search reusing this game),

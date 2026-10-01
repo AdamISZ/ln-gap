@@ -4,9 +4,11 @@
 //! odd depths, the verifier at even ones; with `R` rounds the game has
 //! `2R + 1` depths, the last the disputed step's record.
 //!
-//! Head payload (head bytes 4..48): the state digest at 0..20; the prover's
-//! midpoint (depths 1 to 2R - 1) or the record's digest (depth 2R + 1) at
-//! 20..40; the rest zero.
+//! Head payload (head bytes 4..48): the state digest at 0..20; at 20..40
+//! the prover's midpoint (depths 1 to 2R - 1), the claim block's digest
+//! repeated (the verifier's depths: so that the final depth's leaves can
+//! open the claim block without the state), or the record's digest (depth
+//! 2R + 1); the rest zero.
 
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
@@ -101,6 +103,10 @@ pub struct Record {
     pub witness: u32,
     pub last_step_1: u64,
     pub last_step_2: u64,
+    /// The last agreed step (the disputed step is the next): the state's
+    /// `base`, repeated so that most final-step disproves read the record
+    /// alone; `zk_record_step` holds the prover to it.
+    pub step: u32,
 }
 
 pub const R_MEMW: usize = 0;
@@ -118,6 +124,7 @@ pub const R_WMICRO: usize = 38;
 pub const R_WITNESS: usize = 39;
 pub const R_LS1: usize = 43;
 pub const R_LS2: usize = 51;
+pub const R_STEP: usize = 59;
 
 impl Record {
     pub fn to_bytes(&self) -> [u8; BLOCK] {
@@ -135,6 +142,7 @@ impl Record {
         b[R_WITNESS..R_WITNESS + 4].copy_from_slice(&self.witness.to_be_bytes());
         b[R_LS1..R_LS1 + 8].copy_from_slice(&self.last_step_1.to_be_bytes());
         b[R_LS2..R_LS2 + 8].copy_from_slice(&self.last_step_2.to_be_bytes());
+        b[R_STEP..R_STEP + 4].copy_from_slice(&self.step.to_be_bytes());
         b
     }
     pub fn digest(&self) -> [u8; 20] {
@@ -146,7 +154,7 @@ impl Record {
 pub fn blocks(f: &FinalStep) -> (State, Claim, Record) {
     let claim = Claim { last_step: f.claim_last_step, last_hash: f.claim_last_hash, input: [0; 20] };
     let state = State { lo: f.prev_hash, hi: f.hash, base: f.agreed_step, claim: claim.digest() };
-    let record = Record { read: f.read, write: f.write, witness: f.witness, last_step_1: f.last_step_1, last_step_2: f.last_step_2 };
+    let record = Record { read: f.read, write: f.write, witness: f.witness, last_step_1: f.last_step_1, last_step_2: f.last_step_2, step: f.agreed_step };
     (state, claim, record)
 }
 
@@ -164,7 +172,7 @@ pub fn head(game_id: u16, depth: u32, mover: Role, state: &[u8; 20], second: &[u
 /// choice) and the prover's record head.
 pub fn final_heads(game_id: u16, depth: u32, state: &State, record: &Record) -> ([u8; HEAD_BYTES], [u8; HEAD_BYTES]) {
     let sd = state.digest();
-    (head(game_id, depth - 1, lngap_pos::instance::mover_at(depth - 1), &sd, &[0; 20]), head(game_id, depth, lngap_pos::instance::mover_at(depth), &sd, &record.digest()))
+    (head(game_id, depth - 1, lngap_pos::instance::mover_at(depth - 1), &sd, &state.claim), head(game_id, depth, lngap_pos::instance::mover_at(depth), &sd, &record.digest()))
 }
 
 /// The final leaves' witness below the pair reveal: the state, then the
@@ -432,7 +440,7 @@ impl Search {
         let r = d / 2;
         let (s, mid) = (prior.state, prior.second());
         let state = if right { State { lo: mid, base: s.base | self.bit(r), ..s } } else { State { hi: mid, ..s } };
-        self.entry(d, state, [0; 20], None, None)
+        self.entry(d, state, state.claim, None, None)
     }
     /// The prover's next midpoint at depth 2r + 1 (r < R).
     pub fn midpoint(&self, prior: &Entry, mid: [u8; 20]) -> Entry {
@@ -464,7 +472,12 @@ impl Search {
         let nib = |x: u32, i: u32| (x >> (4 * i)) & 15;
         let right_base = (0..8).all(|i| if i == k { nib(n.base, i) == nib(s.base, i) + v } else { nib(n.base, i) == nib(s.base, i) });
         let right = n.lo == mid && n.hi == s.hi && right_base;
-        !((left || right) && n.claim == s.claim)
+        !((left || right) && n.claim == s.claim && new.second() == n.claim)
+    }
+    /// `zk_record_step` at the final depth: the record's step isn't the
+    /// state's base.
+    pub fn record_step_fires(state: &State, record: &Record) -> bool {
+        record.step != state.base
     }
     /// `zk_copied` at prover depths >= 3: the state digest isn't the
     /// prior's.
@@ -622,8 +635,9 @@ impl Search {
             }
             t.b = t.b.push_opcode(OP_BOOLOR);
             t.len -= 1;
-            // and the claim copied
+            // and the claim copied, and repeated in the head
             t = and_eq_range(t, n + 2 * S_CLAIM, s + 2 * S_CLAIM, 40);
+            t = and_eq_range(t, f + head_nibbles(l.new, H_SECOND, 20)[0], n + 2 * S_CLAIM, 40);
             t.b = t.b.push_opcode(OP_NOT);
             t
         };
@@ -663,4 +677,139 @@ impl Search {
         t = t.from_alt(1);
         t.b.into_script()
     }
+}
+
+// ----- final-depth leaves over the blocks (step 4) -----
+
+/// A block the final move's leaves can open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blk {
+    /// Against the prior head's state digest (the state the last choice
+    /// settled).
+    State,
+    /// Against the final head's record digest.
+    Record,
+    /// Against the claim digest the prior (verifier's) head repeats.
+    Claim,
+}
+
+/// A final-depth leaf's input: a nibble of a block or of the claimant's
+/// extra witness, or a constant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FIn {
+    St(usize),
+    Rec(usize),
+    Cl(usize),
+    Wit(usize),
+    K(i64),
+}
+
+/// The nibbles of block bytes `off..off + len`, as inputs.
+pub fn fin(f: fn(usize) -> FIn, off: usize, len: usize) -> Vec<FIn> {
+    (2 * off..2 * (off + len)).map(f).collect()
+}
+
+/// A leaf at the final depth over one or two blocks (`blocks`, first
+/// deepest in the witness), then `wit` nibbles of the claimant's own
+/// witness, then the pair reveal: each block is checked against its digest
+/// alone on the main stack (BitVMX's gadget), its inputs copied out just
+/// before; then the inputs are arranged in `inputs`' order (constants
+/// pushed) and `check` runs; then 1.
+pub fn final_leaf(l: &Layout, key: &WotsPublic, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> ScriptBuf {
+    assert!(matches!(blocks.len(), 1 | 2), "one or two blocks: three don't fit under the stack limit");
+    let p = l.prior.expect("the final depth reads a prior head");
+    let n = blocks.len();
+    let file = l.file;
+    let (wit_at, file_at) = (n * 2 * BLOCK, n * 2 * BLOCK + wit);
+    let block_at = |b: Blk| blocks.iter().position(|x| *x == b).map(|i| i * 2 * BLOCK);
+    let of = |x: &FIn| -> Option<(Blk, usize)> {
+        match *x {
+            FIn::St(i) => Some((Blk::State, i)),
+            FIn::Rec(i) => Some((Blk::Record, i)),
+            FIn::Cl(i) => Some((Blk::Claim, i)),
+            _ => None,
+        }
+    };
+    let digest_idx = |b: Blk| -> Vec<usize> {
+        match b {
+            Blk::State => head_nibbles(p, H_STATE, 20).into_iter().map(|i| file_at + i).collect(),
+            Blk::Record => head_nibbles(l.new, H_SECOND, 20).into_iter().map(|i| file_at + i).collect(),
+            Blk::Claim => head_nibbles(p, H_SECOND, 20).into_iter().map(|i| file_at + i).collect(),
+        }
+    };
+    let first = blocks[0];
+    // early: the first block's inputs and the witness's (both gone before
+    // the checks); late: the second block's (copied when it is alone)
+    let early: Vec<usize> = (0..inputs.len()).filter(|&j| matches!(inputs[j], FIn::Wit(_)) || of(&inputs[j]).is_some_and(|(b, _)| b == first)).collect();
+    let late: Vec<usize> = (0..inputs.len()).filter(|&j| n == 2 && of(&inputs[j]).is_some_and(|(b, _)| b == blocks[1])).collect();
+    for x in inputs {
+        if let Some((b, _)) = of(x) {
+            assert!(blocks.contains(&b), "input {x:?} from a block the leaf doesn't open");
+        }
+    }
+    let mut t = Tracked::new(Builder::new().wots_verify(key), n * 2 * BLOCK + wit + file);
+    let early_idx: Vec<usize> = early
+        .iter()
+        .map(|&j| match inputs[j] {
+            FIn::Wit(i) => wit_at + i,
+            x => {
+                let (_, i) = of(&x).unwrap();
+                i
+            }
+        })
+        .collect();
+    t = t.pick_all_alt(&early_idx);
+    if n == 2 {
+        t = t.pick_all_alt(&digest_idx(blocks[1]));
+    }
+    t = t.pick_all_alt(&digest_idx(first));
+    t = t.drop(wit + file);
+    t = t.from_alt(40);
+    if n == 2 {
+        t = t.roll_alt(2 * BLOCK, 40);
+    }
+    t = t.run(&block_check_script(), 2 * BLOCK + 40, 0);
+    if n == 2 {
+        t = t.from_alt(2 * BLOCK).from_alt(40);
+        let late_idx: Vec<usize> = late.iter().map(|&j| of(&inputs[j]).unwrap().1).collect();
+        t = t.pick_all_alt(&late_idx);
+        t = t.run(&block_check_script(), 2 * BLOCK + 40, 0);
+    }
+    // restore: the late copies, then the early ones; then arrange
+    t = t.from_alt(late.len()).from_alt(early.len());
+    let mut labels: Vec<Option<usize>> = late.iter().chain(early.iter()).map(|&j| Some(j)).collect();
+    for (j, x) in inputs.iter().enumerate() {
+        if let FIn::K(v) = x {
+            t.b = t.b.push_int(*v);
+            t.len += 1;
+            labels.push(None);
+        } else {
+            let pos = labels.iter().position(|&l| l == Some(j)).expect("every input copied once");
+            let depth = labels.len() - 1 - pos;
+            if depth > 0 {
+                t.b = t.b.push_int(depth as i64).push_opcode(OP_ROLL);
+            }
+            let lab = labels.remove(pos);
+            labels.push(lab);
+        }
+    }
+    t = t.run(check, inputs.len(), 0);
+    let mut script = t.b.into_script();
+    script.push_opcode(OP_PUSHNUM_1);
+    script
+}
+
+/// The witness below the reveal for a final leaf over `blocks`, then the
+/// claimant's extra witness.
+pub fn final_leaf_witness(blocks: &[Blk], state: &State, record: &Record, claim: &Claim, wit: &[u8]) -> Vec<Vec<u8>> {
+    let mut w = vec![];
+    for b in blocks {
+        w.extend(nibble_witness(&match b {
+            Blk::State => state.to_bytes(),
+            Blk::Record => record.to_bytes(),
+            Blk::Claim => claim.to_bytes(),
+        }));
+    }
+    w.extend(nibble_witness(wit));
+    w
 }

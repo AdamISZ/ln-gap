@@ -227,7 +227,7 @@ fn bookkeeping_leaves_match_mirrors() {
                     },
                 ];
                 for (i, st) in variants.iter().enumerate() {
-                    let nn = Entry { state: *st, head: head(GAME, n.depth, mover_at(n.depth), &st.digest(), &[0; 20]), ..n.clone() };
+                    let nn = Entry { state: *st, head: head(GAME, n.depth, mover_at(n.depth), &st.digest(), &st.claim), ..n.clone() };
                     let (f, pk) = fires(&leaf, &sk, &p.head, &nn.head, [nib(&p.state.to_bytes()), nib(&st.to_bytes())].concat());
                     assert_eq!(f, sr.choice_fires(p, &nn), "choice at depth {} variant {i}: script vs mirror", n.depth);
                     // (where the midpoint equals an endpoint, as past the
@@ -239,6 +239,10 @@ fn bookkeeping_leaves_match_mirrors() {
                     peak = peak.max(pk);
                     tally(f);
                 }
+                // the head's claim field not the state's claim: fires
+                let wrong = Entry { head: head(GAME, n.depth, mover_at(n.depth), &n.state.digest(), &[9; 20]), ..n.clone() };
+                let (f, _) = fires(&leaf, &sk, &p.head, &wrong.head, [nib(&p.state.to_bytes()), nib(&n.state.to_bytes())].concat());
+                assert!(f && sr.choice_fires(p, &wrong), "a choice head whose claim field isn't the state's");
                 // a malformed state that doesn't open the new head: no fire
                 let st = State { lo: [3; 20], ..n.state };
                 assert!(!fires(&leaf, &sk, &p.head, &n.head, [nib(&p.state.to_bytes()), nib(&st.to_bytes())].concat()).0);
@@ -305,7 +309,7 @@ fn bookkeeping_leaves_on_regtest() {
     let (p, n) = (&e[2], &e[3]);
     let leaf = sr.choice_leaf(&sk.public(), n.depth);
     let bad = State { lo: [7; 20], ..n.state };
-    let bh = head(GAME, n.depth, mover_at(n.depth), &bad.digest(), &[0; 20]);
+    let bh = head(GAME, n.depth, mover_at(n.depth), &bad.digest(), &bad.claim);
     let err = rt.test_accept(&spend(&leaf, &sk, [p.head, n.head].concat(), [nib(&p.state.to_bytes()), nib(&n.state.to_bytes())].concat())).expect_err("honest");
     let tx = spend(&leaf, &sk, [p.head, bh].concat(), [nib(&p.state.to_bytes()), nib(&bad.to_bytes())].concat());
     let (txid, h) = rt.send_and_confirm(&tx).unwrap();
