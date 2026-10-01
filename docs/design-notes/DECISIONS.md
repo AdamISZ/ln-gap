@@ -2869,6 +2869,121 @@ challenges fire on honest steps of larger programs), and its
 uninitialised ranges include the loader-initialised registers (its
 UninitializedData challenge fires on an honest first read of sp).
 
+## D60. The computation search is a channel game: the state rides in the body, its digest in the head
+
+Date: 2026-10-01. Agreed with the user. Context:
+ZK_Z3_PLAN.md (step 0); D59; the measurements of step 1
+(`tests/zk_transition.rs`, `tests/zk_final_leaves.rs`,
+`lngap-pos/tests/pos_depth_scaling.rs`).
+
+**The problem.** Z1/Z2 run BitVMX's search in a harness: nothing binds
+the rounds, and nothing makes silence lose. Played as a game in the
+channel, each round becomes a move sealed by the venue, judged like a
+chess move: a disprove leaf over the parked pair (prior head, new head).
+A chess head carries its whole state (D28). The search state (two
+hashes, the base step, the claim) does not fit in 44 bytes.
+
+**Decision.** As in chess, each head carries the state after
+the move; here the head carries the state's 20-byte BLAKE3 digest, and
+the entry body carries the state itself (one 64-byte block). Leaves that
+need the state take it as witness nibbles and check the digest. Binary
+search (BitVMX's n-ary search with n = 2, its decision module unchanged).
+
+**Roles and depths.** The prover moves at odd depths, the verifier at
+even ones. With R rounds (2^R >= BitVMX's `max_steps`; Groth16 about 30):
+
+| depth | mover | move | head payload (bytes 4..48) |
+|---|---|---|---|
+| 1 | prover | claim, with round 1's midpoint | state digest 20, mid 20, zero 4 |
+| 2r (1 <= r <= R) | verifier | round r's choice | state digest 20, zero 24 |
+| 2r + 1 (1 <= r < R) | prover | round r + 1's midpoint | state digest 20, mid 20, zero 4 |
+| 2R + 1 | prover | the disputed step's record | state digest 20, record digest 20, zero 4 |
+
+Depths: 2R + 1 (61 for Groth16). The verifier accepts a claim by not
+moving at depth 2: the absence rule then pays the prover, cooperatively
+in the channel as usual.
+
+**The state** (64 bytes, one block): `lo` 20 (the agreed hash, at step
+`base`) | `hi` 20 (the prover's hash at `base + 2^(R-r)`) | `base` 4 (a
+big-endian u32: the interval's first step; round r's choice is bit R - r,
+so after round R `base` is BitVMX's last agreed step) | `claim` 20 (the
+digest of the claim block). Initially `lo` = BitVMX's initial step hash
+(`generate_initial_step_hash`, a constant), `hi` = the claimed last hash
+(BitVMX pads hashes past the last step with it), `base` = 0. The midpoint
+is not in the state: it is in the prover's head, in the clear.
+
+**The claim block** (64 bytes, in depth 1's body; its digest in the
+state): `last_step` 8 | `last_hash` 20 | `input` 20 (the input's digest,
+for InputData, step 5) | zero 16.
+
+**The record** (64 bytes, in depth 2R + 1's body; its digest in that
+head): the read record (memory witness 1, read 1 address and value 8,
+read 2 address and value 8, pc 4, micro 1, opcode 4: 26) | the write
+(address, value, pc, micro: 13) | the witness 4 | the reads' last-write
+steps 16 | zero 5. The prior and next hashes are the state's `lo` and
+`hi`, and the disputed step is `base + 1`, so they are not repeated.
+BitVMX's equivocation challenges (a final trace whose hashes differ from
+those revealed in the rounds) have nothing left to check: the endpoints
+are the state's, carried move to move.
+
+**Transition rules and their disprove leaves** (the claimant's, in each
+depth's refuted tree, beside the generic family and `not_timely`):
+
+- depth 1, `zk_claim`: opens the state and the claim block, and fires
+  if `lo` != H0, `hi` != `last_hash` or `base` != 0. Two digest checks.
+  (A preimage that doesn't open its digest is not a disprove: see
+  availability below.)
+- verifier depths 2r, `zk_choice`: opens the prior state (prior head's
+  digest) and the new one; with the midpoint from the prior head, fires
+  unless (lo', hi') is (lo, mid) with `base` unchanged or (mid, hi) with
+  bit R - r of `base` set, and `claim` is unchanged. Two digest checks
+  (measured with the midpoint in the state: 157.5 KB, peak 869).
+- prover depths 2r + 1 and 2R + 1, `zk_copied`: fires if the state
+  digest differs from the prior head's. No digest check: two head
+  fields compared.
+- depth 2R + 1: the D59 output. The prover's `zk_prove_<class>` opens the
+  record and the state (two digest checks), runs BitVMX's script for the
+  class, and checks BLAKE3(lo || write) == hi. The claimant's S1/S2
+  disproves open what they read (record; state for `base`; claim block
+  for Halt). Reached as D59 describes: after the final move the verifier
+  has no legal move; the prover's absence claim at 2R + 2 is answered by
+  the counter (D44), which parks the final pair.
+
+The midpoints and choices are free: any 20 bytes, either half. A wrong
+midpoint is what the search exists to find; a choice of the half where
+the parties agree only leads to a step the prover can prove.
+
+**Availability: the members check the bodies.** For contract type ZK the
+venue's registered check (D55's authorship check) also requires the
+entry's body to open the head's digests (the state; at depth 1 the claim
+block; at 2R + 1 the record), as for blackjack's strings (D57). So every
+sealed head's preimages are published, and a party can always compute
+its next move and its disproves. The members don't check the rules; the
+leaves do (as D45). A digest that doesn't open cannot be sealed by honest
+members; if a majority seals one anyway, the prover's own prove leaf
+cannot spend and the timeout pays the claimant, and a malformed earlier
+state only hurts its mover.
+
+**What this costs** (step 1): the graph's shape is the game's, not the
+leaves' (disproves are runtime spends), so at 61 depths about 1,000
+pre-signed transactions and 4,000 signatures per channel update, 1.8 s
+and 0.84 MB (chess as the stand-in). The leaves are bigger than chess's:
+the final depth carries 73 prove leaves (11.5 MB) and, for Groth16,
+1,875 S1/S2 leaves (39 MB). The trees depend only on the contract's keys,
+so they are built once per contract and cached. Bearable for an LP
+channel (the user).
+
+**To measure before relying on it** (step 4): the prove leaf with two
+digest checks plus BitVMX's execution script plus the step hash, for the
+heaviest classes; if over the stack limit, the record also carries `lo`
+and `hi` (two blocks) and a claimant's binding disprove compares them
+with the state.
+
+**Not in this decision:** InputData (step 5, against the claim block's
+input digest), ReadValue (step 8, a second search reusing this game),
+and what the claim means to the contract that uses it (a bridge's
+withdrawal, ROLLUP_BRIDGE.md).
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are
