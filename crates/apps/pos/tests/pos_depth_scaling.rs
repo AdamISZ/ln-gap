@@ -39,85 +39,27 @@ fn members() -> Vec<Member> {
 }
 
 fn open(rt: &Arc<Regtest>) -> (ChannelParty, ChannelParty) {
-    let params = ChannelParams {
-        presign_fee: Amount::from_sat(60_000),
-        ..ChannelParams::regtest(FUNDING)
-    };
+    let params = ChannelParams { presign_fee: Amount::from_sat(60_000), ..ChannelParams::regtest(FUNDING) };
     let user_keys = PartyKeys::from_seed(Role::User, Seed::from_label("scale/user"));
     let hub_keys = PartyKeys::from_seed(Role::Hub, Seed::from_label("scale/hub"));
     let pubs = [user_keys.public(), hub_keys.public()];
-    let (u_op, u_prev) = rt
-        .fund(&pubs[0].payout_spk, HALF + Amount::from_sat(10_000))
-        .unwrap();
-    let (h_op, h_prev) = rt
-        .fund(&pubs[1].payout_spk, HALF + Amount::from_sat(10_000))
-        .unwrap();
+    let (u_op, u_prev) = rt.fund(&pubs[0].payout_spk, HALF + Amount::from_sat(10_000)).unwrap();
+    let (h_op, h_prev) = rt.fund(&pubs[1].payout_spk, HALF + Amount::from_sat(10_000)).unwrap();
     let ftree = funding_tree(&pubs);
-    let mut ftx = build_funding_tx(
-        &[(u_op, u_prev.clone()), (h_op, h_prev.clone())],
-        ftree.script_pubkey(),
-        FUNDING,
-    );
-    let funding = (
-        OutPoint {
-            txid: ftx.compute_txid(),
-            vout: 0,
-        },
-        ftx.output[0].clone(),
-    );
-    let initial = ChannelState {
-        seq: 0,
-        balances: [HALF, HALF],
-        contracts: vec![],
-    };
+    let mut ftx = build_funding_tx(&[(u_op, u_prev.clone()), (h_op, h_prev.clone())], ftree.script_pubkey(), FUNDING);
+    let funding = (OutPoint { txid: ftx.compute_txid(), vout: 0 }, ftx.output[0].clone());
+    let initial = ChannelState { seq: 0, balances: [HALF, HALF], contracts: vec![] };
     let accept = || -> Policy { Box::new(|_, _| Ok(())) };
     let user_rev = [user_keys.revocation_hash(0), user_keys.revocation_hash(1)];
     let hub_rev = [hub_keys.revocation_hash(0), hub_keys.revocation_hash(1)];
     let chain: Arc<dyn Chain> = rt.clone();
-    let mut user = ChannelParty::new(
-        user_keys,
-        pubs[1].clone(),
-        params,
-        funding.clone(),
-        initial.clone(),
-        hub_rev,
-        chain.clone(),
-        accept(),
-    )
-    .unwrap();
-    let mut hub = ChannelParty::new(
-        hub_keys,
-        pubs[0].clone(),
-        params,
-        funding,
-        initial,
-        user_rev,
-        chain,
-        accept(),
-    )
-    .unwrap();
-    let (m1, m2) = (
-        user.initial_commit_sigs().unwrap(),
-        hub.initial_commit_sigs().unwrap(),
-    );
+    let mut user = ChannelParty::new(user_keys, pubs[1].clone(), params, funding.clone(), initial.clone(), hub_rev, chain.clone(), accept()).unwrap();
+    let mut hub = ChannelParty::new(hub_keys, pubs[0].clone(), params, funding, initial, user_rev, chain, accept()).unwrap();
+    let (m1, m2) = (user.initial_commit_sigs().unwrap(), hub.initial_commit_sigs().unwrap());
     run_bus(&mut user, &mut hub, vec![m1, m2]).unwrap();
     let prevouts = [u_prev, h_prev];
-    sign_funding_input(
-        &mut ftx,
-        0,
-        &prevouts,
-        &user.keys.payout_tree(),
-        &user.keys.payout,
-    )
-    .unwrap();
-    sign_funding_input(
-        &mut ftx,
-        1,
-        &prevouts,
-        &hub.keys.payout_tree(),
-        &hub.keys.payout,
-    )
-    .unwrap();
+    sign_funding_input(&mut ftx, 0, &prevouts, &user.keys.payout_tree(), &user.keys.payout).unwrap();
+    sign_funding_input(&mut ftx, 1, &prevouts, &hub.keys.payout_tree(), &hub.keys.payout).unwrap();
     rt.send_and_confirm(&ftx).unwrap();
     (user, hub)
 }
@@ -125,64 +67,32 @@ fn open(rt: &Arc<Regtest>) -> (ChannelParty, ChannelParty) {
 #[test]
 #[ignore]
 fn graph_scaling_with_depth() {
-    let depths: Vec<u32> = std::env::var("POS_DEPTHS")
-        .ok()
-        .map(|s| s.split(',').map(|x| x.trim().parse().unwrap()).collect())
-        .unwrap_or(vec![20, 30, 60]);
+    let depths: Vec<u32> = std::env::var("POS_DEPTHS").ok().map(|s| s.split(',').map(|x| x.trim().parse().unwrap()).collect()).unwrap_or(vec![20, 30, 60]);
     let rt = Arc::new(Regtest::start().unwrap());
     let mut miner = PosMiner::new(SEED, members());
     println!(
         "{:>5} {:>8} {:>9} {:>9} {:>10} {:>9} {:>11} {:>10} {:>11}",
-        "depth",
-        "keygen s",
-        "offers MB",
-        "registry",
-        "graph txs",
-        "update s",
-        "graph sigs",
-        "update MB",
-        "contract leaves"
+        "depth", "keygen s", "offers MB", "registry", "graph txs", "update s", "graph sigs", "update MB", "contract leaves"
     );
     for (i, &m) in depths.iter().enumerate() {
         let (mut user, mut hub) = open(&rt);
         let id = 100 + i as u32;
-        let mut ks = [
-            KeyStore::new(Seed::from_label(&format!("scale/user-ks/{m}"))),
-            KeyStore::new(Seed::from_label(&format!("scale/hub-ks/{m}"))),
-        ];
+        let mut ks = [KeyStore::new(Seed::from_label(&format!("scale/user-ks/{m}"))), KeyStore::new(Seed::from_label(&format!("scale/hub-ks/{m}")))];
 
         let t = Instant::now();
-        let offer_u =
-            instance::gen_pos_keys(&mut ks[0], Role::User, id, 1, m, Game::Chess).unwrap();
+        let offer_u = instance::gen_pos_keys(&mut ks[0], Role::User, id, 1, m, Game::Chess).unwrap();
         let offer_h = instance::gen_pos_keys(&mut ks[1], Role::Hub, id, 1, m, Game::Chess).unwrap();
         let keygen = t.elapsed().as_secs_f64() / 2.0;
-        let offers = serde_json::to_string(&offer_u).unwrap().len()
-            + serde_json::to_string(&offer_h).unwrap().len();
+        let offers = serde_json::to_string(&offer_u).unwrap().len() + serde_json::to_string(&offer_h).unwrap().len();
         let keys = instance::collect_keys(&offer_u, &offer_h, m).unwrap();
 
         let t = Instant::now();
         let registry = miner.registry(id, m).unwrap();
         let reg_s = t.elapsed().as_secs_f64();
         let t0 = rt.mtp().unwrap();
-        let clock = GameClock {
-            t0,
-            ell: 60,
-            margin: 60,
-        };
+        let clock = GameClock { t0, ell: 60, margin: 60 };
         let deadline = t0 + (m + 1) * 60 + 60 + 7 * 24 * 3600;
-        let inst = PosInstance::new(
-            id,
-            STAKE * 2 + DEPOSIT * 2,
-            deadline,
-            GAME_ID,
-            Game::Chess,
-            clock,
-            keys,
-            registry,
-        )
-        .unwrap()
-        .with_deposit(DEPOSIT)
-        .unwrap();
+        let inst = PosInstance::new(id, STAKE * 2 + DEPOSIT * 2, deadline, GAME_ID, Game::Chess, clock, keys, registry).unwrap().with_deposit(DEPOSIT).unwrap();
         miner.register(id, m, inst.authorship()).unwrap();
         let contract: Arc<dyn ContractOutput> = Arc::new(inst);
 
@@ -190,13 +100,7 @@ fn graph_scaling_with_depth() {
         // versions' graphs, sign, verify; every message crosses as JSON
         let t = Instant::now();
         let seq = user.current_seq() + 1;
-        let msgs = user
-            .propose(ChannelState {
-                seq,
-                balances: [HALF - STAKE - DEPOSIT, HALF - STAKE - DEPOSIT],
-                contracts: vec![contract.clone()],
-            })
-            .unwrap();
+        let msgs = user.propose(ChannelState { seq, balances: [HALF - STAKE - DEPOSIT, HALF - STAKE - DEPOSIT], contracts: vec![contract.clone()] }).unwrap();
         let mut queue: std::collections::VecDeque<_> = msgs.into();
         let (mut bytes, mut sigs) = (0usize, 0usize);
         while let Some(env) = queue.pop_front() {
@@ -207,14 +111,8 @@ fn graph_scaling_with_depth() {
             let json = serde_json::to_string(&w).unwrap();
             bytes += json.len();
             let back: WireEnvelope = serde_json::from_str(&json).unwrap();
-            let env = back
-                .into_env(|cid| (cid == id).then(|| contract.clone()))
-                .unwrap();
-            let target = if env.to == Role::User {
-                &mut user
-            } else {
-                &mut hub
-            };
+            let env = back.into_env(|cid| (cid == id).then(|| contract.clone())).unwrap();
+            let target = if env.to == Role::User { &mut user } else { &mut hub };
             queue.extend(target.handle(env).unwrap());
         }
         let update_s = t.elapsed().as_secs_f64();
@@ -223,17 +121,9 @@ fn graph_scaling_with_depth() {
         // the graph's size, for one commitment version
         let ctx = user.commit_ctx(seq, Role::User).unwrap();
         let op = OutPoint::null();
-        let prev = bitcoin::TxOut {
-            value: contract.value(),
-            script_pubkey: contract.tree(&ctx).unwrap().script_pubkey(),
-        };
+        let prev = bitcoin::TxOut { value: contract.value(), script_pubkey: contract.tree(&ctx).unwrap().script_pubkey() };
         let graph = contract.graph(&ctx, op, &prev).unwrap();
         let leaves = contract.tree(&ctx).unwrap().leaves().len();
-        println!(
-            "{m:>5} {keygen:>8.2} {:>9.2} {reg_s:>8.2}s {:>10} {update_s:>9.2} {sigs:>11} {:>10.2} {leaves:>11}",
-            offers as f64 / 1e6,
-            graph.len(),
-            bytes as f64 / 1e6
-        );
+        println!("{m:>5} {keygen:>8.2} {:>9.2} {reg_s:>8.2}s {:>10} {update_s:>9.2} {sigs:>11} {:>10.2} {leaves:>11}", offers as f64 / 1e6, graph.len(), bytes as f64 / 1e6);
     }
 }

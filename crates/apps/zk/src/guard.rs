@@ -20,9 +20,7 @@ use std::collections::BTreeSet;
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
 use bitcoin::ScriptBuf;
-use bitcoin_script_riscv::riscv::instruction_mapping::{
-    get_key_from_instruction_and_micro, get_required_microinstruction,
-};
+use bitcoin_script_riscv::riscv::instruction_mapping::{get_key_from_instruction_and_micro, get_required_microinstruction};
 
 const MAJORS: [u32; 10] = [0x03, 0x0f, 0x13, 0x17, 0x23, 0x33, 0x37, 0x63, 0x67, 0x6f];
 const F7: [u32; 4] = [0x00, 0x20, 0x01, 0x7f];
@@ -85,8 +83,7 @@ pub fn allowed(key: &str) -> BTreeSet<u32> {
 /// The guard natively: does (opcode, micro) belong to `key`'s class?
 pub fn guard_holds(key: &str, opcode: u32, micro: u8) -> bool {
     if opcode & 0x7f == 0x73 {
-        return micro == 0
-            && ((opcode == ECALL && key == "ecall") || (opcode == EBREAK && key == "nop"));
+        return micro == 0 && ((opcode == ECALL && key == "ecall") || (opcode == EBREAK && key == "nop"));
     }
     allowed(key).contains(&feature(opcode, micro))
 }
@@ -102,10 +99,7 @@ struct G {
 impl G {
     /// PICK input `i` (0 = o0 .. 8 = micro).
     fn pick(mut self, i: usize) -> Self {
-        self.b = self
-            .b
-            .push_int((8 - i + self.above) as i64)
-            .push_opcode(OP_PICK);
+        self.b = self.b.push_int((8 - i + self.above) as i64).push_opcode(OP_PICK);
         self.above += 1;
         self
     }
@@ -121,15 +115,7 @@ impl G {
     }
     /// x -> x mod 8 (x a nibble).
     fn mod8(mut self) -> Self {
-        self.b = self
-            .b
-            .push_opcode(OP_DUP)
-            .push_int(7)
-            .push_opcode(OP_GREATERTHAN)
-            .push_opcode(OP_IF)
-            .push_int(8)
-            .push_opcode(OP_SUB)
-            .push_opcode(OP_ENDIF);
+        self.b = self.b.push_opcode(OP_DUP).push_int(7).push_opcode(OP_GREATERTHAN).push_opcode(OP_IF).push_int(8).push_opcode(OP_SUB).push_opcode(OP_ENDIF);
         self
     }
     /// x -> x · 2^k.
@@ -148,64 +134,25 @@ impl G {
 /// The guard in Script: consumes `[o0 .. o7, micro]` and fails unless the
 /// opcode and micro-step belong to `key`'s class.
 pub fn class_guard_script(key: &str) -> ScriptBuf {
-    let mut g = G {
-        b: Builder::new(),
-        above: 0,
-    };
+    let mut g = G { b: Builder::new(), above: 0 };
     // major = o7 + 16·(o6 mod 8)
     g = g.pick(6).mod8().shl(4).pick(7).op(OP_ADD, 2, 1);
     // + 128·(o4 mod 8)
     g = g.pick(4).mod8().shl(7).op(OP_ADD, 2, 1);
     // + 1024·f7 class: 3 - 3·[o0 = 0, o1 < 2] - 2·[o0 = 4, o1 < 2] - [o0 = 0, o1 in 2..4]
     g = g.int(3);
-    g = g
-        .eq(0, 0)
-        .pick(1)
-        .int(2)
-        .op(OP_LESSTHAN, 2, 1)
-        .op(OP_BOOLAND, 2, 1)
-        .op(OP_DUP, 0, 1)
-        .op(OP_DUP, 0, 1)
-        .op(OP_ADD, 2, 1)
-        .op(OP_ADD, 2, 1)
-        .op(OP_SUB, 2, 1);
-    g = g
-        .eq(0, 4)
-        .pick(1)
-        .int(2)
-        .op(OP_LESSTHAN, 2, 1)
-        .op(OP_BOOLAND, 2, 1)
-        .op(OP_DUP, 0, 1)
-        .op(OP_ADD, 2, 1)
-        .op(OP_SUB, 2, 1);
-    g = g
-        .eq(0, 0)
-        .pick(1)
-        .int(2)
-        .int(4)
-        .op(OP_WITHIN, 3, 1)
-        .op(OP_BOOLAND, 2, 1)
-        .op(OP_SUB, 2, 1);
+    g = g.eq(0, 0).pick(1).int(2).op(OP_LESSTHAN, 2, 1).op(OP_BOOLAND, 2, 1).op(OP_DUP, 0, 1).op(OP_DUP, 0, 1).op(OP_ADD, 2, 1).op(OP_ADD, 2, 1).op(OP_SUB, 2, 1);
+    g = g.eq(0, 4).pick(1).int(2).op(OP_LESSTHAN, 2, 1).op(OP_BOOLAND, 2, 1).op(OP_DUP, 0, 1).op(OP_ADD, 2, 1).op(OP_SUB, 2, 1);
+    g = g.eq(0, 0).pick(1).int(2).int(4).op(OP_WITHIN, 3, 1).op(OP_BOOLAND, 2, 1).op(OP_SUB, 2, 1);
     g = g.shl(10).op(OP_ADD, 2, 1);
     // + 4096·[rd = 0]: o5 = 0 and o6 < 8
-    g = g
-        .eq(5, 0)
-        .pick(6)
-        .int(8)
-        .op(OP_LESSTHAN, 2, 1)
-        .op(OP_BOOLAND, 2, 1)
-        .shl(12)
-        .op(OP_ADD, 2, 1);
+    g = g.eq(5, 0).pick(6).int(8).op(OP_LESSTHAN, 2, 1).op(OP_BOOLAND, 2, 1).shl(12).op(OP_ADD, 2, 1);
     // + 8192·micro
     g = g.pick(8).shl(13).op(OP_ADD, 2, 1);
     // membership
     g = g.int(0);
     for v in allowed(key) {
-        g = g
-            .op(OP_OVER, 0, 1)
-            .int(v as i64)
-            .op(OP_EQUAL, 2, 1)
-            .op(OP_BOOLOR, 2, 1);
+        g = g.op(OP_OVER, 0, 1).int(v as i64).op(OP_EQUAL, 2, 1).op(OP_BOOLOR, 2, 1);
     }
     g = g.op(OP_NIP, 2, 1);
     // SYSTEM: exact opcodes, micro 0
@@ -215,9 +162,7 @@ pub fn class_guard_script(key: &str) -> ScriptBuf {
         }
         g = g.eq(8, 0);
         for i in 0..8 {
-            g = g
-                .eq(i, ((op >> (28 - 4 * i)) & 15) as i64)
-                .op(OP_BOOLAND, 2, 1);
+            g = g.eq(i, ((op >> (28 - 4 * i)) & 15) as i64).op(OP_BOOLAND, 2, 1);
         }
         g = g.op(OP_BOOLOR, 2, 1);
     }

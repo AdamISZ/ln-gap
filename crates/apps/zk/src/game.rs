@@ -144,36 +144,15 @@ impl Record {
 
 /// The final move's three blocks, from a final step (Z2's search output).
 pub fn blocks(f: &FinalStep) -> (State, Claim, Record) {
-    let claim = Claim {
-        last_step: f.claim_last_step,
-        last_hash: f.claim_last_hash,
-        input: [0; 20],
-    };
-    let state = State {
-        lo: f.prev_hash,
-        hi: f.hash,
-        base: f.agreed_step,
-        claim: claim.digest(),
-    };
-    let record = Record {
-        read: f.read,
-        write: f.write,
-        witness: f.witness,
-        last_step_1: f.last_step_1,
-        last_step_2: f.last_step_2,
-    };
+    let claim = Claim { last_step: f.claim_last_step, last_hash: f.claim_last_hash, input: [0; 20] };
+    let state = State { lo: f.prev_hash, hi: f.hash, base: f.agreed_step, claim: claim.digest() };
+    let record = Record { read: f.read, write: f.write, witness: f.witness, last_step_1: f.last_step_1, last_step_2: f.last_step_2 };
     (state, claim, record)
 }
 
 /// A head: word0, the state digest, then `second` (a midpoint or the
 /// record's digest; zeros for the verifier).
-pub fn head(
-    game_id: u16,
-    depth: u32,
-    mover: Role,
-    state: &[u8; 20],
-    second: &[u8; 20],
-) -> [u8; HEAD_BYTES] {
+pub fn head(game_id: u16, depth: u32, mover: Role, state: &[u8; 20], second: &[u8; 20]) -> [u8; HEAD_BYTES] {
     let mut h = [0u8; HEAD_BYTES];
     h[0..4].copy_from_slice(&word0(game_id, depth, mover).to_be_bytes());
     h[4 + H_STATE..4 + H_STATE + 20].copy_from_slice(state);
@@ -183,29 +162,9 @@ pub fn head(
 
 /// The final pair: the verifier's last head (the state after the last
 /// choice) and the prover's record head.
-pub fn final_heads(
-    game_id: u16,
-    depth: u32,
-    state: &State,
-    record: &Record,
-) -> ([u8; HEAD_BYTES], [u8; HEAD_BYTES]) {
+pub fn final_heads(game_id: u16, depth: u32, state: &State, record: &Record) -> ([u8; HEAD_BYTES], [u8; HEAD_BYTES]) {
     let sd = state.digest();
-    (
-        head(
-            game_id,
-            depth - 1,
-            lngap_pos::instance::mover_at(depth - 1),
-            &sd,
-            &[0; 20],
-        ),
-        head(
-            game_id,
-            depth,
-            lngap_pos::instance::mover_at(depth),
-            &sd,
-            &record.digest(),
-        ),
-    )
+    (head(game_id, depth - 1, lngap_pos::instance::mover_at(depth - 1), &sd, &[0; 20]), head(game_id, depth, lngap_pos::instance::mover_at(depth), &sd, &record.digest()))
 }
 
 /// The final leaves' witness below the pair reveal: the state, then the
@@ -267,11 +226,7 @@ impl Tracked {
     }
     /// PICK the item at bottom index `i` to the altstack.
     pub fn pick_alt(mut self, i: usize) -> Self {
-        self.b = self
-            .b
-            .push_int((self.len - 1 - i) as i64)
-            .push_opcode(OP_PICK)
-            .push_opcode(OP_TOALTSTACK);
+        self.b = self.b.push_int((self.len - 1 - i) as i64).push_opcode(OP_PICK).push_opcode(OP_TOALTSTACK);
         self
     }
     /// PICK `idx` to the altstack, last first (so they come back in order).
@@ -292,11 +247,7 @@ impl Tracked {
     /// back in order).
     pub fn roll_alt(mut self, n: usize, above: usize) -> Self {
         for _ in 0..n {
-            self.b = self
-                .b
-                .push_int(above as i64)
-                .push_opcode(OP_ROLL)
-                .push_opcode(OP_TOALTSTACK);
+            self.b = self.b.push_int(above as i64).push_opcode(OP_ROLL).push_opcode(OP_TOALTSTACK);
         }
         self.len -= n;
         self
@@ -315,10 +266,7 @@ impl Tracked {
     pub fn run(self, s: &ScriptBuf, consumes: usize, leaves: usize) -> Self {
         let mut bytes = self.b.into_script().into_bytes();
         bytes.extend_from_slice(s.as_bytes());
-        Tracked {
-            b: Builder::from(bytes),
-            len: self.len - consumes + leaves,
-        }
+        Tracked { b: Builder::from(bytes), len: self.len - consumes + leaves }
     }
 }
 
@@ -361,13 +309,7 @@ fn exec_inputs(r: usize, witness: bool) -> Vec<usize> {
 /// state's lo and hi out; park the record; check the state; bring the
 /// record back, copy its fields out, check it; then restore lo and hi
 /// below the record's fields and run the proof.
-pub fn prove_script_d60(
-    l: &Layout,
-    key: &WotsPublic,
-    class: &str,
-    exec: &ScriptBuf,
-    witness: bool,
-) -> ScriptBuf {
+pub fn prove_script_d60(l: &Layout, key: &WotsPublic, class: &str, exec: &ScriptBuf, witness: bool) -> ScriptBuf {
     let p = l.prior.expect("depth >= 2");
     let n = l.new;
     let (s, file) = (0usize, 4 * BLOCK);
@@ -377,18 +319,8 @@ pub fn prove_script_d60(
     let mut t = Tracked::new(Builder::new().wots_verify(key), len);
     // lo and hi; the record's digest; the state's (the prior head's)
     t = t.pick_all_alt(&g1);
-    t = t.pick_all_alt(
-        &head_nibbles(n, H_SECOND, 20)
-            .into_iter()
-            .map(f)
-            .collect::<Vec<_>>(),
-    );
-    t = t.pick_all_alt(
-        &head_nibbles(p, H_STATE, 20)
-            .into_iter()
-            .map(f)
-            .collect::<Vec<_>>(),
-    );
+    t = t.pick_all_alt(&head_nibbles(n, H_SECOND, 20).into_iter().map(f).collect::<Vec<_>>());
+    t = t.pick_all_alt(&head_nibbles(p, H_STATE, 20).into_iter().map(f).collect::<Vec<_>>());
     t = t.drop(l.file);
     // [state, record]: the state's digest on top, the record parked
     t = t.from_alt(40).roll_alt(2 * BLOCK, 40);

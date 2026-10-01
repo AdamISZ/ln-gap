@@ -21,8 +21,8 @@
 //! two word0s), in [`FinalStep`]'s layout. In Z2 the search's last round
 //! produces these heads.
 
-pub mod chain;
 pub mod challenges;
+pub mod chain;
 pub mod dispute;
 pub mod game;
 pub mod guard;
@@ -33,9 +33,7 @@ use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
 use bitcoin::ScriptBuf;
 use bitcoin_script_functions::hash::blake3;
-use bitcoin_script_riscv::riscv::instruction_mapping::{
-    generate_verification_script, get_key_from_instruction_and_micro, requires_witness,
-};
+use bitcoin_script_riscv::riscv::instruction_mapping::{generate_verification_script, get_key_from_instruction_and_micro, requires_witness};
 use bitcoin_script_stack::stack::StackTracker;
 use lngap_channel::Role;
 use lngap_lamport::winternitz::{WotsExt, WotsPublic};
@@ -195,11 +193,7 @@ impl FinalStep {
     }
 
     /// Decode a parked pair with its extra data.
-    pub fn parse_with(
-        prior: &[u8; HEAD_BYTES],
-        new: &[u8; HEAD_BYTES],
-        x: &[u8; EXTRA_BYTES],
-    ) -> FinalStep {
+    pub fn parse_with(prior: &[u8; HEAD_BYTES], new: &[u8; HEAD_BYTES], x: &[u8; EXTRA_BYTES]) -> FinalStep {
         let q = |i: usize| u64::from_be_bytes(x[i..i + 8].try_into().unwrap());
         FinalStep {
             hash: x[X_HASH..X_HASH + 20].try_into().unwrap(),
@@ -229,12 +223,7 @@ impl FinalStep {
                 micro: p[P_MICRO],
                 opcode: u32::from_be_bytes([p[P_OPHI], p[P_OPHI + 1], n[N_OPLO], n[N_OPLO + 1]]),
             },
-            write: Step {
-                write_addr: w(n, N_WADDR),
-                write_value: w(n, N_WVAL),
-                pc: w(n, N_WPC),
-                micro: n[N_WMICRO],
-            },
+            write: Step { write_addr: w(n, N_WADDR), write_value: w(n, N_WVAL), pc: w(n, N_WPC), micro: n[N_WMICRO] },
             hash: [0; 20],
             witness: w(n, N_WITNESS),
             agreed_step: w(n, N_AGREED),
@@ -257,11 +246,7 @@ pub fn blake3_160(data: &[u8]) -> [u8; 20] {
 
 /// Bytes as witness nibbles, most significant first, first deepest.
 pub fn nibble_witness(bytes: &[u8]) -> Vec<Vec<u8>> {
-    bytes
-        .iter()
-        .flat_map(|b| [b >> 4, b & 15])
-        .map(|v| if v == 0 { vec![] } else { vec![v] })
-        .collect()
+    bytes.iter().flat_map(|b| [b >> 4, b & 15]).map(|v| if v == 0 { vec![] } else { vec![v] }).collect()
 }
 
 /// `BLAKE3(prev || step)` truncated to 20 bytes: BitVMX's step hash.
@@ -339,11 +324,7 @@ fn digest_src(n: usize) -> Vec<Src> {
 /// digest (which consumes it); then, per phase, bring its inputs back and
 /// run its script; push 1. The extra data's nibbles lie below the pair
 /// reveal in the witness.
-pub(crate) fn leaf_with_extra(
-    l: &Layout,
-    key: &WotsPublic,
-    phases: &[(Vec<Src>, ScriptBuf)],
-) -> ScriptBuf {
+pub(crate) fn leaf_with_extra(l: &Layout, key: &WotsPublic, phases: &[(Vec<Src>, ScriptBuf)]) -> ScriptBuf {
     let mut all = vec![(digest_src(l.new), digest_check_script())];
     all.extend(phases.iter().cloned());
     leaf_phases(l, key, EXTRA_BYTES * 2, &all)
@@ -352,12 +333,7 @@ pub(crate) fn leaf_with_extra(
 /// The general leaf body: `n_extra` witness nibbles below the pair reveal;
 /// gather all phases' inputs, last phase first (so the first comes back
 /// first), drop the file, then restore and run each phase in order.
-pub(crate) fn leaf_phases(
-    l: &Layout,
-    key: &WotsPublic,
-    n_extra: usize,
-    phases: &[(Vec<Src>, ScriptBuf)],
-) -> ScriptBuf {
+pub(crate) fn leaf_phases(l: &Layout, key: &WotsPublic, n_extra: usize, phases: &[(Vec<Src>, ScriptBuf)]) -> ScriptBuf {
     let file = l.file;
     let mut b = Builder::new().wots_verify(key);
     for (src, _) in phases.iter().rev() {
@@ -366,8 +342,7 @@ pub(crate) fn leaf_phases(
                 Src::Dig(j) => b.push_int((file - 1 - j) as i64).push_opcode(OP_PICK),
                 Src::X(i) => {
                     assert!(i < n_extra, "extra nibble {i} of {n_extra}");
-                    b.push_int((file + n_extra - 1 - i) as i64)
-                        .push_opcode(OP_PICK)
+                    b.push_int((file + n_extra - 1 - i) as i64).push_opcode(OP_PICK)
                 }
                 Src::Konst(v) => b.push_int(v),
             }
@@ -395,12 +370,7 @@ pub(crate) fn leaf_phases(
 /// head's digit 0 deepest; any extra witness items lie below them); PICK
 /// `src` (or push its constants) to the altstack, last first; drop the
 /// register file; bring them back (`src[0]` deepest); run `check`; push 1.
-pub(crate) fn leaf_script_src(
-    l: &Layout,
-    key: &WotsPublic,
-    src: &[Src],
-    check: &ScriptBuf,
-) -> ScriptBuf {
+pub(crate) fn leaf_script_src(l: &Layout, key: &WotsPublic, src: &[Src], check: &ScriptBuf) -> ScriptBuf {
     leaf_phases(l, key, 0, &[(src.to_vec(), check.clone())])
 }
 
@@ -436,44 +406,26 @@ pub fn hash_script() -> ScriptBuf {
 /// on top, and fails unless the write is what the instruction does with
 /// those reads), then [`hash_script`].
 pub fn prove_script(instruction: &Instruction, micro: u8) -> ScriptBuf {
-    let mut bytes = generate_verification_script(
-        instruction,
-        micro,
-        BASE_REGISTER_ADDRESS,
-        requires_witness(instruction),
-    )
-    .into_bytes();
+    let mut bytes = generate_verification_script(instruction, micro, BASE_REGISTER_ADDRESS, requires_witness(instruction)).into_bytes();
     bytes.extend_from_slice(hash_script().as_bytes());
     ScriptBuf::from_bytes(bytes)
 }
 
 /// The leaf name of an instruction class's proof, from BitVMX's key.
 pub fn prove_name(instruction: &Instruction, micro: u8) -> String {
-    format!(
-        "zk_prove_{}",
-        get_key_from_instruction_and_micro(instruction, micro).to_lowercase()
-    )
+    format!("zk_prove_{}", get_key_from_instruction_and_micro(instruction, micro).to_lowercase())
 }
 
 /// The prover's `zk_prove_<class>` leaf over the parked pair (depth >= 2),
 /// for `instruction`'s class at micro-step `micro`. `holds` is its native
 /// mirror (a proof exists for the pair), which needs an executor.
-pub fn prove_leaf(
-    l: &Layout,
-    key: &WotsPublic,
-    instruction: &Instruction,
-    micro: u8,
-    holds: Arc<dyn Fn(&[u8; HEAD_BYTES], &[u8; HEAD_BYTES]) -> bool + Send + Sync>,
-) -> PosLeaf {
+pub fn prove_leaf(l: &Layout, key: &WotsPublic, instruction: &Instruction, micro: u8, holds: Arc<dyn Fn(&[u8; HEAD_BYTES], &[u8; HEAD_BYTES]) -> bool + Send + Sync>) -> PosLeaf {
     let p = l.prior.expect("the proof reads a prior head: depth >= 2");
     let n = l.new;
     // the hash check's inputs (deepest): prev hash, the write record, and
     // the claimed hash from the extra data
     let d = n + 8 + 2 * N_WADDR;
-    let mut src: Vec<Src> = (p + 8 + 2 * P_PREV..p + 8 + 2 * P_PREV + 40)
-        .chain(d..d + 26)
-        .map(Src::Dig)
-        .collect();
+    let mut src: Vec<Src> = (p + 8 + 2 * P_PREV..p + 8 + 2 * P_PREV + 40).chain(d..d + 26).map(Src::Dig).collect();
     src.extend(x_nibbles(X_HASH, 20));
     let mut src_exec: Vec<usize> = vec![];
     let src_ref = &mut src_exec;
@@ -500,19 +452,8 @@ pub fn prove_leaf(
     let mut guard: Vec<Src> = (hi..hi + 4).chain(lo..lo + 4).map(Src::Dig).collect();
     guard.extend(low_digit(p, P_MICRO).map(Src::Dig));
     let class = get_key_from_instruction_and_micro(instruction, micro);
-    let script = leaf_with_extra(
-        l,
-        key,
-        &[
-            (guard, guard::class_guard_script(&class)),
-            (src, prove_script(instruction, micro)),
-        ],
-    );
-    PosLeaf {
-        name: prove_name(instruction, micro),
-        script,
-        fires: holds,
-    }
+    let script = leaf_with_extra(l, key, &[(guard, guard::class_guard_script(&class)), (src, prove_script(instruction, micro))]);
+    PosLeaf { name: prove_name(instruction, micro), script, fires: holds }
 }
 
 #[cfg(test)]
@@ -523,22 +464,8 @@ mod tests {
     fn heads_round_trip() {
         let s = FinalStep {
             prev_hash: [0x11; 20],
-            read: Read {
-                mem_witness: 0x2a,
-                read_1_addr: 1,
-                read_1_value: 2,
-                read_2_addr: 3,
-                read_2_value: 4,
-                pc: 5,
-                micro: 6,
-                opcode: 0x1234_5678,
-            },
-            write: Step {
-                write_addr: 7,
-                write_value: 8,
-                pc: 9,
-                micro: 10,
-            },
+            read: Read { mem_witness: 0x2a, read_1_addr: 1, read_1_value: 2, read_2_addr: 3, read_2_value: 4, pc: 5, micro: 6, opcode: 0x1234_5678 },
+            write: Step { write_addr: 7, write_value: 8, pc: 9, micro: 10 },
             hash: [0x22; 20],
             witness: 11,
             agreed_step: 12,

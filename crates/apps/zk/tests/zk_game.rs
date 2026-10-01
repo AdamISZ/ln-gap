@@ -6,9 +6,7 @@
 use std::collections::BTreeMap;
 
 use bitcoin::ScriptBuf;
-use bitcoin_script_riscv::riscv::instruction_mapping::{
-    generate_verification_script, get_key_from_instruction_and_micro, requires_witness,
-};
+use bitcoin_script_riscv::riscv::instruction_mapping::{generate_verification_script, get_key_from_instruction_and_micro, requires_witness};
 use emulator::decision::challenge::prover_execute;
 use emulator::loader::program_definition::ProgramDefinition;
 use lngap_lamport::winternitz::WotsSecret;
@@ -34,38 +32,21 @@ fn all_steps() -> Vec<FinalStep> {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let d = format!("{}/", dir.display());
-    let (_, last, hash) =
-        prover_execute(&pdf(), INPUT.to_vec(), &d, &d, true, None, false).unwrap();
+    let (_, last, hash) = prover_execute(&pdf(), INPUT.to_vec(), &d, &d, true, None, false).unwrap();
     let pd = ProgramDefinition::from_config(&pdf()).unwrap();
-    let (_, trace) = pd
-        .execute_helper(
-            &d,
-            &d,
-            INPUT.to_vec(),
-            Some((0..=last).collect()),
-            None,
-            false,
-        )
-        .unwrap();
+    let (_, trace) = pd.execute_helper(&d, &d, INPUT.to_vec(), Some((0..=last).collect()), None, false).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
-    trace
-        .windows(2)
-        .map(|w| final_step(&w[1].0, &w[0].1, &w[1].1, last, &hash).unwrap())
-        .collect()
+    trace.windows(2).map(|w| final_step(&w[1].0, &w[0].1, &w[1].1, last, &hash).unwrap()).collect()
 }
 
 fn truthy(v: &[u8]) -> bool {
-    v.iter()
-        .enumerate()
-        .any(|(i, b)| *b != 0 && !(i == v.len() - 1 && *b == 0x80))
+    v.iter().enumerate().any(|(i, b)| *b != 0 && !(i == v.len() - 1 && *b == 0x80))
 }
 
 fn run(script: &ScriptBuf, sk: &WotsSecret, state: &State, record: &Record) -> (bool, usize) {
     let (p, n) = final_heads(GAME, D, state, record);
     let mut w = final_witness(state, record);
-    w.extend(disprove_witness(
-        &sk.sign(&[p.as_slice(), n.as_slice()].concat()).unwrap(),
-    ));
+    w.extend(disprove_witness(&sk.sign(&[p.as_slice(), n.as_slice()].concat()).unwrap()));
     match lngap_script32::sim::run_peak(script.as_script(), w) {
         Ok((st, peak)) => (st.len() == 1 && truthy(&st[0]), peak),
         Err(_) => (false, 0),
@@ -85,19 +66,8 @@ fn prove_leaf_d60_on_hello_world() {
         let script = leaves
             .entry(key.clone())
             .or_insert_with(|| {
-                let exec = generate_verification_script(
-                    &ins,
-                    f.read.micro,
-                    BASE_REGISTER_ADDRESS,
-                    requires_witness(&ins),
-                );
-                prove_script_d60(
-                    &l,
-                    &sk.public(),
-                    &key,
-                    &ScriptBuf::from_bytes(exec.into_bytes()),
-                    requires_witness(&ins),
-                )
+                let exec = generate_verification_script(&ins, f.read.micro, BASE_REGISTER_ADDRESS, requires_witness(&ins));
+                prove_script_d60(&l, &sk.public(), &key, &ScriptBuf::from_bytes(exec.into_bytes()), requires_witness(&ins))
             })
             .clone();
         let (state, _claim, record) = blocks(f);
@@ -112,84 +82,25 @@ fn prove_leaf_d60_on_hello_world() {
         // micro-steps work from the intermediate registers the earlier
         // ones wrote, and BitVMX's script doesn't read the fields again)
         // and not for ecall, which has no register fields
-        let op_bit = if matches!(record.read.opcode & 0x7f, 0x23 | 0x63) {
-            1 << 15
-        } else {
-            1 << 7
-        };
+        let op_bit = if matches!(record.read.opcode & 0x7f, 0x23 | 0x63) { 1 << 15 } else { 1 << 7 };
         let bad = [
-            (
-                "hi",
-                State {
-                    hi: [0x5a; 20],
-                    ..state
-                },
-                record,
-            ),
-            (
-                "lo",
-                State {
-                    lo: [0xa5; 20],
-                    ..state
-                },
-                record,
-            ),
-            (
-                "write value",
-                state,
-                Record {
-                    write: lngap_zk::Step {
-                        write_value: record.write.write_value ^ 0x100,
-                        ..record.write
-                    },
-                    ..record
-                },
-            ),
-            (
-                "next pc",
-                state,
-                Record {
-                    write: lngap_zk::Step {
-                        pc: record.write.pc ^ 8,
-                        ..record.write
-                    },
-                    ..record
-                },
-            ),
-            (
-                "opcode",
-                state,
-                Record {
-                    read: lngap_zk::Read {
-                        opcode: record.read.opcode ^ op_bit,
-                        ..record.read
-                    },
-                    ..record
-                },
-            ),
+            ("hi", State { hi: [0x5a; 20], ..state }, record),
+            ("lo", State { lo: [0xa5; 20], ..state }, record),
+            ("write value", state, Record { write: lngap_zk::Step { write_value: record.write.write_value ^ 0x100, ..record.write }, ..record }),
+            ("next pc", state, Record { write: lngap_zk::Step { pc: record.write.pc ^ 8, ..record.write }, ..record }),
+            ("opcode", state, Record { read: lngap_zk::Read { opcode: record.read.opcode ^ op_bit, ..record.read }, ..record }),
         ];
         for (what, s2, r2) in bad {
             if what == "opcode" && (f.read.micro != 0 || f.read.opcode & 0x7f == 0x73) {
                 continue;
             }
-            assert!(
-                !run(&script, &sk, &s2, &r2).0,
-                "step {} ({key}): a corrupted {what} must not prove",
-                f.agreed_step + 1
-            );
+            assert!(!run(&script, &sk, &s2, &r2).0, "step {} ({key}): a corrupted {what} must not prove", f.agreed_step + 1);
         }
     }
     let max = peaks.values().map(|v| v.1).max().unwrap();
-    println!(
-        "{} steps, {} classes; peak max {max}",
-        steps.len(),
-        peaks.len()
-    );
+    println!("{} steps, {} classes; peak max {max}", steps.len(), peaks.len());
     for (k, (count, peak, size)) in &peaks {
-        println!(
-            "  {k:<28} {count:>5} steps  peak {peak:>4}  leaf {:>4} KB",
-            size / 1000
-        );
+        println!("  {k:<28} {count:>5} steps  peak {peak:>4}  leaf {:>4} KB", size / 1000);
     }
     assert!(max <= 1000, "over the stack limit");
 }
@@ -203,24 +114,10 @@ fn probe_nop_leaf_on_real_steps() {
     let l = Layout::at(D, GAME, mover_at(D));
     let nop = riscv_decode::decode(0x00000013).unwrap(); // addi x0, x0, 0
     let exec = generate_verification_script(&nop, 0, BASE_REGISTER_ADDRESS, false);
-    let script = prove_script_d60(
-        &l,
-        &sk.public(),
-        "nop",
-        &ScriptBuf::from_bytes(exec.into_bytes()),
-        false,
-    );
+    let script = prove_script_d60(&l, &sk.public(), "nop", &ScriptBuf::from_bytes(exec.into_bytes()), false);
     let steps = all_steps();
-    let nop_mw = steps
-        .iter()
-        .find(|f| {
-            get_key_from_instruction_and_micro(
-                &riscv_decode::decode(f.read.opcode).unwrap(),
-                f.read.micro,
-            ) == "nop"
-        })
-        .map(|f| f.read.mem_witness)
-        .unwrap();
+    let nop_mw =
+        steps.iter().find(|f| get_key_from_instruction_and_micro(&riscv_decode::decode(f.read.opcode).unwrap(), f.read.micro) == "nop").map(|f| f.read.mem_witness).unwrap();
     let mut proved = BTreeMap::<String, usize>::new();
     let mut tried = 0;
     for f in steps.iter().filter(|f| f.read.micro == 0) {
@@ -233,32 +130,14 @@ fn probe_nop_leaf_on_real_steps() {
         let (state, _, record) = blocks(f);
         // the nop's write: nothing written, pc + 4, micro 0; the memory
         // witness nop expects (none)
-        let w = lngap_zk::Step {
-            write_addr: 0,
-            write_value: 0,
-            pc: f.read.pc.wrapping_add(4),
-            micro: 0,
-        };
-        let r = Record {
-            write: w,
-            read: lngap_zk::Read {
-                mem_witness: nop_mw,
-                ..record.read
-            },
-            ..record
-        };
-        let s = State {
-            hi: lngap_zk::step_hash(&state.lo, &w),
-            ..state
-        };
+        let w = lngap_zk::Step { write_addr: 0, write_value: 0, pc: f.read.pc.wrapping_add(4), micro: 0 };
+        let r = Record { write: w, read: lngap_zk::Read { mem_witness: nop_mw, ..record.read }, ..record };
+        let s = State { hi: lngap_zk::step_hash(&state.lo, &w), ..state };
         if run(&script, &sk, &s, &r).0 {
             *proved.entry(key).or_default() += 1;
         }
     }
-    println!(
-        "nop leaf proved {} of {tried} real non-nop steps: {proved:?}",
-        proved.values().sum::<usize>()
-    );
+    println!("nop leaf proved {} of {tried} real non-nop steps: {proved:?}", proved.values().sum::<usize>());
 }
 
 /// Probe: does each class's leaf bind the opcode's fixed fields (opcode
@@ -278,19 +157,8 @@ fn probe_class_binding() {
         let script = leaves
             .entry(key.clone())
             .or_insert_with(|| {
-                let exec = generate_verification_script(
-                    &ins,
-                    f.read.micro,
-                    BASE_REGISTER_ADDRESS,
-                    requires_witness(&ins),
-                );
-                prove_script_d60(
-                    &l,
-                    &sk.public(),
-                    &key,
-                    &ScriptBuf::from_bytes(exec.into_bytes()),
-                    requires_witness(&ins),
-                )
+                let exec = generate_verification_script(&ins, f.read.micro, BASE_REGISTER_ADDRESS, requires_witness(&ins));
+                prove_script_d60(&l, &sk.public(), &key, &ScriptBuf::from_bytes(exec.into_bytes()), requires_witness(&ins))
             })
             .clone();
         let (state, _, record) = blocks(&f);
@@ -298,13 +166,7 @@ fn probe_class_binding() {
             if !seen.insert((key.clone(), bit)) {
                 continue;
             }
-            let r = Record {
-                read: lngap_zk::Read {
-                    opcode: record.read.opcode ^ (1 << bit),
-                    ..record.read
-                },
-                ..record
-            };
+            let r = Record { read: lngap_zk::Read { opcode: record.read.opcode ^ (1 << bit), ..record.read }, ..record };
             if run(&script, &sk, &state, &r).0 {
                 unbound.entry(key.clone()).or_default().insert(bit);
             }
@@ -337,111 +199,38 @@ fn prove_leaf_d60_on_regtest() {
     let prover: Keypair = Seed::from_label("d60 prover").keypair("pay");
     let l = Layout::at(D, GAME, mover_at(D));
     let steps = all_steps();
-    let spend = |key: &str,
-                 ins: &riscv_decode::Instruction,
-                 micro: u8,
-                 state: &State,
-                 record: &Record| {
-        let exec =
-            generate_verification_script(ins, micro, BASE_REGISTER_ADDRESS, requires_witness(ins));
-        let mut b = Builder::new()
-            .checksigverify(&xonly(&prover))
-            .into_script()
-            .into_bytes();
-        b.extend_from_slice(
-            prove_script_d60(
-                &l,
-                &sk.public(),
-                key,
-                &ScriptBuf::from_bytes(exec.into_bytes()),
-                requires_witness(ins),
-            )
-            .as_bytes(),
-        );
+    let spend = |key: &str, ins: &riscv_decode::Instruction, micro: u8, state: &State, record: &Record| {
+        let exec = generate_verification_script(ins, micro, BASE_REGISTER_ADDRESS, requires_witness(ins));
+        let mut b = Builder::new().checksigverify(&xonly(&prover)).into_script().into_bytes();
+        b.extend_from_slice(prove_script_d60(&l, &sk.public(), key, &ScriptBuf::from_bytes(exec.into_bytes()), requires_witness(ins)).as_bytes());
         let script = ScriptBuf::from_bytes(b);
         let tree = TapTree::new(vec![Leaf::new("prove", script.clone(), Timelock::NONE)]).unwrap();
-        let (op, prev) = rt
-            .fund(&tree.script_pubkey(), Amount::from_sat(1_000_000))
-            .unwrap();
-        let mut tx = build_spend(
-            op,
-            &Timelock::NONE,
-            vec![TxOut {
-                value: Amount::from_sat(900_000),
-                script_pubkey: tree.script_pubkey(),
-            }],
-        );
+        let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
+        let mut tx = build_spend(op, &Timelock::NONE, vec![TxOut { value: Amount::from_sat(900_000), script_pubkey: tree.script_pubkey() }]);
         let sig = sign_tapscript(&prover, &tx, 0, std::slice::from_ref(&prev), &script).unwrap();
         let (p, n) = final_heads(GAME, D, state, record);
         let mut w = final_witness(state, record);
-        w.extend(disprove_witness(
-            &sk.sign(&[p.as_slice(), n.as_slice()].concat()).unwrap(),
-        ));
+        w.extend(disprove_witness(&sk.sign(&[p.as_slice(), n.as_slice()].concat()).unwrap()));
         w.push(sig.as_ref().to_vec());
         tx.input[0].witness = tapscript_witness(&w, &script, &tree.control_block("prove").unwrap());
         tx
     };
     for want in ["lw_0", "sb_2", "ecall"] {
-        let f = steps
-            .iter()
-            .find(|f| {
-                get_key_from_instruction_and_micro(
-                    &riscv_decode::decode(f.read.opcode).unwrap(),
-                    f.read.micro,
-                ) == want
-            })
-            .unwrap();
+        let f = steps.iter().find(|f| get_key_from_instruction_and_micro(&riscv_decode::decode(f.read.opcode).unwrap(), f.read.micro) == want).unwrap();
         let ins = riscv_decode::decode(f.read.opcode).unwrap();
         let (state, _, record) = blocks(f);
         let tx = spend(want, &ins, f.read.micro, &state, &record);
         let (txid, h) = rt.send_and_confirm(&tx).unwrap();
-        println!(
-            "{want}: step {} proved, {txid} at {h}: {} vB",
-            f.agreed_step + 1,
-            tx.vsize()
-        );
+        println!("{want}: step {} proved, {txid} at {h}: {} vB", f.agreed_step + 1, tx.vsize());
     }
     // a nop "proof" of a real addi step: no write, pc + 4
-    let f = steps
-        .iter()
-        .find(|f| {
-            get_key_from_instruction_and_micro(
-                &riscv_decode::decode(f.read.opcode).unwrap(),
-                f.read.micro,
-            ) == "addi"
-        })
-        .unwrap();
-    let nop_f = steps
-        .iter()
-        .find(|f| {
-            get_key_from_instruction_and_micro(
-                &riscv_decode::decode(f.read.opcode).unwrap(),
-                f.read.micro,
-            ) == "nop"
-        })
-        .unwrap();
+    let f = steps.iter().find(|f| get_key_from_instruction_and_micro(&riscv_decode::decode(f.read.opcode).unwrap(), f.read.micro) == "addi").unwrap();
+    let nop_f = steps.iter().find(|f| get_key_from_instruction_and_micro(&riscv_decode::decode(f.read.opcode).unwrap(), f.read.micro) == "nop").unwrap();
     let (state, _, record) = blocks(f);
-    let w = lngap_zk::Step {
-        write_addr: 0,
-        write_value: 0,
-        pc: f.read.pc.wrapping_add(4),
-        micro: 0,
-    };
-    let r = Record {
-        write: w,
-        read: lngap_zk::Read {
-            mem_witness: nop_f.read.mem_witness,
-            ..record.read
-        },
-        ..record
-    };
-    let s = State {
-        hi: lngap_zk::step_hash(&state.lo, &w),
-        ..state
-    };
+    let w = lngap_zk::Step { write_addr: 0, write_value: 0, pc: f.read.pc.wrapping_add(4), micro: 0 };
+    let r = Record { write: w, read: lngap_zk::Read { mem_witness: nop_f.read.mem_witness, ..record.read }, ..record };
+    let s = State { hi: lngap_zk::step_hash(&state.lo, &w), ..state };
     let nop = riscv_decode::decode(0x00000013).unwrap();
-    let err = rt
-        .test_accept(&spend("nop", &nop, 0, &s, &r))
-        .expect_err("the guard refuses");
+    let err = rt.test_accept(&spend("nop", &nop, 0, &s, &r)).expect_err("the guard refuses");
     println!("nop proof of a real addi rejected ({err})");
 }

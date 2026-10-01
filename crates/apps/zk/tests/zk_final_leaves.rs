@@ -25,10 +25,7 @@ fn measure(name: &str, yaml: &str) {
     let l = Layout::at(D, GAME, mover_at(D));
     let t = Instant::now();
     let classes = generate_sample_instructions();
-    let prove: Vec<_> = classes
-        .iter()
-        .map(|(ins, micro)| prove_leaf(&l, &sk.public(), ins, *micro, Arc::new(|_, _| false)))
-        .collect();
+    let prove: Vec<_> = classes.iter().map(|(ins, micro)| prove_leaf(&l, &sk.public(), ins, *micro, Arc::new(|_, _| false))).collect();
     let t_prove = t.elapsed();
     let t = Instant::now();
     let s1 = s1_leaves(&l, &sk.public(), &info);
@@ -53,17 +50,12 @@ fn measure(name: &str, yaml: &str) {
 
 #[test]
 fn final_leaves_hello() {
-    measure(
-        "hello-world",
-        &format!("{}/programs/hello-world.yaml", env!("CARGO_MANIFEST_DIR")),
-    );
+    measure("hello-world", &format!("{}/programs/hello-world.yaml", env!("CARGO_MANIFEST_DIR")));
 }
 
 #[test]
 #[ignore]
 fn final_leaves_groth16() {
-    let Ok(dir) = std::env::var("ZK_GROTH16_DIR") else {
-        panic!("set ZK_GROTH16_DIR")
-    };
+    let Ok(dir) = std::env::var("ZK_GROTH16_DIR") else { panic!("set ZK_GROTH16_DIR") };
     measure("groth16", &format!("{dir}/groth16.yaml"));
 }

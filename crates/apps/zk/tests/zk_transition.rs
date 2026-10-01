@@ -64,13 +64,7 @@ fn path_bit(r: u32) -> (usize, u8) {
 fn legal(r: u32, old: &[u8], new: &[u8]) -> bool {
     let eq = |a: usize, b: usize, len: usize| (0..len).all(|k| nib(new, a + k) == nib(old, b + k));
     let (pk, bit) = path_bit(r);
-    let path_right = (PATH..PATH + 8).all(|k| {
-        if k == pk {
-            nib(new, k) == nib(old, k) + bit
-        } else {
-            nib(new, k) == nib(old, k)
-        }
-    });
+    let path_right = (PATH..PATH + 8).all(|k| if k == pk { nib(new, k) == nib(old, k) + bit } else { nib(new, k) == nib(old, k) });
     let left = eq(LO, LO, 40) && eq(HI, MID, 40) && eq(PATH, PATH, 8);
     let right = eq(LO, MID, 40) && eq(HI, HI, 40) && path_right;
     left || right
@@ -79,9 +73,7 @@ fn legal(r: u32, old: &[u8], new: &[u8]) -> bool {
 /// The leaf's semantics: both states open their heads' digests and the
 /// transition is illegal.
 fn fires(r: u32, old: &[u8], new: &[u8], prior_head: &[u8; 48], new_head: &[u8; 48]) -> bool {
-    digest(old)[..] == prior_head[DIGEST_AT..DIGEST_AT + 20]
-        && digest(new)[..] == new_head[DIGEST_AT..DIGEST_AT + 20]
-        && !legal(r, old, new)
+    digest(old)[..] == prior_head[DIGEST_AT..DIGEST_AT + 20] && digest(new)[..] == new_head[DIGEST_AT..DIGEST_AT + 20] && !legal(r, old, new)
 }
 
 /// BLAKE3 of the `n`-byte message below against the 40-nibble digest on
@@ -115,10 +107,7 @@ impl Rule {
         2 * N + i
     }
     fn pick(mut self, idx: usize, extra: usize) -> Self {
-        self.b = self
-            .b
-            .push_int((self.base - 1 - idx + extra) as i64)
-            .push_opcode(OP_PICK);
+        self.b = self.b.push_int((self.base - 1 - idx + extra) as i64).push_opcode(OP_PICK);
         self
     }
     /// acc on top (extra items above base including acc = `extra`).
@@ -131,12 +120,7 @@ impl Rule {
         self.b = self.b.push_opcode(OP_EQUAL).push_opcode(OP_BOOLAND);
         self
     }
-    fn branch(
-        mut self,
-        pairs: &[(usize, usize, usize)],
-        path_add: Option<(usize, u8)>,
-        extra: usize,
-    ) -> Self {
+    fn branch(mut self, pairs: &[(usize, usize, usize)], path_add: Option<(usize, u8)>, extra: usize) -> Self {
         self.b = self.b.push_opcode(OP_PUSHNUM_1);
         for &(a, b, len) in pairs {
             for k in 0..len {
@@ -157,27 +141,14 @@ impl Rule {
 fn leaf(r: u32, key: &WotsPublic) -> ScriptBuf {
     let l = Layout::at(D, GAME, mover_at(D));
     let base = 4 * N + l.file;
-    let mut rule = Rule {
-        b: Builder::new().wots_verify(key),
-        base,
-        file: l.file,
-    };
+    let mut rule = Rule { b: Builder::new().wots_verify(key), base, file: l.file };
     rule = rule.branch(&[(LO, LO, 40), (HI, MID, 40)], None, 0);
     rule = rule.branch(&[(LO, MID, 40), (HI, HI, 40)], Some(path_bit(r)), 1);
     let _ = rule.file;
-    let b = rule
-        .b
-        .push_opcode(OP_BOOLOR)
-        .push_opcode(OP_NOT)
-        .push_opcode(OP_TOALTSTACK);
+    let b = rule.b.push_opcode(OP_BOOLOR).push_opcode(OP_NOT).push_opcode(OP_TOALTSTACK);
     let mut bytes = b.into_script().into_bytes();
     bytes.extend_from_slice(two_checks(N, N).as_bytes());
-    bytes.extend_from_slice(
-        Builder::new()
-            .push_opcode(OP_FROMALTSTACK)
-            .into_script()
-            .as_bytes(),
-    );
+    bytes.extend_from_slice(Builder::new().push_opcode(OP_FROMALTSTACK).into_script().as_bytes());
     ScriptBuf::from_bytes(bytes)
 }
 
@@ -194,10 +165,7 @@ fn two_checks(a: usize, b_: usize) -> ScriptBuf {
     // New digest, then prior digest, to the altstack.
     for d0 in [l.new + 2 * DIGEST_AT, l.prior.unwrap() + 2 * DIGEST_AT] {
         for j in (d0..d0 + 40).rev() {
-            b = b
-                .push_int((file - 1 - j) as i64)
-                .push_opcode(OP_PICK)
-                .push_opcode(OP_TOALTSTACK);
+            b = b.push_int((file - 1 - j) as i64).push_opcode(OP_PICK).push_opcode(OP_TOALTSTACK);
         }
     }
     for _ in 0..file / 2 {
@@ -209,10 +177,7 @@ fn two_checks(a: usize, b_: usize) -> ScriptBuf {
         b = b.push_opcode(OP_FROMALTSTACK);
     }
     for _ in 0..2 * b_ {
-        b = b
-            .push_int(40)
-            .push_opcode(OP_ROLL)
-            .push_opcode(OP_TOALTSTACK);
+        b = b.push_int(40).push_opcode(OP_ROLL).push_opcode(OP_TOALTSTACK);
     }
     let mut bytes = b.into_script().into_bytes();
     bytes.extend_from_slice(check_script(a as u32).as_bytes());
@@ -226,10 +191,7 @@ fn two_checks(a: usize, b_: usize) -> ScriptBuf {
 }
 
 fn nibbles(data: &[u8]) -> Vec<Vec<u8>> {
-    data.iter()
-        .flat_map(|b| [b >> 4, b & 15])
-        .map(|v| if v == 0 { vec![] } else { vec![v] })
-        .collect()
+    data.iter().flat_map(|b| [b >> 4, b & 15]).map(|v| if v == 0 { vec![] } else { vec![v] }).collect()
 }
 
 fn heads(old: &[u8], new: &[u8]) -> ([u8; 48], [u8; 48]) {
@@ -242,9 +204,7 @@ fn heads(old: &[u8], new: &[u8]) -> ([u8; 48], [u8; 48]) {
 fn witness(sk: &WotsSecret, old: &[u8], new: &[u8], ph: &[u8; 48], nh: &[u8; 48]) -> Vec<Vec<u8>> {
     let mut w = nibbles(old);
     w.extend(nibbles(new));
-    w.extend(disprove_witness(
-        &sk.sign(&[ph.as_slice(), nh.as_slice()].concat()).unwrap(),
-    ));
+    w.extend(disprove_witness(&sk.sign(&[ph.as_slice(), nh.as_slice()].concat()).unwrap()));
     w
 }
 
@@ -294,14 +254,8 @@ fn transition_leaf_limits() {
             let bad: Vec<(&str, Box<dyn Fn(&mut Vec<u8>)>)> = vec![
                 ("lo not copied", Box::new(|s: &mut Vec<u8>| s[3] ^= 0x10)),
                 ("hi not copied", Box::new(|s: &mut Vec<u8>| s[39] ^= 1)),
-                (
-                    "path bit wrong",
-                    Box::new(move |s: &mut Vec<u8>| s[63 - (r / 8) as usize] ^= 1 << (r % 8)),
-                ),
-                (
-                    "path other bit",
-                    Box::new(move |s: &mut Vec<u8>| s[60 + ((r as usize / 8 + 1) % 4)] ^= 0x40),
-                ),
+                ("path bit wrong", Box::new(move |s: &mut Vec<u8>| s[63 - (r / 8) as usize] ^= 1 << (r % 8))),
+                ("path other bit", Box::new(move |s: &mut Vec<u8>| s[60 + ((r as usize / 8 + 1) % 4)] ^= 0x40)),
             ];
             for (what, f) in &bad {
                 let mut nb = new.clone();
@@ -314,25 +268,16 @@ fn transition_leaf_limits() {
                 peaks.push(peak);
                 // The same malformed state against a head it doesn't open.
                 let (ok, _) = run(&script, witness(&sk, &old, &nb, &ph, &nh));
-                assert!(
-                    !ok,
-                    "round {r} {what}: a state that doesn't open its head must not spend"
-                );
+                assert!(!ok, "round {r} {what}: a state that doesn't open its head must not spend");
                 let mut ob = old.clone();
                 ob[10] ^= 2;
                 let (ok, _) = run(&script, witness(&sk, &ob, &nb, &ph, &nh2));
-                assert!(
-                    !ok,
-                    "round {r} {what}: a prior state that doesn't open its head must not spend"
-                );
+                assert!(!ok, "round {r} {what}: a prior state that doesn't open its head must not spend");
             }
             peaks.push(peak);
         }
         let max = peaks.iter().max().unwrap();
-        println!(
-            "round {r:>2}: leaf {} B, peak {max} (limit 1000)",
-            script.len()
-        );
+        println!("round {r:>2}: leaf {} B, peak {max} (limit 1000)", script.len());
         assert!(*max <= 1000, "over the stack limit");
     }
 }
@@ -370,31 +315,18 @@ fn transition_leaf_matches_mirror() {
 fn two_digest_limits() {
     let sk = pair_key([15; 32]);
     let mut rng = rand::rngs::StdRng::seed_from_u64(16);
-    println!(
-        "{:>5} {:>5} {:>9} {:>6}",
-        "prior", "new", "script B", "peak"
-    );
+    println!("{:>5} {:>5} {:>9} {:>6}", "prior", "new", "script B", "peak");
     for (a, bsz) in [(64usize, 64usize), (64, 128), (128, 64), (128, 128)] {
-        let mut bytes = Builder::new()
-            .wots_verify(&sk.public())
-            .into_script()
-            .into_bytes();
+        let mut bytes = Builder::new().wots_verify(&sk.public()).into_script().into_bytes();
         bytes.extend_from_slice(two_checks(a, bsz).as_bytes());
-        bytes.extend_from_slice(
-            Builder::new()
-                .push_opcode(OP_PUSHNUM_1)
-                .into_script()
-                .as_bytes(),
-        );
+        bytes.extend_from_slice(Builder::new().push_opcode(OP_PUSHNUM_1).into_script().as_bytes());
         let script = ScriptBuf::from_bytes(bytes);
         let old: Vec<u8> = (0..a).map(|_| rng.gen()).collect();
         let new: Vec<u8> = (0..bsz).map(|_| rng.gen()).collect();
         let (ph, nh) = heads(&old, &new);
         let mut w = nibbles(&old);
         w.extend(nibbles(&new));
-        w.extend(disprove_witness(
-            &sk.sign(&[ph.as_slice(), nh.as_slice()].concat()).unwrap(),
-        ));
+        w.extend(disprove_witness(&sk.sign(&[ph.as_slice(), nh.as_slice()].concat()).unwrap()));
         let res = lngap_script32::sim::run_peak(script.as_script(), w);
         let (ok, peak) = match &res {
             Ok((st, p)) => (st.len() == 1 && st[0] == [1], *p),
@@ -404,11 +336,7 @@ fn two_digest_limits() {
             "{a:>5} {bsz:>5} {:>9} {:>6}  {}",
             script.len(),
             if ok { peak.to_string() } else { "-".into() },
-            if ok {
-                "spends".to_string()
-            } else {
-                format!("fails: {:?}", res.err())
-            }
+            if ok { "spends".to_string() } else { format!("fails: {:?}", res.err()) }
         );
     }
 }
@@ -433,43 +361,22 @@ fn transition_leaf_on_regtest() {
     let challenger: Keypair = Seed::from_label("transition challenger").keypair("pay");
     let mut rng = rand::rngs::StdRng::seed_from_u64(18);
     let r = 20;
-    let mut b = Builder::new()
-        .checksigverify(&xonly(&challenger))
-        .into_script()
-        .into_bytes();
+    let mut b = Builder::new().checksigverify(&xonly(&challenger)).into_script().into_bytes();
     b.extend_from_slice(leaf(r, &sk.public()).as_bytes());
     let script = ScriptBuf::from_bytes(b);
-    let tree = TapTree::new(vec![Leaf::new(
-        "transition",
-        script.clone(),
-        Timelock::NONE,
-    )])
-    .unwrap();
+    let tree = TapTree::new(vec![Leaf::new("transition", script.clone(), Timelock::NONE)]).unwrap();
     let spend = |old: &[u8], new: &[u8]| {
-        let (op, prev) = rt
-            .fund(&tree.script_pubkey(), Amount::from_sat(1_000_000))
-            .unwrap();
-        let mut tx = build_spend(
-            op,
-            &Timelock::NONE,
-            vec![TxOut {
-                value: Amount::from_sat(900_000),
-                script_pubkey: tree.script_pubkey(),
-            }],
-        );
-        let sig =
-            sign_tapscript(&challenger, &tx, 0, std::slice::from_ref(&prev), &script).unwrap();
+        let (op, prev) = rt.fund(&tree.script_pubkey(), Amount::from_sat(1_000_000)).unwrap();
+        let mut tx = build_spend(op, &Timelock::NONE, vec![TxOut { value: Amount::from_sat(900_000), script_pubkey: tree.script_pubkey() }]);
+        let sig = sign_tapscript(&challenger, &tx, 0, std::slice::from_ref(&prev), &script).unwrap();
         let (ph, nh) = heads(old, new);
         let mut w = witness(&sk, old, new, &ph, &nh);
         w.push(sig.as_ref().to_vec());
-        tx.input[0].witness =
-            tapscript_witness(&w, &script, &tree.control_block("transition").unwrap());
+        tx.input[0].witness = tapscript_witness(&w, &script, &tree.control_block("transition").unwrap());
         tx
     };
     let (old, new) = honest(&mut rng, r, true);
-    let err = rt
-        .test_accept(&spend(&old, &new))
-        .expect_err("an honest choice");
+    let err = rt.test_accept(&spend(&old, &new)).expect_err("an honest choice");
     let mut bad = new.clone();
     bad[5] ^= 0x01; // lo not copied from the old mid
     let tx = spend(&old, &bad);
@@ -489,12 +396,7 @@ fn transition_leaf_build_time() {
     let s = leaf(9, &sk.public());
     let t_leaf = t.elapsed();
     let t = std::time::Instant::now();
-    let _ =
-        bitcoin::taproot::TapLeafHash::from_script(&s, bitcoin::taproot::LeafVersion::TapScript);
+    let _ = bitcoin::taproot::TapLeafHash::from_script(&s, bitcoin::taproot::LeafVersion::TapScript);
     let t_hash = t.elapsed();
-    println!(
-        "BLAKE3 body {} B in {t_body:?}; whole leaf {} B in {t_leaf:?}; tapleaf hash {t_hash:?}",
-        body.len(),
-        s.len()
-    );
+    println!("BLAKE3 body {} B in {t_body:?}; whole leaf {} B in {t_leaf:?}; tapleaf hash {t_hash:?}", body.len(), s.len());
 }
