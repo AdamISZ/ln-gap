@@ -2226,6 +2226,27 @@ another head — is a self-contradiction against the venue's record,
 evidence against `i` by name (FL4). The cooperative path and the channel
 machinery are unchanged: the channel sees a point.
 
+*Amended 2026-10-01: what the secret proves.* `t` reveals only the sum
+`c_h + p_i`, and neither part can be found by search. But `t·G = C_h +
+P_i` is publicly checkable, and producing `t` needs `p_i` as well as `c_h`
+(which every member can compute). So `t` proves knowledge of `p_i`, and
+names `i` only while `p_i` is secret, that is, while `i` has sealed
+nothing for that move. Once `i` seals some head `h` for the move, `p_i`
+is public (the block carries the reveal), and any member, holding the
+content key, can compute `t' = c_{h'} + p_i` for any other head `h'`.
+For that case ("sealed with another head") `t'` alone doesn't single out
+`i`; the evidence is the claim's provenance. On-chain the claim
+transaction carries `i`'s channel signature (public). In-channel only
+the payer knows that `i`'s node settled with it (real to the payer, not
+checkable by others without the channel record). A non-member cannot
+compute `c_{h'}` for an unsealed head, so a payer cannot fabricate
+evidence against `i`. Naming `i` repays nothing: the payer's real loss
+from a claim without a seal is its move going unsealed (its stake, by
+absence). Its protection is 1-of-n: a payer handed `t` with no block
+takes its authored entry to another member within the move window. The
+operational rule: settle a fee in-channel only once the block exists,
+and treat a premature claim as the signal to re-route.
+
 **Notation** (D49 and D52 wrote `Σs` for three things). For slot `s`,
 chunk `j`, value `v`: table point `A_{s,j,v}`, secret `a_{s,j,v}`. For a
 head `h` with nibbles `v_j`: `C_h = Σ_j A_{s,j,v_j}` (the content sum,

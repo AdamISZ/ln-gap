@@ -1012,9 +1012,21 @@ the payer after \texttt{expiry}. Cooperatively nothing reaches the
 chain: the payee, holding $t$, hands it to the payer and proposes the
 next channel state with $L$ removed and its value credited, and the
 payer's policy accepts iff $tG = T$. A claim with no matching block on
-the venue (sealed by nobody, by someone else, or with another head) is
-a self-contradiction of member $i$ against the venue's own record, and
-is answered by ejection rather than by script. When the sealer is not the
+the venue is answered by ejection rather than by script, and what names
+member $i$ depends on the case. Claiming reveals only the sum $t = c_h
++ p_{i,(c,d)}$, and neither part can be found by search; but anyone can
+check $tG = T$, and producing $t$ requires $p_{i,(c,d)}$. If $i$ sealed
+nothing for this move, $p_{i,(c,d)}$ is known to $i$ alone, so $t$ by
+itself is a self-contradiction of member $i$ against the venue's
+record. If $i$ sealed a different head for this move, $p_{i,(c,d)}$ is
+already public (the seal reveals it), and any member, who can compute
+content secrets, could complete a lock to another head; the evidence is
+then the claim's provenance: its signature on Bitcoin, or, settled in
+the channel, a fact known to the payer. Naming $i$ does not repay the
+payer, whose real loss is an unsealed move. Its protection is 1 of $n$:
+handed $t$ with no block, it takes its signed entry to another member
+within the move's window, and it settles a fee only once the block
+exists. When the sealer is not the
 payer's counterparty, each hop of the route carries the same output,
 locked to the same $T$, with expiries decreasing towards the sealer as
 for HTLCs; the proof of concept builds the single-hop case.
@@ -1659,7 +1671,7 @@ false flags against a timely move & none in Script; flaggers named; provable onl
 a committee majority lying about time & none in Script; publicly judgeable with an audit layer (\S\ref{sec:accountable}) & majority; economic \\
 an unsigned seal & provable from the seal; ejection & economic \\
 two different signed moves at one depth & \texttt{equiv} leaf (the mover's fault) & cryptographic \\
-fee lock completed without sealing & self-contradiction against the venue's record; ejection & economic \\
+fee lock completed without sealing & $t$ itself if the member sealed nothing for the move, else the claim's provenance; ejection; the payer re-routes in time & economic \\
 the venue halting & none: see below & --- \\
 a shared fact shown differently to different contracts & attribution; ejection; optional burn & economic ($G$: aggregate) \\
 refusing to refresh at the horizon & the horizon's default outcome & design \\
