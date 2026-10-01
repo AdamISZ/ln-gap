@@ -3043,6 +3043,43 @@ input digest), ReadValue (step 8, a second search reusing this game),
 and what the claim means to the contract that uses it (a bridge's
 withdrawal, ROLLUP_BRIDGE.md).
 
+## D61. The computation's input is committed by signature, word by word
+
+Date: 2026-10-01. Agreed with the user. Context: D60; ZK_Z3_PLAN.md
+step 5; `final_d60.rs`, `tests/zk_input.rs`.
+
+**The problem.** BitVMX's InputData challenge: a read of an input word's
+address that was never written must return the claimed input's word
+there. D60 committed the input by a digest in the claim block. Opening
+that digest at the final depth needs the record, the claim block, the
+input chunk and, for inputs over 64 bytes (Groth16's is 168), the list of
+chunk digests: three or four blocks. A leaf can open two (D60's
+amendments).
+
+**Decision.** Commit the input by signature. The prover holds a one-time
+Winternitz key per input word (4 bytes: 8 digits plus checksum),
+exchanged with the contract's other keys, and signs every word in the
+claim's entry body. The members check that the signatures are there and
+valid (`input_signed`: availability, as for the blocks). `zk_input_<j>`
+verifies the prover's signature on word j (on top of the pair reveal in
+the witness: about 11 elements, the key a leaf constant), opens the
+record, and runs BitVMX's `input_challenge` for word j's address, which
+fires if a never-written read of that address doesn't return the signed
+word. Two signatures under one input key are an equivocation: the prover
+forfeits, as for state keys (D39, D43), with the same leaf shape (to
+wire in with the graph, step 6). The claim block's `input` field is
+unused.
+
+Words are as the trace reads them: little-endian, zero-padded
+(`input_words`; checked against the emulator with an asymmetric input).
+One leaf per input word: hello-world 1, Groth16 42.
+
+**Measured.** `zk_input_0` on hello-world: 86 KB, peak 772. It holds on
+every honest step. It fires on a corrupted read of the input, and on a
+prover that ran one input and signed another; a signature under another
+key doesn't verify. On regtest the disprove confirmed at 23.0 kvB, and
+the honest signature was rejected.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

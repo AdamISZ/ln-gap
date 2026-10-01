@@ -53,6 +53,9 @@ pub struct ProgramInfo {
     pub code: SectionDefinition,
     pub data_chunks: Vec<Chunk>,
     pub uninitialized: SectionDefinition,
+    /// The input section's first address and the input's words (D61).
+    pub input_base: u32,
+    pub input_words: usize,
 }
 
 impl ProgramInfo {
@@ -71,6 +74,8 @@ impl ProgramInfo {
         let mut data_chunks = chunks(&p.sections, |s| s.initialized && !s.is_code);
         data_chunks.push(Chunk { base_addr: rstart, data: (0..regs.size / 4).map(|i| p.registers.get(i)).collect() });
         let mut uninitialized = p.get_uninitialized_ranges(&pd);
+        let input_base = p.find_section_by_name(&pd.input_section_name).ok_or_else(|| anyhow!("no input section"))?.start;
+        let input_words = pd.inputs.iter().map(|i| i.size as usize).sum::<usize>().div_ceil(4);
         uninitialized.ranges.retain(|&(a, b)| b < rstart || a > rend);
         Ok(ProgramInfo {
             entry: p.pc.get_address(),
@@ -81,6 +86,8 @@ impl ProgramInfo {
             code: p.code_sections.clone(),
             data_chunks,
             uninitialized,
+            input_base,
+            input_words,
         })
     }
 }

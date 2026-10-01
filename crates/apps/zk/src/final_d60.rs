@@ -21,8 +21,8 @@
 
 use bitcoin::ScriptBuf;
 use bitcoin_script_riscv::riscv::challenges::{
-    addresses_sections_challenge, entry_point_challenge, future_read_challenge, halt_challenge, initialized_challenge, opcode_challenge, program_counter_challenge,
-    uninitialized_challenge,
+    addresses_sections_challenge, entry_point_challenge, future_read_challenge, halt_challenge, initialized_challenge, input_challenge, opcode_challenge,
+    program_counter_challenge, uninitialized_challenge,
 };
 use bitcoin_script_stack::stack::StackTracker;
 use lngap_lamport::winternitz::WotsPublic;
@@ -150,6 +150,59 @@ pub fn halt_exit_leaf(l: &Layout, key: &WotsPublic) -> FinalLeaf {
     // equal constants in place of the two hashes
     let inputs = [fin(FIn::Cl, C_LAST_STEP, 8), agreed16(), fin(FIn::Rec, R_R1V, 4), fin(FIn::Rec, R_R2V, 4), fin(FIn::Rec, R_OP, 4), zeros(40), zeros(40)].concat();
     leaf(l, key, "zk_halt_exit".into(), &[Blk::Record, Blk::Claim], 0, &inputs, &tracked(halt_challenge))
+}
+
+// ----- InputData (D61): the input committed by signature -----
+
+/// The input's words as the trace reads them: little-endian, zero-padded
+/// (checked against the emulator in tests/zk_input.rs).
+pub fn input_words(input: &[u8]) -> Vec<u32> {
+    emulator::loader::program::vec_u8_to_vec_u32(input, true)
+}
+
+/// The Winternitz parameters of an input word's key (4 bytes).
+pub fn input_key_params() -> lngap_lamport::winternitz::WotsParams {
+    lngap_lamport::winternitz::WotsParams::for_bytes(4)
+}
+
+/// The message an input key signs: the word, big-endian.
+pub fn input_message(word: u32) -> [u8; 4] {
+    word.to_be_bytes()
+}
+
+/// The members' check of a claim's input (availability, D61): one valid
+/// signature per word, under the prover's key for that word.
+pub fn input_signed(keys: &[WotsPublic], words: &[u32], sigs: &[lngap_lamport::winternitz::WotsSig]) -> bool {
+    keys.len() == words.len() && sigs.len() == words.len() && keys.iter().zip(words).zip(sigs).all(|((k, w), s)| k.verify(s).is_ok_and(|m| m == input_message(*w)))
+}
+
+/// `zk_input_<j>` (the record, and the prover's signature on input word j
+/// on top of the pair reveal): a read of word j's address that was never
+/// written doesn't return the signed word. BitVMX's `input_challenge`.
+pub fn input_leaves(l: &Layout, key: &WotsPublic, input_keys: &[WotsPublic], info: &ProgramInfo) -> Vec<FinalLeaf> {
+    assert_eq!(input_keys.len(), info.input_words, "one key per input word");
+    input_keys
+        .iter()
+        .enumerate()
+        .map(|(j, k)| {
+            let inputs = [(0..8).map(FIn::Pre).collect(), reads()].concat();
+            let address = info.input_base + 4 * j as u32;
+            FinalLeaf {
+                name: format!("zk_input_{j}"),
+                blocks: vec![Blk::Record],
+                wit: 0,
+                script: final_leaf_pre(l, key, Some(k), &[Blk::Record], 0, &inputs, &tracked(|st| input_challenge(st, address))),
+            }
+        })
+        .collect()
+}
+
+/// Native mirror: a never-written read of word j's address whose value
+/// isn't `word`.
+pub fn input_fires(record: &Record, info: &ProgramInfo, j: usize, word: u32) -> bool {
+    let a = info.input_base + 4 * j as u32;
+    let r = &record.read;
+    (record.last_step_1 == NEVER && r.read_1_addr == a && r.read_1_value != word) || (record.last_step_2 == NEVER && r.read_2_addr == a && r.read_2_value != word)
 }
 
 /// All of the claimant's final-depth disproves for a program.

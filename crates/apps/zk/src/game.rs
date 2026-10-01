@@ -701,6 +701,8 @@ pub enum FIn {
     Rec(usize),
     Cl(usize),
     Wit(usize),
+    /// A digit of the signed message verified first (D61: an input word).
+    Pre(usize),
     K(i64),
 }
 
@@ -716,6 +718,14 @@ pub fn fin(f: fn(usize) -> FIn, off: usize, len: usize) -> Vec<FIn> {
 /// before; then the inputs are arranged in `inputs`' order (constants
 /// pushed) and `check` runs; then 1.
 pub fn final_leaf(l: &Layout, key: &WotsPublic, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> ScriptBuf {
+    final_leaf_pre(l, key, None, blocks, wit, inputs, check)
+}
+
+/// [`final_leaf`], first verifying a Winternitz signature under `pre`
+/// whose elements sit on top of the pair reveal (D61: the prover's
+/// signature on an input word); its message digits are the `FIn::Pre`
+/// inputs.
+pub fn final_leaf_pre(l: &Layout, key: &WotsPublic, pre: Option<&WotsPublic>, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> ScriptBuf {
     assert!(matches!(blocks.len(), 1 | 2), "one or two blocks: three don't fit under the stack limit");
     let p = l.prior.expect("the final depth reads a prior head");
     let n = blocks.len();
@@ -747,7 +757,20 @@ pub fn final_leaf(l: &Layout, key: &WotsPublic, blocks: &[Blk], wit: usize, inpu
             assert!(blocks.contains(&b), "input {x:?} from a block the leaf doesn't open");
         }
     }
-    let mut t = Tracked::new(Builder::new().wots_verify(key), n * 2 * BLOCK + wit + file);
+    let mut b0 = Builder::new();
+    let pre_n = match pre {
+        Some(pk) => {
+            b0 = b0.wots_verify(pk);
+            let m = pk.params.message_digits as usize;
+            for _ in 0..m {
+                b0 = b0.push_opcode(OP_TOALTSTACK);
+            }
+            m
+        }
+        None => 0,
+    };
+    assert!(inputs.iter().all(|x| !matches!(x, FIn::Pre(i) if *i >= pre_n)), "a Pre input beyond the signed message");
+    let mut t = Tracked::new(b0.wots_verify(key), n * 2 * BLOCK + wit + file);
     let early_idx: Vec<usize> = early
         .iter()
         .map(|&j| match inputs[j] {
@@ -775,9 +798,11 @@ pub fn final_leaf(l: &Layout, key: &WotsPublic, blocks: &[Blk], wit: usize, inpu
         t = t.pick_all_alt(&late_idx);
         t = t.run(&block_check_script(), 2 * BLOCK + 40, 0);
     }
-    // restore: the late copies, then the early ones; then arrange
-    t = t.from_alt(late.len()).from_alt(early.len());
-    let mut labels: Vec<Option<usize>> = late.iter().chain(early.iter()).map(|&j| Some(j)).collect();
+    // restore: the late copies, the early ones, the signed digits; then
+    // arrange
+    t = t.from_alt(late.len()).from_alt(early.len()).from_alt(pre_n);
+    let pres: Vec<usize> = (0..pre_n).map(|i| inputs.iter().position(|x| *x == FIn::Pre(i)).map_or(usize::MAX - i, |j| j)).collect();
+    let mut labels: Vec<Option<usize>> = late.iter().chain(early.iter()).map(|&j| Some(j)).chain(pres.iter().map(|&j| Some(j))).collect();
     for (j, x) in inputs.iter().enumerate() {
         if let FIn::K(v) = x {
             t.b = t.b.push_int(*v);
@@ -792,6 +817,12 @@ pub fn final_leaf(l: &Layout, key: &WotsPublic, blocks: &[Blk], wit: usize, inpu
             let lab = labels.remove(pos);
             labels.push(lab);
         }
+    }
+    // signed digits no input uses sit below the inputs: drop them
+    let unused = labels.iter().filter(|l| l.is_some_and(|j| j >= inputs.len())).count();
+    for _ in 0..unused {
+        t.b = t.b.push_int(inputs.len() as i64).push_opcode(OP_ROLL).push_opcode(OP_DROP);
+        t.len -= 1;
     }
     t = t.run(check, inputs.len(), 0);
     let mut script = t.b.into_script();
