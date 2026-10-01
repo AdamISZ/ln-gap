@@ -731,7 +731,6 @@ pub fn final_leaf_pre(l: &Layout, key: &WotsPublic, pre: Option<&WotsPublic>, bl
     let n = blocks.len();
     let file = l.file;
     let (wit_at, file_at) = (n * 2 * BLOCK, n * 2 * BLOCK + wit);
-    let block_at = |b: Blk| blocks.iter().position(|x| *x == b).map(|i| i * 2 * BLOCK);
     let of = |x: &FIn| -> Option<(Blk, usize)> {
         match *x {
             FIn::St(i) => Some((Blk::State, i)),
