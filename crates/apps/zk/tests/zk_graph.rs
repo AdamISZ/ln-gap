@@ -118,7 +118,7 @@ impl World {
         let mut ks = [KeyStore::new(Seed::from_label(&format!("zkg/user-ks/{id}"))), KeyStore::new(Seed::from_label(&format!("zkg/hub-ks/{id}")))];
         let rounds = ProgramDefinition::from_config(&pdf()).unwrap().nary_def().total_rounds() as u32;
         let search = Search { game_id: GAME_ID, rounds };
-        let m = search.depths();
+        let m = search.total();
         let info = ProgramInfo::load(&pdf()).unwrap();
         let offer_u = instance::gen_pos_keys(&mut ks[0], Role::User, id, 1, m, Game::Zk).unwrap();
         let offer_h = instance::gen_pos_keys(&mut ks[1], Role::Hub, id, 1, m, Game::Zk).unwrap();
@@ -388,5 +388,100 @@ fn zk_game_on_regtest() {
         let tx = w.spend(m, p_op, &p_prev, "disprove_zk_record_step", final_witness(&state, &r), vec![], Role::Hub);
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("zk_record_step must mine: {e}"));
         println!("  zk_record_step disproves it inside the verifier's window: {} vB. The verifier wins.", tx.vsize());
+    }
+}
+
+/// The read challenge (D62) end to end on regtest: phases 1 and 2 sealed
+/// (47 depths), the verifier forcing the prover's terminal move out with an
+/// absence claim at 47, the prover parking it, then:
+///
+/// - R1 (a faked read): the verifier's `zk_read_value_2`, with its write
+///   at step 600 as witness, takes the pot;
+/// - R2 (the same with lying hashes): the verifier's `zk_correct_hash`;
+/// - R3 (an honest prover, the challenge forced): no read leaf fires, and
+///   the prover's split pays after delta + delta'.
+#[test]
+fn read_challenge_on_regtest() {
+    use bitvmx_cpu_definitions::challenge::ChallengeType;
+    use emulator::decision::challenge::ForceChallenge;
+    use emulator::executor::utils::FailReads;
+    use lngap_zk::dispute::search_with_read;
+    use lngap_zk::game::play_read;
+    use lngap_zk::Step;
+
+    let strs = |v: &[&str]| -> Vec<String> { v.iter().map(|x| x.to_string()).collect() };
+    let fail_read_2 = FailConfiguration::new_fail_reads(FailReads::new(None, Some(&strs(&["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]))));
+    let fail_write = FailConfiguration::new_fail_write(emulator::executor::utils::FailWrite::new(&strs(&["600", "0xaa000000", "0x11111100", "0xaa000000"])));
+    let rt = Regtest::start().unwrap();
+    let (delta, delta_p) = (ChannelParams::regtest(Amount::ONE_BTC).delta, ChannelParams::regtest(Amount::ONE_BTC).delta_prime);
+    let cases = [
+        ("R1", Behaviour { fail: Some(fail_read_2.clone()) }, Behaviour::default(), ForceCondition::ValidInputWrongStepOrHash, ForceChallenge::No),
+        ("R2", Behaviour { fail: Some(fail_read_2) }, Behaviour { fail: Some(fail_write) }, ForceCondition::ValidInputWrongStepOrHash, ForceChallenge::No),
+        ("R3", Behaviour::default(), Behaviour::default(), ForceCondition::ValidInputStepAndHash, ForceChallenge::ReadValueNArySearch),
+    ];
+    for (i, (name, prover, prover_read, fc, force)) in cases.into_iter().enumerate() {
+        let dir = std::env::temp_dir().join(format!("lngap-zkg-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (s, r) = search_with_read(&pdf(), &VALID, &dir, &prover, &prover_read, &Behaviour::default(), fc, force, ForceChallenge::No).unwrap().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let r = r.expect("a read challenge");
+        let mut w = World::open(&rt, 10 + i as u32);
+        let p1 = play(&s, &w.search).unwrap();
+        let p2 = play_read(&r, &w.search, &p1).unwrap();
+        for e in p1.iter().chain(&p2) {
+            w.seal(e);
+        }
+        let m = w.search.total();
+        println!("{name}: {} moves sealed; BitVMX chose {}", p1.len() + p2.len(), format!("{:?}", r.challenge).split(' ').next().unwrap());
+        rt.mine(u64::from(w.params.to_self_delay) + 2).unwrap();
+        // the verifier claims the prover's terminal move absent; the prover
+        // parks it
+        w.claim(&rt, m);
+        let (p_op, p_prev) = w.refute(&rt, m);
+        rt.mine(u64::from(delta) + 1).unwrap();
+        let rec1 = p1.last().unwrap().record.unwrap();
+        let s2 = p2[p2.len() - 2].state;
+        let write_of = |t: &bitvmx_cpu_definitions::trace::TraceStep| Step {
+            write_addr: t.get_write().address,
+            write_value: t.get_write().value,
+            pc: t.get_pc().get_address(),
+            micro: t.get_pc().get_micro(),
+        };
+        let read_value = |w: &World, sel: u8, wr: &Step| {
+            w.spend(
+                m,
+                p_op,
+                &p_prev,
+                &format!("disprove_zk_read_value_{sel}"),
+                [nibble_witness(&rec1.to_bytes()), nibble_witness(&s2.to_bytes()), nibble_witness(&wr.to_bytes())].concat(),
+                vec![],
+                Role::Hub,
+            )
+        };
+        match &r.challenge {
+            ChallengeType::ReadValue { trace, read_selector, .. } if name != "R3" => {
+                let tx = read_value(&w, *read_selector as u8, &write_of(trace));
+                rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("{name}: zk_read_value must mine: {e}"));
+                println!("  zk_read_value_{read_selector} (W = step {}'s write): {} vB. The verifier wins.", r.step + 1, tx.vsize());
+            }
+            ChallengeType::CorrectHash { trace, verifier_hash, .. } => {
+                let mut wit = hex::decode(verifier_hash).unwrap();
+                wit.extend_from_slice(&write_of(trace).to_bytes());
+                let tx = w.spend(m, p_op, &p_prev, "disprove_zk_correct_hash", [nibble_witness(&s2.to_bytes()), nibble_witness(&wit)].concat(), vec![], Role::Hub);
+                rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("{name}: zk_correct_hash must mine: {e}"));
+                println!("  zk_correct_hash at step {}: {} vB. The verifier wins.", r.step + 1, tx.vsize());
+            }
+            ChallengeType::ReadValue { trace, .. } => {
+                for sel in [1, 2] {
+                    assert!(rt.test_accept(&read_value(&w, sel, &write_of(trace))).is_err(), "{name}: read_value_{sel} must not fire on an honest prover");
+                }
+                rt.mine(u64::from(delta_p)).unwrap();
+                let split = w.two_of_two(&format!("absent_{m}/refuted/split_UserWins"), vec![]);
+                rt.mine_with(&[split.clone()]).unwrap_or_else(|e| panic!("{name}: the prover's split must mine: {e}"));
+                println!("  no read leaf fires; the prover's split: {} vB. The prover wins.", split.vsize());
+            }
+            c => panic!("{name}: unexpected {c:?}"),
+        }
     }
 }

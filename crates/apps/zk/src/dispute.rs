@@ -121,3 +121,63 @@ pub fn search(pdf: &str, input: &[u8], dir: &Path, prover: &Behaviour, verifier:
     let final_step = final_step(&trace, &step_hash, &next_hash, claim.1, &claim.2)?;
     Ok(Some(Searched { claim, rounds, step: trace.step_number, trace, final_step }))
 }
+
+// ----- the read challenge (D62): BitVMX's second search -----
+
+/// The read challenge played after the first search: BitVMX's
+/// `ReadValueChallenge` search toward the step that last wrote the
+/// disputed read's address, then the verifier's challenge.
+#[derive(Clone, Debug)]
+pub struct ReadSearched {
+    /// Each round: the prover's hashes and the verifier's choice (round 1's
+    /// hashes are the first search's, as BitVMX reuses them).
+    pub rounds: Vec<(Vec<String>, u32)>,
+    /// The final interval's endpoints (the prover's hashes at the step
+    /// before the write and at the write) and that step.
+    pub step_hash: [u8; 20],
+    pub next_hash: [u8; 20],
+    pub step: u64,
+    /// The verifier's challenge, as BitVMX chooses it.
+    pub challenge: bitvmx_cpu_definitions::challenge::ChallengeType,
+}
+
+/// Run the first search, then (if the verifier's choice after it is a read
+/// challenge, or `force` makes it one) the read search: BitVMX's sequence
+/// (`test_challenge_aux`). `prover_read` is the prover's fault injection
+/// during the read search.
+#[allow(clippy::too_many_arguments)]
+pub fn search_with_read(
+    pdf: &str,
+    input: &[u8],
+    dir: &Path,
+    prover: &Behaviour,
+    prover_read: &Behaviour,
+    verifier: &Behaviour,
+    force_condition: ForceCondition,
+    force: emulator::decision::challenge::ForceChallenge,
+    force_read: emulator::decision::challenge::ForceChallenge,
+) -> Result<Option<(Searched, Option<ReadSearched>)>> {
+    use bitvmx_cpu_definitions::challenge::ChallengeType;
+    use emulator::decision::challenge::{prover_get_hashes_and_step, verifier_choose_challenge, verifier_choose_challenge_for_read_challenge};
+    let Some(s) = search(pdf, input, dir, prover, verifier, force_condition)? else { return Ok(None) };
+    let p_dir = format!("{}/prover/", dir.display());
+    let v_dir = format!("{}/verifier/", dir.display());
+    let e = |e: emulator::EmulatorError| anyhow!("{e}");
+    let h = |x: &str| h20(x);
+    let challenge = verifier_choose_challenge(pdf, &v_dir, &v_dir, s.trace.clone(), &hex::encode(s.final_step.prev_hash), &hex::encode(s.final_step.hash), force, verifier.fail.clone(), true).map_err(e)?;
+    let ChallengeType::ReadValueNArySearch { bits } = challenge else { return Ok(Some((s, None))) };
+    let rounds_total = ProgramDefinition::from_config(pdf)?.nary_def().total_rounds();
+    let mut rounds = vec![(s.rounds[0].0.clone(), bits)];
+    let mut decision = bits;
+    for round in 2..=rounds_total {
+        let hashes = prover_get_hashes_for_round(pdf, &p_dir, &p_dir, round, decision, prover_read.fail.clone(), NArySearchType::ReadValueChallenge).map_err(e)?;
+        decision = verifier_choose_segment(pdf, &v_dir, &v_dir, round, hashes.clone(), verifier.fail.clone(), NArySearchType::ReadValueChallenge).map_err(e)?;
+        rounds.push((hashes, decision));
+    }
+    let (step_hash, next_hash, step) = prover_get_hashes_and_step(pdf, &p_dir, NArySearchType::ReadValueChallenge, Some(decision), prover_read.fail.clone())
+        .map_err(e)?
+        .as_hashes_with_step()
+        .map_err(|e| anyhow!("{e:?}"))?;
+    let challenge = verifier_choose_challenge_for_read_challenge(pdf, &v_dir, &v_dir, &step_hash, &next_hash, verifier.fail.clone(), force_read, true).map_err(e)?;
+    Ok(Some((s, Some(ReadSearched { rounds, step_hash: h(&step_hash)?, next_hash: h(&next_hash)?, step, challenge }))))
+}

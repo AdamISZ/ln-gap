@@ -82,7 +82,7 @@ fn zk_contract_in_a_channel() {
     let mut miner = PosMiner::new(SEED, (0..5u8).map(|i| Member::new([SEED[0] + i; 32])).collect());
     let rounds = ProgramDefinition::from_config(&pdf()).unwrap().nary_def().total_rounds() as u32;
     let sr = Search { game_id: GAME_ID, rounds };
-    let m = sr.depths();
+    let m = sr.total();
     let info = ProgramInfo::load(&pdf()).unwrap();
     // keys: both sides' per-depth keys; the prover's (the user's: odd
     // depths) input keys
@@ -110,7 +110,7 @@ fn zk_contract_in_a_channel() {
     let t = Instant::now();
     let tree = inst.tree(&ctx).unwrap();
     assert!(tree.leaf("equiv_input_0").is_ok() && tree.leaf("settle").is_ok());
-    let fin = inst.refuted_tree(&ctx, m).unwrap();
+    let fin = inst.refuted_tree(&ctx, sr.depths()).unwrap();
     let names: Vec<&str> = fin.leaves().iter().map(|l| l.name.as_str()).collect();
     let n_prove = names.iter().filter(|n| n.starts_with("zk_prove_")).count();
     let n_dis = names.iter().filter(|n| n.starts_with("disprove_")).count();
@@ -119,8 +119,13 @@ fn zk_contract_in_a_channel() {
     assert!(inst.refuted_tree(&ctx, 4).unwrap().leaf("disprove_zk_choice").is_ok());
     assert!(inst.refuted_tree(&ctx, 5).unwrap().leaf("disprove_zk_copied").is_ok());
     assert!(inst.refuted_tree(&ctx, 1).unwrap().leaf("disprove_zk_claim").is_ok());
+    // the read challenge (D62): the opening, a phase-2 choice, the terminal
+    assert!(inst.refuted_tree(&ctx, sr.open_depth()).unwrap().leaf("disprove_zk_open").is_ok());
+    assert!(inst.refuted_tree(&ctx, sr.open_depth() + 2).unwrap().leaf("disprove_zk_choice").is_ok());
+    let term = inst.refuted_tree(&ctx, m).unwrap();
+    assert!(["disprove_zk_read_value_1", "disprove_zk_read_value_2", "disprove_zk_correct_hash", "disprove_zk_copied"].iter().all(|n| term.leaf(n).is_ok()));
     let graph = inst.graph(&ctx, OutPoint::null(), &bitcoin::TxOut { value: inst.value, script_pubkey: tree.script_pubkey() }).unwrap();
-    println!("depth {m}: {n_prove} prove leaves, {n_dis} disproves; graph {} pre-signed txs; trees and graph built in {:.2?}", graph.len(), t.elapsed());
+    println!("{m} depths; at {}: {n_prove} prove leaves, {n_dis} disproves; graph {} pre-signed txs; trees and graph built in {:.2?}", sr.depths(), graph.len(), t.elapsed());
 
     // one channel update adding it
     let contract: Arc<dyn ContractOutput> = Arc::new(inst.clone());

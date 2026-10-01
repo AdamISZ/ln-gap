@@ -10,6 +10,10 @@
 //! - the venue's check: the head's state-key signature (head bytes 4..48,
 //!   as blackjack's), the body opening the head's digests (D60), and at
 //!   depth 1 the input words each signed (D61);
+//! - the read challenge (D62): the verifier's opening at 2R + 2
+//!   (`zk_open`), R more rounds, the prover's terminal move at 4R + 3 with
+//!   BitVMX's `zk_read_value_<r>` and `zk_correct_hash`; the instance runs
+//!   to 4R + 3, the proof still due at 2R + 1;
 //! - the input keys' equivocation leaves; `settle` pays the prover.
 //!
 //! An entry is the head, the state key's signature elements (20 bytes
@@ -103,14 +107,27 @@ impl lngap_pos::ext::Family for ZkFamily {
         let s = &self.search;
         if d == 1 {
             vec![pos_leaf("zk_claim".into(), s.claim_leaf(refute))]
-        } else if d % 2 == 0 {
-            vec![pos_leaf("zk_choice".into(), s.choice_leaf(refute, d))]
-        } else if d < s.depths() {
-            vec![pos_leaf("zk_copied".into(), s.copied_leaf(refute, d))]
-        } else {
+        } else if d == s.depths() {
+            // phase 1's record (D59/D60/D61)
             let mut v: Vec<PosLeaf> = final_leaves(l, refute, &self.info).into_iter().map(|f| pos_leaf(f.name, f.script)).collect();
             v.extend(input_leaves(l, refute, &self.input_keys, &self.info).into_iter().map(|f| pos_leaf(f.name, f.script)));
             v
+        } else if d == s.open_depth() {
+            // the read challenge's opening (D62)
+            vec![pos_leaf("zk_open".into(), s.open_leaf(refute))]
+        } else if d == s.total() {
+            // the read challenge's terminal move: the copy, and BitVMX's
+            // read-value and correct-hash challenges (D62)
+            vec![
+                pos_leaf("zk_copied".into(), s.copied_leaf(refute, d)),
+                pos_leaf("zk_read_value_1".into(), s.read_value_leaf(refute, 1)),
+                pos_leaf("zk_read_value_2".into(), s.read_value_leaf(refute, 2)),
+                pos_leaf("zk_correct_hash".into(), s.correct_hash_leaf(refute)),
+            ]
+        } else if d % 2 == 0 {
+            vec![pos_leaf("zk_choice".into(), s.choice_leaf(refute, d))]
+        } else {
+            vec![pos_leaf("zk_copied".into(), s.copied_leaf(refute, d))]
         }
     }
 

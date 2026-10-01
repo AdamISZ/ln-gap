@@ -310,7 +310,7 @@ impl PosInstance {
     pub fn with_family(mut self, f: std::sync::Arc<dyn crate::ext::Family>) -> Result<PosInstance> {
         ensure!(self.game == Game::Zk, "an outside family plays Game::Zk");
         if let Some(fd) = f.final_depth() {
-            ensure!(fd == self.max_depth(), "the family's final depth {fd} is not the instance's last {}", self.max_depth());
+            ensure!(fd <= self.max_depth(), "the family's final depth {fd} is beyond the instance's last {}", self.max_depth());
         }
         self.family = Some(f);
         Ok(self)

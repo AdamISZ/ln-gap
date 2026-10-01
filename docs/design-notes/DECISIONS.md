@@ -3101,6 +3101,81 @@ prover that ran one input and signed another; a signature under another
 key doesn't verify. On regtest the disprove confirmed at 23.0 kvB, and
 the honest signature was rejected.
 
+## D62. The read challenge: BitVMX's second search as phase 2 of the game
+
+Date: 2026-10-01. Agreed with the user ("stick closely to BitVMX's own
+protocol, even if at some point we discover that it's sub-optimal").
+Context: D59 (the proof covers execution, not the truth of the reads),
+D60, ZK_Z3_PLAN.md step 8; `game.rs` (phase 2), `dispute::search_with_read`,
+`tests/zk_read.rs`, `tests/zk_graph.rs`.
+
+**The problem.** The prover's proof at the disputed step k shows that the
+step executes correctly given its reads. A read that claims "address A
+held v, last written at step L" may be false. BitVMX catches this with a
+second n-ary search, steered by the verifier toward the step w that last
+wrote A, and four challenges at its end.
+
+**Decision.** Mirror BitVMX: its search (`NArySearchType::ReadValueChallenge`,
+driven by its decision module) and its challenge scripts, unchanged,
+played in the channel as phase 2 of the same game.
+
+- After phase 1's record (depth 2R + 1) the verifier either claims
+  absence there (forcing the proof, as before) or MOVES at 2R + 2 to open
+  the read challenge. The opening's state restarts the search (BitVMX's
+  initial hash, base 0; the upper hash is zero and never read, since the
+  target is before k) and links phase 1's record by its digest, in the
+  state's `claim` field and the head's second field. `zk_open` (the
+  prover's) fires if it is anything else.
+- R rounds follow, as in phase 1 (the prover's midpoints, the verifier's
+  choices; `zk_copied`, `zk_choice` unchanged, the base bit by the round
+  within the phase). Round 1's midpoint is posted afresh. BitVMX reuses the
+  first search's round-1 hashes, so an honest prover posts the same one.
+- The prover's terminal move at 4R + 3 copies the state. The verifier
+  forces it out with an absence claim, and the parked pair (the last
+  choice, the terminal) carries the verifier's disproves, each over at
+  most two blocks: phase 1's record (against the link in the prior head)
+  and phase 2's final state (against the prior head's state digest), plus
+  the verifier's witness:
+  - `zk_read_value_<r>`: BitVMX's `read_value_challenge`. The witness is
+    the verifier's write W at the step after the base; it fires if W is
+    the prover's committed write there (it hashes lo to hi) and it
+    contradicts read r of the record (the read names that step but W
+    wrote elsewhere or another value, or the read names an earlier step or
+    none but W wrote its address), with the write before k;
+  - `zk_correct_hash`: BitVMX's `correct_hash_challenge`. The witness is
+    the verifier's hash at the base and W; it fires if the prover's hash
+    there differs while the verifier's reaches the prover's next hash;
+  - `zk_copied`.
+  If none fires, the prover's split pays after `delta + delta'`.
+- BitVMX's other two: `EquivocationResign` (the re-signed endpoints differ
+  from those revealed) has nothing to check, since the endpoints are the
+  carried state. `EquivocationHash` (the two searches' hashes at the
+  conflict step differ) arises only when the target is the conflict step
+  itself, i.e. the read claims to have been written at step k, which
+  phase 1's FutureRead already disproves.
+
+The instance runs 4R + 3 depths (hello-world 47; Groth16 about 119); the
+family's final depth (the proof) stays 2R + 1.
+
+**Measured.** BitVMX's own fault cases on hello-world (its tests 35-36),
+binary search. R1, a faked input read at step 1106 claiming a write at
+600: the read search ends at 600, BitVMX chooses ReadValue, and
+`zk_read_value_2` fires. R2, the same with the prover lying in its hashes:
+CorrectHash at 1024, and `zk_correct_hash` fires. R3, an honest prover
+with the challenge forced: neither fires. Script == mirror, with the
+verifier's witness and a wrong one; peak 966. Leaves: zk_open 88 KB,
+zk_read_value 229 KB, zk_correct_hash 156 KB. On regtest (47 depths,
+real entries sealed): R1 read_value 58.8 kvB, R2 correct_hash 40.5 kvB,
+R3 the prover's split 179 vB; the claim about 210 vB and the refutation
+about 36.7 kvB each. A channel update adding the 47-depth contract: 793
+pre-signed transactions, 3,172 signatures, 0.65 MB, 30 s (the big leaves
+rebuilt per commitment version and side; cache the trees per contract).
+
+**Residuals.** Round 1 of phase 2 is posted afresh rather than reused: a
+prover posting a different round-1 hash there than in phase 1 isn't
+caught as such (BitVMX doesn't offer it the chance); the search then
+runs on the hash it posted. Untested on Groth16 end to end.
+
 ## TODO
 
 - **N8 / anchor verification.** Omission, a corrupt root and a private fork are

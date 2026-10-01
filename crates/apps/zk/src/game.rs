@@ -407,9 +407,26 @@ pub struct Search {
 }
 
 impl Search {
-    /// The game's depths: 2R + 1.
+    /// Phase 1's depths, 2R + 1: the last is the disputed step's record.
     pub fn depths(&self) -> u32 {
         2 * self.rounds + 1
+    }
+    /// All depths with the read challenge (D62): phase 1, the verifier's
+    /// opening at 2R + 2, R rounds, the prover's terminal move at 4R + 3.
+    pub fn total(&self) -> u32 {
+        4 * self.rounds + 3
+    }
+    /// The read challenge's opening depth.
+    pub fn open_depth(&self) -> u32 {
+        2 * self.rounds + 2
+    }
+    /// The round a verifier's choice at depth `d` answers, in its phase.
+    pub fn choice_round(&self, d: u32) -> u32 {
+        if d <= 2 * self.rounds {
+            d / 2
+        } else {
+            (d - self.open_depth()) / 2
+        }
     }
     /// The round a verifier depth 2r answers, or a prover depth 2r - 1
     /// opens (its midpoint).
@@ -437,7 +454,7 @@ impl Search {
     /// The verifier's choice at depth 2r: left (lo, mid) or right (mid, hi).
     pub fn choice(&self, prior: &Entry, right: bool) -> Entry {
         let d = prior.depth + 1;
-        let r = d / 2;
+        let r = self.choice_round(d);
         let (s, mid) = (prior.state, prior.second());
         let state = if right { State { lo: mid, base: s.base | self.bit(r), ..s } } else { State { hi: mid, ..s } };
         self.entry(d, state, state.claim, None, None)
@@ -462,7 +479,7 @@ impl Search {
     /// `zk_choice` at verifier depth 2r: the new state isn't one of the two
     /// halves of the prior's interval at its midpoint.
     pub fn choice_fires(&self, prior: &Entry, new: &Entry) -> bool {
-        let r = new.depth / 2;
+        let r = self.choice_round(new.depth);
         let (s, n, mid) = (prior.state, new.state, prior.second());
         let left = n.lo == s.lo && n.hi == mid && n.base == s.base;
         // nibble-wise, as the leaf checks it: base's nibble holding bit r
@@ -606,7 +623,7 @@ impl Search {
     pub fn choice_leaf(&self, key: &WotsPublic, d: u32) -> ScriptBuf {
         let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
         let p = l.prior.expect("a choice is at depth >= 2");
-        let r = d / 2;
+        let r = self.choice_round(d);
         let (s, n, f) = (0usize, 2 * BLOCK, 4 * BLOCK);
         let mid = f + head_nibbles(p, H_SECOND, 20)[0];
         let (k, v) = self.base_nibble(r);
@@ -689,8 +706,13 @@ pub enum Blk {
     State,
     /// Against the final head's record digest.
     Record,
-    /// Against the claim digest the prior (verifier's) head repeats.
+    /// Against the claim digest the prior (verifier's) head repeats. In
+    /// the read challenge (D62) that field links phase 1's record, so this
+    /// block is then the record (its bytes at the record's offsets).
     Claim,
+    /// Against the NEW head's state digest (a verifier's own move, D62's
+    /// opening).
+    NewState,
 }
 
 /// A final-depth leaf's input: a nibble of a block or of the claimant's
@@ -701,6 +723,10 @@ pub enum FIn {
     Rec(usize),
     Cl(usize),
     Wit(usize),
+    /// A nibble of the new head's state block.
+    Ns(usize),
+    /// A nibble of the register file (the parked heads).
+    File(usize),
     /// A digit of the signed message verified first (D61: an input word).
     Pre(usize),
     K(i64),
@@ -736,6 +762,7 @@ pub fn final_leaf_pre(l: &Layout, key: &WotsPublic, pre: Option<&WotsPublic>, bl
             FIn::St(i) => Some((Blk::State, i)),
             FIn::Rec(i) => Some((Blk::Record, i)),
             FIn::Cl(i) => Some((Blk::Claim, i)),
+            FIn::Ns(i) => Some((Blk::NewState, i)),
             _ => None,
         }
     };
@@ -744,12 +771,13 @@ pub fn final_leaf_pre(l: &Layout, key: &WotsPublic, pre: Option<&WotsPublic>, bl
             Blk::State => head_nibbles(p, H_STATE, 20).into_iter().map(|i| file_at + i).collect(),
             Blk::Record => head_nibbles(l.new, H_SECOND, 20).into_iter().map(|i| file_at + i).collect(),
             Blk::Claim => head_nibbles(p, H_SECOND, 20).into_iter().map(|i| file_at + i).collect(),
+            Blk::NewState => head_nibbles(l.new, H_STATE, 20).into_iter().map(|i| file_at + i).collect(),
         }
     };
     let first = blocks[0];
     // early: the first block's inputs and the witness's (both gone before
     // the checks); late: the second block's (copied when it is alone)
-    let early: Vec<usize> = (0..inputs.len()).filter(|&j| matches!(inputs[j], FIn::Wit(_)) || of(&inputs[j]).is_some_and(|(b, _)| b == first)).collect();
+    let early: Vec<usize> = (0..inputs.len()).filter(|&j| matches!(inputs[j], FIn::Wit(_) | FIn::File(_)) || of(&inputs[j]).is_some_and(|(b, _)| b == first)).collect();
     let late: Vec<usize> = (0..inputs.len()).filter(|&j| n == 2 && of(&inputs[j]).is_some_and(|(b, _)| b == blocks[1])).collect();
     for x in inputs {
         if let Some((b, _)) = of(x) {
@@ -774,6 +802,7 @@ pub fn final_leaf_pre(l: &Layout, key: &WotsPublic, pre: Option<&WotsPublic>, bl
         .iter()
         .map(|&j| match inputs[j] {
             FIn::Wit(i) => wit_at + i,
+            FIn::File(i) => file_at + i,
             x => {
                 let (_, i) = of(&x).unwrap();
                 i
@@ -838,8 +867,170 @@ pub fn final_leaf_witness(blocks: &[Blk], state: &State, record: &Record, claim:
             Blk::State => state.to_bytes(),
             Blk::Record => record.to_bytes(),
             Blk::Claim => claim.to_bytes(),
+            Blk::NewState => state.to_bytes(),
         }));
     }
     w.extend(nibble_witness(wit));
     w
+}
+
+// ----- the read challenge (D62): BitVMX's second search as phase 2 -----
+
+/// A right-hand side in an equality check: another input, or a constant.
+#[derive(Clone, Copy, Debug)]
+pub enum Rhs {
+    I(usize),
+    K(u8),
+}
+
+/// A check over `n` inputs (consumed): passes iff NOT all of `eqs` hold
+/// (input `a` equals the right-hand side): a disprove's verdict.
+pub fn not_all_equal_script(n: usize, eqs: &[(usize, Rhs)]) -> ScriptBuf {
+    let mut t = Tracked::new(Builder::new(), n);
+    t.b = t.b.push_opcode(OP_PUSHNUM_1);
+    t.len += 1;
+    for &(a, rhs) in eqs {
+        t.b = t.b.push_int((t.len - 1 - a) as i64).push_opcode(OP_PICK);
+        t.len += 1;
+        match rhs {
+            Rhs::I(b) => t.b = t.b.push_int((t.len - 1 - b) as i64).push_opcode(OP_PICK),
+            Rhs::K(v) => t.b = t.b.push_int(i64::from(v)),
+        }
+        t.b = t.b.push_opcode(OP_EQUAL).push_opcode(OP_BOOLAND);
+        t.len -= 1;
+    }
+    t.b = t.b.push_opcode(OP_NOT).push_opcode(OP_VERIFY);
+    t.len -= 1;
+    t.drop(n).b.into_script()
+}
+
+impl Search {
+    /// The verifier's opening of the read challenge (depth 2R + 2), after
+    /// phase 1's record: the state restarts the search (BitVMX's initial
+    /// hash, base 0; the upper hash is never read, since the target is
+    /// before the disputed step, and is zero) and links phase 1's record,
+    /// in the state's `claim` field and the head's second field.
+    pub fn open(&self, last: &Entry) -> Entry {
+        let link = last.second();
+        let state = State { lo: initial_hash(), hi: [0; 20], base: 0, claim: link };
+        self.entry(self.open_depth(), state, link, None, None)
+    }
+    /// `zk_open`: the opening isn't (H0, 0, 0, the record's digest), or
+    /// its head doesn't repeat the link.
+    pub fn open_fires(prior: &Entry, new: &Entry) -> bool {
+        let s = &new.state;
+        !(s.lo == initial_hash() && s.hi == [0; 20] && s.base == 0 && s.claim == prior.second() && new.second() == s.claim)
+    }
+    /// The prover's terminal move (depth 4R + 3): the state copied.
+    pub fn terminal(&self, prior: &Entry) -> Entry {
+        self.entry(self.total(), prior.state, [0; 20], None, None)
+    }
+
+    /// `zk_open` in Script: the new head's state (one block) against the
+    /// file's link fields.
+    pub fn open_leaf(&self, key: &WotsPublic) -> ScriptBuf {
+        let d = self.open_depth();
+        let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
+        let p = l.prior.expect("depth >= 2");
+        let mut inputs: Vec<FIn> = (0..2 * BLOCK).map(FIn::Ns).collect();
+        inputs.extend(head_nibbles(p, H_SECOND, 20).into_iter().map(FIn::File));
+        inputs.extend(head_nibbles(l.new, H_SECOND, 20).into_iter().map(FIn::File));
+        let h0 = nibbles_of(&initial_hash());
+        let (prior2, new2) = (2 * BLOCK, 2 * BLOCK + 40);
+        let mut eqs: Vec<(usize, Rhs)> = vec![];
+        eqs.extend((0..40).map(|k| (2 * S_LO + k, Rhs::K(h0[k]))));
+        eqs.extend((0..40).map(|k| (2 * S_HI + k, Rhs::K(0))));
+        eqs.extend((0..8).map(|k| (2 * S_BASE + k, Rhs::K(0))));
+        eqs.extend((0..40).map(|k| (2 * S_CLAIM + k, Rhs::I(prior2 + k))));
+        eqs.extend((0..40).map(|k| (new2 + k, Rhs::I(2 * S_CLAIM + k))));
+        final_leaf(&l, key, &[Blk::NewState], 0, &inputs, &not_all_equal_script(inputs.len(), &eqs))
+    }
+
+    /// `zk_read_value_<r>` at the terminal depth: phase 1's record (the
+    /// reads; against the link) and phase 2's final state (against the
+    /// prior head), and the verifier's write W at the step after the
+    /// state's base (26 nibbles: address, value, pc, micro byte). BitVMX's
+    /// `read_value_challenge` unchanged.
+    pub fn read_value_leaf(&self, key: &WotsPublic, r: u8) -> ScriptBuf {
+        let d = self.total();
+        let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
+        let inputs = [
+            fin(FIn::Cl, R_R1A, 4),
+            fin(FIn::Cl, R_R1V, 4),
+            fin(FIn::Cl, R_LS1, 8),
+            fin(FIn::Cl, R_R2A, 4),
+            fin(FIn::Cl, R_R2V, 4),
+            fin(FIn::Cl, R_LS2, 8),
+            vec![FIn::K(i64::from(r))],
+            fin(FIn::St, S_LO, 20),
+            (0..26).map(FIn::Wit).collect(),
+            fin(FIn::St, S_HI, 20),
+            vec![FIn::K(0); 8],
+            fin(FIn::St, S_BASE, 4),
+            vec![FIn::K(0); 8],
+            fin(FIn::Cl, R_STEP, 4),
+        ]
+        .concat();
+        let mut st = bitcoin_script_stack::stack::StackTracker::new();
+        bitcoin_script_riscv::riscv::challenges::read_value_challenge(&mut st);
+        final_leaf(&l, key, &[Blk::Claim, Blk::State], 26, &inputs, &st.get_script())
+    }
+
+    /// `zk_correct_hash` at the terminal depth: phase 2's final state, and
+    /// the verifier's hash at the base and write W after it (66 nibbles).
+    /// BitVMX's `correct_hash_challenge` unchanged.
+    pub fn correct_hash_leaf(&self, key: &WotsPublic) -> ScriptBuf {
+        let d = self.total();
+        let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
+        let inputs = [fin(FIn::St, S_LO, 20), (0..66).map(FIn::Wit).collect(), fin(FIn::St, S_HI, 20)].concat();
+        let mut st = bitcoin_script_stack::stack::StackTracker::new();
+        bitcoin_script_riscv::riscv::challenges::correct_hash_challenge(&mut st);
+        final_leaf(&l, key, &[Blk::State], 66, &inputs, &st.get_script())
+    }
+}
+
+/// The verifier's write as BitVMX's challenges take it (13 bytes).
+pub fn write_bytes(w: &Step) -> [u8; 13] {
+    w.to_bytes()
+}
+
+/// `zk_read_value_<r>`'s mirror (BitVMX's `read_value_challenge`): the
+/// write step (base + 1) is before the disputed step, W is the prover's
+/// committed write there (it hashes lo to hi), and it contradicts read r:
+/// the read names this step but W wrote elsewhere or another value, or the
+/// read names an earlier step (or none) but W wrote its address.
+pub fn read_value_fires(record: &Record, state: &State, w: &Step, r: u8) -> bool {
+    let write_step = u64::from(state.base) + 1;
+    let (addr, value, ls) = if r == 1 { (record.read.read_1_addr, record.read.read_1_value, record.last_step_1) } else { (record.read.read_2_addr, record.read.read_2_value, record.last_step_2) };
+    let never = crate::challenges::NEVER;
+    let contradicts = (ls == write_step && (w.write_addr != addr || w.write_value != value)) || ((ls == never || ls < write_step) && w.write_addr == addr);
+    u64::from(state.base) < u64::from(record.step) && contradicts && crate::step_hash(&state.lo, w) == state.hi
+}
+
+/// `zk_correct_hash`'s mirror: the prover's hash at the base isn't the
+/// verifier's, yet the verifier's hash and W reach the prover's next hash.
+pub fn correct_hash_fires(state: &State, verifier_hash: &[u8; 20], w: &Step) -> bool {
+    state.lo != *verifier_hash && crate::step_hash(verifier_hash, w) == state.hi
+}
+
+/// Phase 2's entries from BitVMX's read search, after phase 1's: the
+/// opening, each round's midpoint and choice, the terminal move.
+pub fn play_read(read: &crate::dispute::ReadSearched, search: &Search, phase1: &[Entry]) -> anyhow::Result<Vec<Entry>> {
+    let h = |s: &str| -> anyhow::Result<[u8; 20]> { hex::decode(s)?.try_into().map_err(|_| anyhow::anyhow!("a hash is 20 bytes")) };
+    anyhow::ensure!(read.rounds.len() as u32 == search.rounds, "the read search ran {} rounds", read.rounds.len());
+    let mut v = vec![search.open(phase1.last().expect("phase 1 played"))];
+    for (hashes, bits) in &read.rounds {
+        anyhow::ensure!(hashes.len() == 1, "binary search: one hash per round");
+        let mid = search.midpoint(v.last().unwrap(), h(&hashes[0])?);
+        v.push(mid);
+        let c = search.choice(v.last().unwrap(), *bits == 1);
+        v.push(c);
+    }
+    let last = v.last().unwrap().clone();
+    anyhow::ensure!(
+        (last.state.lo, last.state.hi, u64::from(last.state.base)) == (read.step_hash, read.next_hash, read.step),
+        "the game's final interval is not the read search's"
+    );
+    v.push(search.terminal(&last));
+    Ok(v)
 }
