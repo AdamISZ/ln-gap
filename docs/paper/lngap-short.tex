@@ -1,7 +1,6 @@
 \documentclass[11pt]{article}
 \usepackage[margin=1.1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
-\usepackage{hyperref}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage[protrusion=true,expansion=false]{microtype}
@@ -13,7 +12,7 @@
 \usepackage[normalem]{ulem}
 \usetikzlibrary{arrows.meta,positioning,fit,shapes.geometric,calc}
 \usepackage{listings}
-
+\usepackage{hyperref}
 \hypersetup{colorlinks=true, linkcolor=blue!60!black, urlcolor=blue!60!black, citecolor=blue!60!black}
 
 \titleformat{\section}{\large\bfseries}{\thesection.}{0.7em}{}
@@ -59,7 +58,7 @@
 
 \section{Abstract}
 
-We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection), based on the use of a proof of publication ledger governed by a threshold of validators. The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry in the ledger, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing of entries in the ledger requires only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trust-minimised: they rely on the honesty of a majority of the PoP ledger validators (a committee that can be drawn at random, per contract, from a large bonded roster), whose misbehaviour is attributable and who themselves are not required to execute the contract or program, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by bonds (timelocked funds which can optionally be made burnable).
+We propose, without any consensus change to Bitcoin, offchain bilateral contracts in Bitcoin that depend on arbitrary computation, calling this general paradigm LN-GAP (Lightning Network governed by arbitrary programs). That general idea is not new but we describe here a distinct mechanism to achieve O(1)-transactions to resolve disputed contracts onchain (that is, there is no onchain bisection). The onchain dispute resolution depends on a threshold attestation of the validators to absence of a published entry, and a 1 of $n$ positive signature over the entry in a novel way (we call this an elliptic curve one time signature, or EC-OTS), and in so doing allows the application of the ForceMove paradigm for the offchain game with an independent timeout clock that does not rely on facts about the Bitcoin chain itself (thus not requiring Bitcoin SPV proofs). The advantages of this construction are: publishing of entries requires only 1 of $n$ liveness, contracts are fully denominated in bitcoin and trust-minimised: they rely on the honesty of a majority of the venue members (a committee that can be drawn per contract from a large bonded roster), whose misbehaviour is attributable and who themselves are not required to execute the contract or program, and fraudulent equivocation is provable. Those validators are motivated by both positive fees (paid, in bitcoin, atomically with publication in LN channels) and negatively by timelocked bonds, reputation loss (attributed fraud) and optionally burning bonds to miner fees.
 
 \section{Introduction}
 
@@ -71,7 +70,7 @@ What's missing? Lightning already provides private, fast and cheap payments. In 
 The customer wants to pay a storage service provider once per day, in sats, but wants the service provider to prove that they are upholding their agreement (with a response to a challenge for an inclusion proof), and if they fail to do so after a time window, their deposit can be taken.
 \end{quote}
 
-This is basically ``\underline{Filecoin without an altcoin}'', as outlined in the long version of this paper (Section~\ref{sec:storage}).
+This is basically ``\underline{Filecoin without an altcoin}'', although arguably better. See Section~\ref{sec:storage}.
 
 \subsection{The problem of 2-party games on Lightning}
 
@@ -79,7 +78,7 @@ Suppose you want to play a game on Lightning, like chess, for a monetary reward,
 
 I mention chess not because it's a good game to bet on (it isn't!) but because it's a game that's sufficiently complex that expressing it in onchain transactions (most specifically, proving that a move is illegal; proving that a move is legal would be way worse!) gets very expensive and we want to avoid it.
 
-That such games can be played on chain at all, in today's Bitcoin, was shown by Poelstra~\cite{poelstrastate}: each player signs the next game state with a one-time (Lamport) signature, which Script can read, and a script checks that successive states are related by the rules, so tic-tac-toe needs 27 pre-signed transactions rather than one per path through the game tree (about 550,000), and the same approach extends in principle to chess. His distinction between ``Small Script'', expressive arithmetic on 32-bit values that cannot see the transaction, and ``Big Script'', which can, through \texttt{OP\_CHECKSIG}, is a useful lens for what follows: the predicates that judge a move here are Small Script over one-time-signed state, and only the payout is Big Script. What that work leaves open is the one-move-per-transaction pace of play on chain, which is the subject of the rest of this section.
+That such games can be played on chain at all, in today's Bitcoin, was described by Poelstra~\cite{poelstrastate}: each player signs the next game state with a one-time (Lamport) signature, which Script can read, and a script checks that successive states are related by the rules, so tic-tac-toe needs 27 pre-signed transactions rather than one per path through the game tree (about 250,000), and the same approach extends in principle to chess. His distinction between ``Small Script'', expressive arithmetic on 32-bit values that cannot see the transaction, and ``Big Script'', which can, through \texttt{OP\_CHECKSIG}, is a useful lens for what follows: the predicates that judge a move here are Small Script over one-time-signed state, and only the payout is Big Script. What that work leaves open is the one-move-per-transaction pace of play on chain, which is the subject of the rest of this section.
 
 One approach to doing this offchain is called ForceMove~\cite{forcemove}. The idea is relatively simple: behave optimistically, and fallback to onchain transactions as the arbiter if your opponent does not follow the rules you agreed to. The reason for its name is that, once on-chain, the opponent is \emph{forced to move} by having a timeout expressed in the blockchain's consensus logic. So in Bitcoin this would mean that the Script controlling the funds has a shape like: 
 
@@ -105,7 +104,7 @@ But the problem with ForceMove, which is not exposed in the Lightning payments c
 \item Bob \emph{does} respond, with a valid move \ldots
 \end{itemize}
 
-\ldots now Alice is stuck playing the game onchain; a chess game can easily take 50-100 moves by both sides. If Bob is adversarial he will know that Alice will not want either the transaction cost nor especially the delay implicit in doing all of those moves onchain (she intended to play offchain, which can be near immediate), so he could bribe her. This would be much more relevant if the game is really financially motivated (\$ 1000 bet), and in case where we are at move 30 and Bob knows for sure he's losing; instead of resigning he says to Alice ``here, I'm generous, take \$ 800 and I'll take \$ 200, otherwise, we're going to chain''.
+\ldots now Alice is stuck playing the game onchain; a chess game can easily take 50-100 moves by both sides. If Bob is adversarial he will know that Alice will not want either the transaction cost or especially the delay implicit in doing all of those moves onchain (she intended to play offchain, which can be near immediate), so he could bribe her. This would be much more relevant if the game is really financially motivated (\$ 1000 bet), and in a case where we are at move 30 and Bob knows for sure he's losing; instead of resigning he says to Alice ``here, I'm generous, take \$ 800 and I'll take \$ 200, otherwise, we're going to chain''.
 
 The point is not that that scenario is particularly realistic, the point is that \textbf{going onchain is a viable threat for an adversary}, in general, and that's why I say ``ForceMove is not the full solution''.
 
@@ -118,12 +117,12 @@ There's a nuance here worth being precise about:
 \begin{itemize}
 
 \item If one side forces on-chain, publishing a dispute transaction, and says ``the other guy didn't follow the rules! here's proof'', with a signed attestation by the counterparty of an illegal move, no problem: the court can adjudicate the dispute.
-\item If one side forces-on chain, publishing a dispute transaction, and says ``the other guy didn't send his move'', that's very different. How does the ``court'' (blockchain) know whether the move was sent or not? Clearly that's impossible, so the court has to treat both sides fairly, and insist they play out their moves. \uline{We have reverted to exactly the same problem we had in vanilla ForceMove}.
+\item If one side forces on-chain, publishing a dispute transaction, and says ``the other guy didn't send his move'', that's very different. How does the ``court'' (blockchain) know whether the move was sent or not? Clearly that's impossible, so the court has to treat both sides fairly, and insist they play out their moves. \uline{We have reverted to exactly the same problem we had in vanilla ForceMove}.
 \end{itemize}
 
-From this reasoning it's clear: to solve the problem of that last case, we need an \uline{objective fact} that the court can assess, not hearsay. That objective fact must take the form ``by the count of some external attestation, the counterparty did not post a move before the deadline''. In the next section we'll examine two different ways to create that external attestation.
+From this reasoning it's clear: to solve the problem of that last case, we need an \uline{objective fact} that the court can assess, not hearsay. That objective fact must take the form ``by the count of some external attestation, the counterparty did not post a move before the deadline''. In the next section we'll examine two different ways to create that external attestation on what we'll henceforth call the ``\textbf{venue}''.
 
-The following diagram (Figure~\ref{fig:highlevel}) shows at a high-level how this logic can be enforced in a single ``contract output'' embedded in a Lightning channel. The most important point is that ``the counterparty did not move before the deadline'' is being attested to by an external ``venue''.
+The following diagram (Figure~\ref{fig:highlevel}) shows at a high-level how this logic can be enforced in a single ``contract output'' embedded in a Lightning channel. The most important point is that ``the counterparty did not move before the deadline'' is being attested to by an external venue.
 
 \begin{figure}[H]
 \centering
@@ -178,22 +177,47 @@ The alternative is to reach consensus over a quorum, on the list of published va
 
 It turns out that with careful thought, it's possible to construct a version of this that is both sufficiently efficient to enforce the necessary rules in Script, and also that has the right kind of both positive and negative incentives, purely measured in bitcoin, without inserting a new altcoin.
 
-A naive idea of how to do this hits a snag: Bitcoin Script can read Winternitz signatures in a couple of kilobytes; weighty but OK. It cannot, directly, read Schnorr or BLS signatures on arbitrary messages (the former without CHECKSIGFROMSTACK, the latter .. well that would be a much bigger consensus update!). The latter two can support an aggregated signature; the former (Winternitz, or Lamport) cannot. To assess 66 out of 100 Winternitz signatures in a Bitcoin signature seems patently absurd.
+A naive idea of how to do this hits a snag: Bitcoin Script can read Winternitz signatures in a couple of kilobytes; weighty but OK. It cannot, directly, read Schnorr or BLS signatures on arbitrary messages (the former without CHECKSIGFROMSTACK, the latter .. well that would be a much bigger consensus update!). The latter two can support an aggregated signature; the former (Winternitz, or Lamport) cannot. To assess 66 out of 100 Winternitz signatures in a Bitcoin script seems patently absurd.
 
-Therefore we consider the natural question: can you reproduce the one-time nature of hash-based OTS schemes in an elliptic curve context? We claim that you can, using something we'll call EC-OTS; the detailed construction is in the long version of the paper. That construction might be of independent interest, since it gives the same basic effect as a hash-based WOTS, but using EC curve points instead.
+Therefore we consider the natural question: can you reproduce the one-time nature of hash-based OTS schemes in an elliptic curve context? We claim that you can, using something we'll call EC-OTS; the details are in Section~\ref{sec:ecots}.
 
-But taking that construction and saying ``we'll have a $\frac{2}{3}$ threshold attest to state updates in an EC OTS verifiable in Script'' really doesn't give you what you need.
+But taking that construction and saying ``we'll have a $\frac{2}{3}$ threshold attest to state updates in an EC-OTS verifiable in Script'' really doesn't give you what you need.
 
 What you need:
 
 \begin{itemize}
-\item \textbf{Liveness} : can never be promised, just like in a proof of work chain, but if \emph{any} member of the validator set can enter your publication in a slot, then some approximate ``1 of $n$ liveness'' can be claimed, and this is an acceptable security model.
-\item \textbf{A large enough quorum}: Credibility of the above as well as what follows, requires some relatively large, heterogeneous and ideally permissionless-entry set of validators. This naturally leads to thinking of FROST-style thresholds, with O(1) publication, but (see next entry) that is not actually viable and so we go with a trick to make thresholds of 50 of 100 be viable. Even figures 10 times higher than that are \emph{theoretically} possible, but in practice we would not go much higher.\footnote{Section~\ref{sec:accountable} returns to this: a large, dynamic set need not be verified in Script at all, if its role is to make a small, Script-legible committee accountable.}
-\item \textbf{Fraud is attributable}: this is the reason why a naive FROST-style threshold is unworkable: by its nature, such a threshold signature cannot reveal which members of the validator set committed the fraud. And punishing the entire set of such members when only a threshold have committed the fraud, is clearly unworkable. To make fraud attribution feasible we use what we call a ``one-bit signature'':  $t$ of $n$ OP\_CHECKSIGADD operations can prove that a binary true/false was attested to. More on that in a moment.
-\item \textbf{Positive incentives in bitcoin}: this is possible in a more general ``sidechain'' model (pay fees to move around coins on the sidechain), but this is not a sidechain, nor any kind of blockchain: the only consensus maintained on the ledger is the canonical history of publications; the semantics of the publications are none of its business. Here we have validators post bonds on bitcoin (timelocked coins) and receive fees for its publication efforts, atomically with those publications, over Lightning channels, using adaptors. This incentivizes honest participation and disincentivizes fraud or dishonesty.
+\item \textbf{Liveness} : can never be promised, just like in a proof of work chain, but if \emph{any} member of the validator set can enter your publication in a time window, then some approximate ``1 of $n$ liveness'' can be claimed, and this is an acceptable security model.
+\item \textbf{A large enough quorum}: Credibility of the above as well as what follows, requires some relatively large, heterogeneous and probably permissionless-entry set of validators. This naturally leads to thinking of FROST-style thresholds, with O(1) publication, but (see next entry) that is not actually viable and so we go with a trick to make thresholds of 50 of 100 be viable. Even figures 10 times higher than that are \emph{theoretically} possible, but in practice we would not go much higher.\footnote{The long version of this paper returns to this: a large, dynamic set need not be verified in Script at all, if its role is to make a small, Script-legible committee accountable.}
+\item \textbf{Fraud is attributable}: this is the reason why a naive FROST-style threshold is unworkable: by its nature, such a threshold signature cannot reveal which members of the validator set committed the fraud. And punishing the entire set of such members when only a threshold have committed the fraud, is unacceptable. To make fraud attribution feasible we use what we call a ``one-bit signature'':  $t$ of $n$ OP\_CHECKSIGADD operations can prove that a binary true/false was attested to. More on that in a moment.
+\item \textbf{Positive incentives in bitcoin}: this is possible in a more general ``sidechain'' model (pay fees to move around coins on the sidechain), but this is not a sidechain, nor any kind of blockchain: the only consensus maintained is ``did this event get published?''; the semantics of the publications are none of its business. Here we \emph{can} have validators post bonds on bitcoin\footnote{though, as we shall see, there are strong arguments to also use public entities with reputations} (timelocked coins) and receive fees for their publication efforts, atomically with those publications, over Lightning channels, using adaptors. This incentivizes honest participation and disincentivizes fraud or dishonesty.
 \end{itemize}
 
-You may be wondering why we insist on \emph{attributable} fraud. Without attribution, users of the ledger cannot discern which members they do not want to use in future, if something fraudulent is published. With attribution, a member caught contradicting itself is ejected: it loses its future fees while its bonded coins (coins locked to a CLTV output) sit out their timelock. It's possible to go further, as an option: equivocation evidence can be made to unlock the bonded coins to anyone, but without covenants this is not a simple burn, it is a miner fee-race burn: since the evidence is public, any miner can include its own spend paying the whole bond as fee, so the money game-theoretically ends up with the miner of the first eligible block, and the cheater recovers it only by mining that block itself. We do not make this the baseline (Section~\ref{sec:venue}).
+You may be wondering why we insist on \emph{attributable} fraud. Without attribution, users of the venue cannot discern which members they do not want to use in future, if something fraudulent is published. With attribution, a member caught contradicting itself is ejected: it loses its future fees while its bonded coins (coins locked to a CLTV output) sit out their timelock, or its reputation is burned. It's possible to go further, as an option: equivocation evidence can be made to unlock the bonded coins to anyone, but without covenants this is not a simple burn, it is a miner fee-race burn: since the evidence is public, any miner can include its own spend paying the whole bond as fee, so the money game-theoretically ends up with the miner of the first eligible block, and the cheater recovers it only by mining that block itself. We do not include this in the architecture described, but it is a possible additional feature.
+
+\section{EC-OTS: one-time signatures on curve points}
+\label{sec:ecots}
+
+Since the introduction of BitVM ideas, we know the paradigm: in the absence of \op{CHECKSIGFROMSTACK}, our best way of dumping a message onto the stack with proof that it was attested by a key owner, is to construct a Lamport/Winternitz signature out of hashes, and the signing event consists of revealing preimages for digit chunks or bits, in the witness of a spending transaction.
+
+This author's original idea was started with the hypothetical of ``can the venue threshold attest using FROST, in Script?'' and wondering how that attestation might make it onto the stack. Though that application of the idea turns out to be bogus, a related idea is very useful: transaction fees for attestations become atomic once the signature is EC-based instead of hash based.
+
+Basically, EC-OTS turns ``knows the discrete log of these points'' into ``attests this value''.
+
+\paragraph{The table.} The venue has a key $X = xG$. For each move of each contract it publishes in advance, for every digit $j$ of the move's head\footnote{We use ``head'' to mean the chunk of data the mover posts; it is not only a move, but also the game or contract state, basically.} (a nibble, $96$ of them for a $48$ byte head) and every value $v \in \{0,\dots,15\}$, an \emph{anticipation point}
+\[
+A_{j,v} = R_{j,v} + e_{j,v}X, \qquad R_{j,v} = r_{j,v}G, \quad e_{j,v} = H(R_{j,v}, X, \langle\text{contract}, \text{move}, j, v\rangle).
+\]
+
+\paragraph{Attesting.} To attest that digit $j$ of the move holds $v$, a member reveals $a_{j,v} = r_{j,v} + e_{j,v}x$. This is a Schnorr signature (with nonce $R_{j,v}$) on the statement ``digit $j$ holds $v$'', whose value is also the discrete log of $A_{j,v}$. Sealing a move means revealing one such scalar per digit.
+
+\paragraph{Reading it in Script.} In a dispute, the mover's Winternitz signature over the head puts the head's digits $v_j$ on the stack; each digit selects $A_{j,v_j}$ from the $16$ points for its position, written into the script as constants, and the spender signs the transaction with $a_{j,v_j}$ as a private key, checked by one \op{CHECKSIG} under $A_{j,v_j}$. The spend is valid only if the venue revealed exactly the scalars for this head. (The $16$ points per position are most of the refutation's size in Table~\ref{tab:sizes}.)
+
+\paragraph{One-time.} Revealing two values at the same position is an equivocation, provable by anyone holding both scalars, since each checks against its published point. Each value has its own nonce, so a second value reveals nothing about $x$; with one nonce per position, as in the standard DLC construction, two values would leak the key, which here is shared by every member.
+
+\paragraph{Relatives.} The mechanism is the anticipation points of Discreet Log Contracts~\cite{dlc}, decomposed into digits; the one-time idea is that of Lamport and Winternitz signatures, with curve scalars in place of hash preimages.
+
+\paragraph{Attribution.} Every member holds the same content key, so any member can seal any move (1 of $n$). To say \emph{which} member sealed, each member also has a per-move \emph{proposer point} $P_i = p_iG$ and reveals $p_i$ in its seal; and to flag a move as not published by its due time, a per-move \emph{flag point} $F_i$ whose secret it reveals. These are one-bit versions of the same idea: a point whose secret is revealed, or not. $t$ of $n$ flags are counted in Script with \op{CHECKSIGADD}, each naming its member.
+
 
 \section{What the venue is not, and a useful prior: DLCs and oracles}
 \label{sec:venue}
@@ -204,76 +228,60 @@ To get the obvious out of the way: it's not a proof of stake \emph{blockchain} a
 
 But the deeper disanalogy is that the venue we propose isn't even a proof of publication ledger. It doesn't need to enforce uniqueness of attestations; equivocating attestations are adjudicated within the channel contract. It only has to establish ``X was published in this time window''.
 
-The venue answers, per move of each contract, the two questions a dispute asks:
-\emph{what} was published, and \emph{whether it was published in time}.
-The two answers come from different mechanisms.
-
-In the terms of Discreet
-Log Contracts~\cite{dlc}, the venue \emph{is} a federation of oracles: each move's content is an outcome attested by one member under anticipation points\footnote{We'll shortly see that this is crucial for the incentives of the system} published in advance, and each move's timeliness is a one-bit outcome attested by a majority.
-
-However what is attested --- publication/non-publication within a window --- is of a profoundly different character than a typical oracle attestation (the price of oil in dollars at time $T$).
-
-Let's briefly review those two points:
+\paragraph{What a venue is also not: a federated sidechain.} This is a natural thought: with a majority attesting, then why bother with complexity? It comes back to a quorum deciding everything. But no: 
 
 \begin{itemize}
-\item The content of the attestation, or the player's ``move'', is a string that can be fed into Script in a form that can allow adjudication of the contract rules; it's not an arbitrary fact that Bitcoin can't read.
-\item The key property is
-that the fact concerns the \emph{action of the party who benefits from
-it}. A mover's entry, posted in an \texttt{OP\_RETURN}, proves that the
-mover published it by that block: the mover signed it and Bitcoin dates
-it. An oil price posted to Bitcoin proves only that someone claimed that
-price. Publication is \emph{self-certifying}; a price is not, since
-nobody can produce evidence of ``the price at noon'', only report it.
+\item The federation owns the coins. It can steal all of them, at once, unilaterally (unilaterally with respect to its users, that is). It's crucial to notice that a venue of the type we describe cannot cheat two parties if neither are colluding with a majority of its members.
+\item Just another aspect of the above, but a hugely important one: a federation can also freeze any coins it likes. This is practically relevant because of the next bullet point; and note that the Liquid~\cite{liquid} sidechain, for example, only allowed withdrawals to whitelisted addresses. In this scenario freezing is less a theoretical risk and more an inevitability.
+\item Federations are comprised of static legal entities, or at least known persons. This prevents the thing that could make them most trustworthy: \emph{permissionless entry}. We achieve this specifically by tying membership to Bitcoin utxos, which means that Sybil is only prevented economically, but allows better trustlessness at scale.
 \end{itemize}
 
-The proof of concept has one fixed set of members;
-Section~\ref{sec:roster} proposes drawing each contract's members from
-a larger bonded roster instead.
+The venue's responsibility is isolated: it answers, per move of each contract, the two questions a dispute asks:
+\emph{what} was published, and \emph{whether it was published in time}. By the same token, the functionality it provides is not as broad as that of a sidechain or rollup. We will briefly discuss this further in Section~\ref{sec:zk}.
 
-Facts can always be widely known (like, the price of oil is not 1M USD per barrel) and self-publication, with signatures, likewise. That isn't a fundamental difference in either direction. However manipulation does not apply on a self-publication, whereas the price of oil at a particular exchange can be manipulated, especially short term.
+\paragraph{The DLC comparison}. In the terms of Discreet
+Log Contracts~\cite{dlc}, the venue \emph{is} a temporary committee of oracles. While each move's \emph{content} is bound to the attestation of one member with anticipation points\footnote{We'll shortly see that this is crucial for the incentives of the system} published in advance, the actual substance of each member's attestation is \underline{the move's timeliness}, not its content, the latter being signed by the mover.
 
-The following table summarizes the comparison:
+Notice therefore that what is attested --- publication/non-publication within a window --- is of a profoundly different character than a typical oracle attestation (the price of oil in dollars at time $T$):
 
-\begin{center}
-\small
-\begin{tabular}{>{\raggedright\arraybackslash}p{50mm}>{\raggedright\arraybackslash}p{38mm}>{\raggedright\arraybackslash}p{46mm}}
-\toprule
- & price-feed DLC & the venue's per-move attestation \\
-\midrule
-can the interested party produce proof? & no & yes, for publication (not for absence) \\
-manipulating the underlying & a real attack & not applicable, apart from network attacks \\
-what the oracle decides & the payout directly & timing only; content is cryptographic \\
-can a lie be aimed at one contract? & no: it is broadcast & yes, silently (mitigated by sampling, Section~\ref{sec:roster}) \\
-\bottomrule
-\end{tabular}
-\end{center}
+\begin{quote}
+\textbf{The content of the attestation, or the player's ``move'', is a string that can be fed into Script in a form that can allow adjudication of the contract rules; it's not an arbitrary fact that Bitcoin can't read.}
+\end{quote}
+
+An oil price posted to a Bitcoin contract proves only that someone claimed that price. Publication is \emph{self-certifying}; a price is not, since nobody can produce evidence of ``the price at noon'', only report it. That leaves only one hole, for our venue: is \emph{when} this ``self-certifying fact'' published, an objective truth?
+
+The answer is ``no'', in the absolute sense, but approaches ``yes'' for longer and longer timescales. Why? Because data can be broadcast --- ``they can't stop the signal, Mal!'' --- and the data here is self-certifying.
+
+Practically, that means if you play games at a cadence of 1 day per move, it is not feasible for members to say ``I said that that move didn't show up in the window because I didn't see it.'' Attribution of fault is still probabilistic for sure, but becomes undeniable in practical terms.
+
+For short term (10 seconds per move), that doesn't apply. Clocks are not perfectly synchronized, so we cannot be sure of fault.
+
+So to summarize the comparison: a price oracle's lie is broadcast and might be immediately visible; it's lying about an external fact. A venue member's lie is only about the time something happened, which is not an external fact. The venue's attestation talks about a much more restricted thing, but is not provable in general; it's only, realistically, provable over longer timescales.
 
 \subsection{Incentives}
 
 \paragraph{Fees.} This is where the use of what we call EC-OTS comes in.
 
 A mover pays the member that seals its move, atomically, with a point-locked payment inside the mover's channel; the typical adaptor trick. The
-lock point is $T = C_m + P_{i,s}$. Think of $C_m$ as the point which represents the player's move (details are in the longer version of the paper), and $P_{i,s}$ as the point that the member $i$ of the venue pre-selected for slot $s$. All these pre-selected points are sent to the players at the setup of the contract.
+lock point is $T = C_m + P_{i}$. Think of $C_m$ as the point which represents the player's move (see Section~\ref{sec:ecots}; more details in the long version of the paper), and $P_{i}$ as the point that the member $i$ of the venue pre-selected. All these pre-selected points are sent to the players at the setup of the contract.
 
-The result is that, if the member $i$ ``seals'' the move $C_m$ at slot $s$, in so doing, it reveals its own secret $p_{i,s}$, which taken together with the discrete log of $C_m$ is enough for it to claim the fee payment that the mover committed to with an adaptor signature to $T$.
-
+The result is that, if the member $i$ ``seals'' the signed move $C_m$, in so doing, it reveals its own secret $p_{i}$, which taken together with the discrete log of $C_m$ is enough for it to claim the fee payment that the mover committed to with an adaptor signature to $T$. This mechanism does not force the member $i$ to actually publish; we discuss these mechanics further in the long version of the paper.
 
 The designated sealer is generally not the payer's channel counterparty,
-so the fee must be routed. Since this requires PTLCs, this has implications for the specific Lightning Network in use. While the whole design is possible without fees, the incentives are poor, since without fees, what incentivizes a heterogeneous, large set of members?
+so the fee must be routed. Since this requires PTLCs, this has implications for the specific Lightning Network in use. While the whole design is possible without fees, the incentives are poor, since without fees, what incentivizes venue members?
 
-\paragraph{Bonds.} Each member locks bitcoin in a timelocked output on
-Bitcoin for the duration of its membership. The core function of this utxo is as in Joinmarket fidelity bonds~\cite{fidelity}. It addresses the point that Sybil attacks cannot be prevented directly if identities are unknown, and so the only kind of ``identity'' that exists in Bitcoin itself is at the utxo level. Utxos commit to their role in the quorum (or roster of possible members of quora). Unfortunately time-value of money cost isn't large unless the amount is very large indeed, but it has to be the foundation.
+\paragraph{Bonds.} Each member can lock bitcoin in a timelocked output on Bitcoin for the duration of its membership. The core function of this utxo is as in Joinmarket fidelity bonds~\cite{fidelity}. It addresses the point that Sybil attacks cannot be prevented directly if identities are unknown, and so the only kind of ``identity'' that exists in Bitcoin itself is at the utxo level. Utxos commit to their role in the venue (or roster of possible members of venue committees). Unfortunately time-value of money cost isn't large unless the amount is large and the time lock is long. We'll see in Section~\ref{sec:security} that there are strong arguments to not \emph{only} use anonymous members.
 
 Because bitcoin doesn't have covenants, one can't constrain that the locked outputs go to, say, burn addresses, under a certain condition. What one can do, as was observed in Stakechains~\cite{coins}, is burn to miner fees by creating an anyone-can-spend output, which is more workable in bitcoin than other systems because colluding sufficiently with miners to actually recoup funds would be nearly completely impractical.
 
 But we have to distinguish two cases:
 
 \begin{itemize}
-\item Member \textbf{equivocates} : signs two messages that contradict each other. Even though this can be just ``fault'' (e.g. crash) rather than malicious behavior, as in Lightning, it makes sense to swipe funds here: which in this case means burn to miners.
-\item Member attests to something that is publicly obviously false: such as, attesting that a move was not made when it was. Here the crucial point is that their attestation is public, and the fact that they are lying about is also public. Here the rejection of them is a matter of client choice: those wishing to construct quora for future contracts will not use them, which means they lose all fee revenue in future.
+\item Member \textbf{equivocates} : signs two messages that contradict each other. Even though this can be just ``fault'' (e.g. crash) rather than malicious behavior, as in Lightning, it might make sense to swipe funds here, as earlier mentioned: which in this case means burn to miners.
+\item Member attests to something that is publicly obviously false: such as, attesting that a move was not made when it was, at a long timescale. Here the crucial point is that their attestation is public, and the fact that they are lying about is also public. Here the rejection of them is a matter of client choice: those wishing to construct quora for future contracts will not use them, which means they lose all fee revenue in future.
 \end{itemize}
 
-The shape of that second item is why two things in the technical design are so important: that it is possible to identify individual members who have attested ``that move is not published in time'' and ``that move is published in time'', and secondly, that there are positive fees to accrue for behaving honestly. With those two elements in place, it's possible to argue that the incentives are sufficiently aligned.
+The shape of that second item is why two things in the technical design are so important: that it is possible to identify individual members who have attested ``that move is not published in time'' and ``that move is published in time'', and secondly, that there are positive fees to accrue for behaving honestly. With those two elements in place, it's reasonable to argue that the incentives are sufficiently aligned.
 
 \section{Contract outputs and the dispute graph}
 \label{sec:graph}
@@ -288,16 +296,13 @@ white, $\Pb$ black); each holds a payment key $P_\Pa$, $P_\Pb$, and every 2-of-2
 
 Timelocks: $\tsd$ is the channel's \texttt{to\_self\_delay}, $\dl$ the challenge window and $\dlp$ the additional delay on prover-favourable paths; move $d$ is due at $T_d = t_0 + d\ell$ and a depth-$d$ absence claim is admissible once median-time-past has passed $T_d + m$ (an absolute, time-based \op{CLTV}).
 
-In setup, the two parties agree several things: first the quorum of members are fixed, who are going to form the venue and ``attest'' as discussed extensively above. Then, they will need to get, from those members, all the per-move keys: keys for ``anticipation points'' used for constructing atomic fees; keys for ``flags'' that let them attest to non-publication. They will also need to share a big chunk of similar keys with each other: Winternitz keys for refutation and for state.
+In setup, the two parties agree several things: first the committee of members is fixed, who are going to form the venue and ``attest'' as discussed extensively above. Then, they will need to get, from those members, all the per-move keys: keys for ``anticipation points'' used for constructing atomic fees; keys for ``flags'' that let them attest to non-publication. $\Pa$ and $\Pb$ will also need to share a big chunk of similar keys with each other: Winternitz keys for refutation and for state.
 
-That whole setup \emph{is} linear in the finite number of moves that the contract or game can take up: worth emphasizing, because it means that our applications must consider only reasonable finite-length games (at least, in this design).
+That whole setup \emph{is} linear in the finite number of moves that the contract or game can take up: worth emphasizing, because it means that our applications must consider only reasonable finite-length games (at least, in this design). The dispute graph (see Figure~\ref{fig:graph}) must be pre-signed for all future moves.
 
+What remains is an augmentation of Lightning: cosigning a commitment transaction which now has a special contract output $C$. Like to\_local, $C$ and every output below it carry Lightning's revocation leaf, so a revoked state is swept in full; and $C$ has has equivocation leaves that work similarly: if a party signs two different states at the same depth with its Winternitz key, the counterparty takes the whole pot.
 
-What remains is an augmentation of Lightning: cosigning a commitment transaction which now has a special contract output, and, as well as the normal Lightning revoke output, it has an equivocation output that functions similarly: if the counterparty doesn't follow the contract rules and equivocates with their Winternitz keys, they get their funds confiscated.
-
-There is still more pre-signing needed, however, for the contract: the dispute graph (see Figure~\ref{fig:graph}) must be pre-signed on a per-move basis, also.
-
-We once again emphasize that \underline{the details are deferred to the long version of the paper}.
+A move thus does not require a channel update; though, a fee might; this can be avoided; \underline{see the long version of the paper} for details on this and a lot more about this design.
 
 \begin{figure}[t]
 \centering
@@ -320,9 +325,9 @@ We once again emphasize that \underline{the details are deferred to the long ver
 
 \node[pre, below=11mm of C, xshift=-34mm] (settle) {settle};
 \node[pre, below=11mm of C, xshift=-4mm] (absent) {absent$_d$};
-\node[pre, below=11mm of C, xshift=34mm] (exhibit) {exhibit$_d$};
+\node[run, below=11mm of C, xshift=34mm] (revoke) {revoke};
 \node[pre, below=11mm of C, xshift=66mm] (equiv) {equiv$_d$};
-\foreach \n in {settle,absent,exhibit,equiv} { \draw (C.south) edge (\n.north); }
+\foreach \n in {settle,absent,revoke,equiv} { \draw (C.south) edge (\n.north); }
 
 \node[outp, below=3mm of absent] (Ad) {$A_d$};
 \draw (absent) -- (Ad);
@@ -341,8 +346,8 @@ We once again emphasize that \underline{the details are deferred to the long ver
 \node[outp, below=3mm of counter, align=center] (Adm) {$A'_{d-1}$: the depth-$(d{-}1)$\\claim tree, no counter};
 \draw (counter) -- (Adm);
 
-\node[outp, below=3mm of exhibit, align=center] (Pe) {$P_d$: the refuted\\tree, as below};
-\draw (exhibit) -- (Pe);
+\node[outp, below=3mm of revoke, font=\scriptsize] (Prev) {pot $\to$ counterparty};
+\draw (revoke) -- (Prev);
 
 \node[outp, below=3mm of equiv, font=\scriptsize] (Peq) {pot $\to c(d)$};
 \draw (equiv) -- (Peq);
@@ -357,7 +362,7 @@ hanging off it, per depth $d$. Every output is a taproot tree; the
 edges are its leaves. The claim output $A_d$ races the mover's
 refutation against the claimant's timeout; the refuted output $P_d$
 races the claimant's disproves against the mover's self-checking split;
-the counter sends the game one depth back.}
+the counter sends the game one depth back. ``revoke'' is Lightning's revocation path; it is also a leaf of to\_local, $L$, $A_d$ and $P_d$ (not drawn).}
 \label{fig:graph}
 \end{figure}
 
@@ -393,13 +398,13 @@ fee \texttt{timeout} & payer & $147$ \\
 transactions at any depth; the refutation is the one large transaction
 and is paid by the party that answers a claim, its cost being the
 venue readout ($96$ possession proofs per head, $16$ points each, as
-script constants) rather than any signature or hash chain.}
+script constants) rather than any signature or hash chain. Changing from a 5 member venue to 50 is likely only to add 1\% to the size of the chess refute transaction; it's linear but very small in magnitude, and the committee size is not practical above about 100 most likely, and impossible above 999 in the current design.}
 \label{tab:sizes}
 \end{table}
 
-Note that by far the bulk of the onchain cost is always in the refute step, as that is the step that dumps the actual contract/game state. Obviously, that will almost never appear, but even when it does we are bounded to 3 transactions, hence the O(1) claim of the abstract. But importantly, through use of deposit amounts in-channel, one can ensure that the offender is always the one that pays the additional onchain transaction costs.
+Note that by far the bulk of the onchain cost is always in the refute step, as that is the step that dumps the actual contract/game state. Obviously, that will almost never appear, but even when it does we are bounded to at most 4 transactions, hence the O(1) claim of the abstract. But importantly, through use of deposit amounts in-channel, one can ensure that the offender is always the one that pays the additional onchain transaction costs.
 
-An additional important scaling detail: we are sensitive to the requirement to have the venue support large numbers of members: the cost of supporting say 100 members instead of 10 is fairly minimal: one point in the script and one witness in the signature per member. The real limit in the current design is the support of OP\_CHECKSIGADD based multisignature attestation to absence; theoretically capped at 999 but realistically we wouldn't go much above 100 members.
+An additional important scaling detail: we are sensitive to the requirement to have the venue support large numbers of members: the cost of supporting say 100 members instead of 10 is fairly minimal: one point in the script and one witness element per member. The real limit in the current design is the support of \op{CHECKSIGADD} based multisignature attestation to absence; theoretically capped at 999 but realistically we wouldn't go much above 100 members.
 
 \section{Applications}
 \label{sec:apps}
@@ -409,21 +414,11 @@ An additional important scaling detail: we are sensitive to the requirement to h
 
 We return to the example of the introduction.
 
-\paragraph{Set-up.} The customer erasure-codes and encrypts its data,
-splits it into chunks of a few hundred bytes, and computes a Merkle root
-$R$ over them. A contract in the customer's channel with the provider
-fixes $R$, the number of chunks, an epoch length, a fee per epoch and
-the provider's bond $B$. The data is handed over off-chain.
+In short, you can request probabilistic proof of storage~\cite{jk}~\cite{sw} of some large chunk of data from a provider (think: Merkle proof for a random data chunk). This idea was pursued in the altcoins Sia~\cite{sia} and Filecoin~\cite{filecoin}. Because they base actual \emph{blockchains} on this idea, where rewards are built from these proofs, faults are punished with burn. So arguably this design is bad from two angles: one, a public blockchain isn't scalable and necessitates a new token, and two, punishment isn't directed to the aggrieved party (who lost their data).
 
-\paragraph{Disputes are the game's disputes.} A missing response is an
-absence claim, refuted only by a venue attestation of a timely response.
-A wrong response is a disprove leaf that checks a Merkle path (SHA-256,
-native in Script; the chunk must fit a 520-byte stack element). A false
-claim by the customer is answered by the attested response. The
-contract graph is the chess graph with a different disprove family: the
-``move'' is a challenge or a response, and the ``rule'' is a path check.
+In the LN-GAP model, instead, a customer can engage with a service provider in a long-term game of challenge-response.
 
-\paragraph{What is new.} Paying for proofs of retrievability over
+\paragraph{What is new here:} Paying for proofs of retrievability over
 Bitcoin has been proposed before: contingent service payments on
 Bitcoin for exactly this~\cite{zkcsp}, recurring variants~\cite{rcpor},
 periodic challenge-and-pay over a payment channel~\cite{scrypt}, and
@@ -432,37 +427,20 @@ Lightning~\cite{bitstream}. All are \emph{pay on success}: if the
 provider does not answer, the customer does not pay, and the only
 penalty for losing the data is lost future income. No two-party
 construction can do better, because silence cannot be adjudicated
-between two parties. With a public clock ``no timely response in epoch
+between two parties. In LN-GAP, however, with a public clock ``no timely response in epoch
 $k$'' is a fact, so the provider's \emph{bond} is forfeited for absence,
 not merely its payment withheld, and the whole schedule runs off-chain.
-
-\paragraph{Sia and Filecoin.} The dedicated storage networks do punish
-absence, and they can because each has its own blockchain, which gives
-them the public clock. A Sia host posts collateral in a file contract
-and must submit a storage proof for a randomly chosen segment within a
-proof window at the contract's end; if it misses the window its
-collateral and earned revenue are burned, and the renter recovers only
-its unspent payment~\cite{sia}. A Filecoin storage provider posts pledge
-and deal collateral and must answer a Proof-of-Spacetime challenge for
-every sector every day; a missed proof puts the sector in fault, with a
-daily fee, and persistent faults terminate it and slash the collateral,
-which is largely burned~\cite{filecoin}. Both burn rather than
-compensate. In Filecoin the reason is a third party: stored data earns
-storage power and block rewards, so a client and provider who could
-profit from penalties together would be taking from the network.
-
-What we add is the absence-adjudicating clock without a blockchain or a token of its own: the venue provides it, and settlement stays in bitcoin, in a channel.
 
 \subsection{Hidden information: blackjack}
 \label{sec:blackjack}
 
-A demo is fully implemented in the proof of concept code.
+A browser-based demo is fully implemented in the proof of concept code.
 
 Since Bitcoin is money, we are interested in resolving dispute about payment, and betting on chess is uninteresting. So if we are talking of games, we're talking of staking and betting in some sense. One naturally thinks therefore of hidden-information games where there may or may not be skill involved, but there is also a random element.
 
-To play a simple card game like Blackjack\footnote{If, like the author, you didn't really know the rules of Blackjack, they are summarized in the long version}, we have to handle a fairly simple state machine over cards and hands, but the hidden information part is different. We start from the known trick of ``combine two parties randomnesses, where each randomness is committed upfront so you can't renege'' (omitting important details \ldots).
+To play a simple card game like Blackjack\footnote{If, like the author, you didn't really know the rules of Blackjack, they are summarized in the long version}, we have to handle a fairly simple state machine over cards and hands, but the hidden information part is different. We start from the known trick of ``combine two parties' randomness, where each is committed upfront so you can't renege''\footnote{Such protocols usually have a fatal flaw: the last mover has full information so can renege if they don't like the outcome; LN-GAP addresses precisely that problem: stalling your move is a loss!}.
 
-Opening a commitment is a problem in Script, because commitments have to be ``hiding'' and that is usually achieved with concatenating a salt. But, there is no OP\_CAT. Instead the value is
+Opening a commitment is a problem in Script, because commitments have to be ``hiding'' and that is usually achieved with concatenating a salt. But, there is no \op{CAT}. Instead the value is
 encoded in the \emph{length} of a random string, as in the Bitcoin
 lottery of Andrychowicz et al.~\cite{smcbitcoin}: commit
 $C = \mathrm{SHA256}(s)$ with $|s| = 32 + v$ bytes; to open, reveal $s$,
@@ -472,187 +450,72 @@ It's a very cool trick, but notice it only allows committing to quite small numb
 
 To deal a card, you take such a commitment from both players, open and combine it by simply adding the two numbers mod 13 to deal a card. Now obviously dealing with replacement isn't correct for many card games, but apparently in Blackjack it's normal to use a lot of decks so having the equivalent of an infinite shuffled deck is fine.
 
-Note that this is provably trustless, not only provably fair, gambling, so in that way similar to Babilonia~\cite{babilonia}.
-
-
 \subsection{A sealed-bid auction}
 \label{sec:auction}
 
 An outline discussion of this idea is deferred to the long version of this paper.
 
-\section{Zero knowledge verifiers}
+\section{Zero knowledge verifiers --- towards rollup bridges}
 \label{sec:zk}
 
-Technically this is ``just another application'' like blackjack etc. but it could have quite big consequences, so gets its own section. Remember that in basic BitVM designs we had an algorithm that later designs optimized out: onchain bisection. We can do the challenge-response mechanism offchain, relying on the venue, as usual, to prevent stalling. Thus, even if the program is far too big to be dumped onto the stack in Script, by applying this paradigm we can break its execution into chunks offchain, punish stalling and thus enforce that the single chunk of execution under dispute gets resolved in onchain transactions, if there is a dispute.
+Remember that in the BitVM1 design we had an algorithm\footnote{I think it may be fairer to attribute the original idea to Arbitrum, however} that later designs optimized out: onchain bisection. In LN-GAP, we can do the challenge-response mechanism offchain, relying on the venue, as usual, to prevent stalling. Thus, even if the program is far too big to be dumped onto the stack in Script, by applying this paradigm we can break its execution into chunks offchain, punish stalling and thus enforce that the single chunk of execution under dispute gets resolved in onchain transactions, if there is a dispute.
 
-A very similar approach is taken in BitVMX~\cite{bitvmx}. There a generic ZKP verifier is bisected, but onchain. That distinction: onchain/offchain is the only thing that matters, hence our proof of concept code shows verification of a ZKP \emph{offchain} by use of our publication venue, but otherwise uses the same machinery taken directly from the BitVMX codebase: the RISC0 verifier of STARK receipts, itself verified by a Groth16 instantiation. So the credit is very much theirs; the value in what we do is specifically in making a tradeoff to prevent a very large number of Bitcoin transactions needing to be published. More details in the long version of the paper, but needless to say this specific ``application'' is really a way of opening up a near infinite number of applications, since the program size can be made arbitrarily large. It's only because of this possibility that the ``A'' in LN-GAP can truly be asserted. 
+A very similar approach is taken in BitVMX~\cite{bitvmx}. There, a Groth16 verifier is bisected, but onchain. That offchain vs onchain distinction is the only delta, hence our proof of concept code shows verification of a ZKP \emph{offchain} by use of our publication venue, but otherwise uses the same machinery taken directly from the BitVMX codebase: the Groth16 verifier checking a shrink-wrapped RISC Zero proof of correct execution of a STARK verifier. So the credit is very much theirs; the claimed value in what we do is specifically in making a tradeoff to prevent a very large number of Bitcoin transactions needing to be published. More details in the long version of the paper, but needless to say this specific ``application'' is really a way of opening up a near infinite number of applications, since the program's (the one whose correct execution is STARK-proved at the base layer) size can be made arbitrarily large. It's only because of this possibility that the ``A'' in LN-GAP can truly be asserted.
+
+While this is currently speculative, one can imagine zk-rollup (see~\cite{lightrollups} for potential designs)  hybrid constructions: correctness of a burn from the rollup can be used in a contract with a liquidity provider: demonstrating that the withdrawal claim is consistent with a published history of state roots. Unlike Ethereum, we cannot have a base layer contract provide this, effective, single use seal for the ``hard'' confirmations or finality, so another mechanism, possibly including the use of the venue, and possibly including \op{RETURN} mechanisms, may be required. 
 
 \section{Security}
 \label{sec:security}
 
-Table~\ref{tab:security} lists what can go wrong and what prevents it.
-The assumptions fall into five classes:
-\begin{itemize}
-\item \textbf{Cryptographic}: holds unconditionally given the primitives
-  (one-time signatures, Schnorr, SHA-256) and Script (i.e. bitcoin consensus, not quite crypto but close enough).
-\item \textbf{Lightning's}: a party watches the chain and responds within
-  its windows; fees for pre-signed transactions can be bumped.
-\item \textbf{1 of $n$}: at least one member is honest and live before
-  the relevant due time.
-\item \textbf{Majority}: fewer than $t$ members collude.
-\item \textbf{Economic}: misbehaviour is attributable and costs more than
-  it gains; bounded by the condition of Section~\ref{sec:venue}.
-\end{itemize}
+The long version of the paper tabulates and analyzes different risks inherent in the design. Here, we'll consider a concrete use case to clarify better what the actual risk profile is, and the interesting ways it's different from other similar systems.
 
-\begin{table}[H]
-\centering
-\small
-\begin{tabular}{>{\raggedright\arraybackslash}p{44mm}>{\raggedright\arraybackslash}p{62mm}>{\raggedright\arraybackslash}p{30mm}}
-\toprule
-threat & defended by & assumption \\
-\midrule
-publishing a revoked channel state & revocation leaf & Lightning's \\
-an illegal move & disprove family, from the refutation's witness & cryptographic \\
-answering a claim with an entry the mover did not sign & authorship check in \texttt{refute} & cryptographic \\
-a player signing two moves at one depth & \texttt{equiv} leaf & cryptographic \\
-a stall & absence claim and timeout & Lightning's \\
-a false absence claim & refutation with the venue's attestation & 1 of $n$ (some member sealed the move) \\
-censorship of a mover (no member seals) & nothing in Script; fee income, member independence & 1 of $n$ \\
-a late seal colluding with the mover & \texttt{not\_timely}: $t$ flags & majority \\
-false flags against a timely move & none in Script; flaggers named; provable only with an audit layer (\S\ref{sec:accountable}) & majority; economic \\
-a committee majority lying about time & none in Script; publicly judgeable with an audit layer (\S\ref{sec:accountable}) & majority; economic \\
-an unsigned seal & provable from the seal; ejection & economic \\
-two different signed moves at one depth & \texttt{equiv} leaf (the mover's fault) & cryptographic \\
-fee lock completed without sealing & self-contradiction against the venue's record; ejection & economic \\
-the venue halting & none: see below & --- \\
-a shared fact shown differently to different contracts & attribution; ejection; optional burn & economic ($G$: aggregate) \\
-refusing to refresh at the horizon & the horizon's default outcome & design \\
-\bottomrule
-\end{tabular}
-\caption{Threats and their defences.}
-\label{tab:security}
-\end{table}
+The short version is: the content of the contract rules is defended by cryptography + Bitcoin consensus. The ability to publish your next move in the game/contract is defended by a 1 of $n$ availability argument on the venue. The timeliness of your publication --- did you publish before the deadline --- is defended by a majority consensus on the venue, and reputational or economic costs from attributable mis-attestation.
 
-The short version is: the content of the contract rules are evaluated cryptographically, and are defended by cryptography + Bitcoin consensus. The ability to publish your next move in the game/contract is defended by a 1 of $n$ availability argument on the venue. The timeliness of your publication --- did you publish before the deadline --- is defended by a majority consensus on the venue.
+Compare two cases: a federation, using a threshold multisig, decides whether withdrawals are accepted, versus the LN-GAP model:
 
-That last is of course the weakest point, and most of the rest of what we write here will focus on it.
+\paragraph{Federation majority or threshold:} Can steal (or be hacked of) \underline{all funds} in the rollup immediately (it can ignore the status of ZKPs and just sign the transfer on bitcoin). Can censor withdrawals with a $1 - f$ threshold.
+\paragraph{LN-GAP venue majority:} has no ability to steal if neither counterparty cooperates with it. \emph{Can} steal for one bilateral relationship, by colluding with one party against the other. \emph{Cannot} steal all funds at the same time unless the aforementioned collusion happens with every counterparty. Can never censor funds at any threshold $f$, since the funds are never under its control unilaterally.
 
-\paragraph{Economic security, and its limit.} The bond and the fees
-defend what is attributable. For one two-party contract the gain from
-venue misbehaviour is at most its pot; if the same venue controls multiple contracts, that danger multiplies. We state this as the limitation of the system rather than engineer around it: the only ways
-to remove it are verifying the venue's chain in Script (SPV, impractical)
-or turning the fact into Bitcoin outputs that each contract spends,
-which works only for facts of a few bits fixed in structure; for example, tic-tac-toe. Most interesting applications are not that simple.
+These distinctions have far reaching implications. Notice that ability to steal is also ability to freeze, so in case of public entities, you inevitably have a big funds freezing risk; this was emphasized already in Section~\ref{sec:venue}. Consider this very concrete scenario:
 
-Two further courses accept the limit but shrink it: committees
-drawn per contract, so that a targeted attack reaches one pot and a
-broad one needs a share of a large roster; and accountability rather
-than enforcement, making misbehaviour publicly verifiable. We discuss both of these points next 
-(Section~\ref{sec:accountable}).
+\paragraph{The Iranian service provider:} Alice and Bob-the-service-provider are in Iran and choose a venue, consisting of majority public American companies. Those American companies are subject to sanctions, but didn't know, at contract setup time, that Alice and Bob operate in Iran. After some steps are executed in the Alice-Bob channel, these companies discover this, and by law are required to stop offering service. They cannot freeze the funds; they never controlled them (which is rather helpful to their lawyers!), and it is illegal to collude with either party. Their refusal to participate \emph{does} cause a problem; if Alice and Bob don't perfectly trust each other (else why are they using a cryptographic contract), they have an unstable situation: they can continue, getting moves sealed by other entities (not the American majority), but a majority ``not-timely'' condition can no longer be triggered, meaning stalling (not playing a move) is not safe to publish a claim against, meaning that: they might have to negotiate a co-spend of the output, rely on a long time delay refund or use some kind of fresh re-negotiation of the contract rules continuation with another venue\footnote{they cannot swap-out members mid-contract: the venue members must be fixed at the start, in LN-GAP. Such a re-negotiation protocol is left as future work, but seems intuitive.}. There are two lessons: this model is much better than having funds confiscated from both parties, and, that it's quite necessary to have permissionless or otherwise non-homogeneous elements of the committee.
+
+Another very important point is public attribution. If members of an LN-GAP venue are known, objectively, to have lied about their attestations, then if they are public entities, they have burnt their reputation. If they are anonymous but bonded, they have forgone at least time value of money (if they can no longer use that bond for collecting venue fees). However whether attribution is public or not, as argued in Section~\ref{sec:venue}, is largely a matter of timescales: it is, for longer timescales.
+
+Finally, there is the question of liveness and censorship resistance; we claim it is in general ``1 of $n$''. But it's related to the practical question: ``Who should the venue members be?''. If we use only some set of, say 15 public companies, as venue members it does have an advantage: they have a lot to lose by publically lying about a contract publication fact as discussed in the previous paragraph (attribution) but it loses the natural censorship resistance: they can simply refuse to publish a move for certain entities. While with purely anonymous venue members, the power of 1 of $n$ really kicks in; but if you relied \emph{exclusively} on anonymous venue members, even ones defended with timelocked bonds, you'd be significantly more open to potential Sybil attacks; remember that the Sybils only have to occupy 51\% of the venue membership, plus collude with your counterparty.
+
+This balance is what suggests a probable optimum configuration: some set of public, well known identities with reputations at stake, along with free permissionless-entry anonymous entities, combined to make the quorum. Both would earn transaction fees.
+
+At least one further measure can expand the attack cost: committees drawn per contract, so that a targeted attack reaches one pot and a broad one needs a share of a large roster. We discuss this next in Section~\ref{sec:accountable}.
+
+Finally, we should note that these security gains are not gotten for free: relying on funds in bilateral contracts obviously limits the kinds of contracts that can be executed, and most significantly, implies holding of collateral within those bilateral contract outputs, so the liquidity story is less desirable, in the general case.
 
 \section{Weakening the majority assumption}
 \label{sec:accountable}
 
-This section describes extensions that are not yet implemented. They
-address the one threat of Section~\ref{sec:security} that the design
-leaves to economics alone: a colluding majority of the venue. Two levers are considered (with a third in the long version of the paper): \emph{whose} majority it is (a committee drawn per
-contract from a bonded roster), and whether its lie \emph{can be
-shown}.
+The long version of the paper discusses additional improvements to the attributability of fault and the reduction of probability of collusion. Here we just mention the most basic mechanism that is almost inevitable in a real world deployment. First we mention the majority threshold's basic reasoning.
 
 \subsection{The threshold adversary}
 \label{sec:threshold}
 
-A majority of the members can take the pot of any contract, in either
+A majority of the members plus your counterparty can take the pot of any contract, in either
 direction. By \emph{false flags}, $t$ members declare an honest mover's
 timely move unpublished and \texttt{not\_timely} kills its refutation.
 By a \emph{late seal with suppressed flags}, one member seals a stalling
 mover's move after its due time while $n - t + 1$ members withhold their
 flags, so the late refutation stands. The majority threshold balances
 the two, each needing about half of the members. This resembles a
-majority attack on a proof-of-work chain, with three differences. The
-venue's attackers are tied to a bond (every flag and every seal carries a
-member's key), where a miner posts no bond. Their cost is sunk (a
-timelocked bond, a franchise of future fees), where hash power can be
-rented for the attack. And the attack can target a single contract,
-silently, where a reorganisation is public.
-
-A timeliness lie by a majority is attributable (we know who flagged, by our OP\_CHECKSIGADD design) but not falsifiable (nobody can show the flag was false). Punishment needs objective proof, not just opinion (opinion is fine for client's choices (``don't do business with him again''), but not for swiping a bond).
+majority attack on a proof-of-work chain.
 
 \subsection{Committees drawn from a roster}
 \label{sec:roster}
 
-The first question is \emph{whose} majority. Two players cannot both
-choose a majority of the members who judge them, though they can choose sufficient to prevent a counter-majority.
-
-But notice, the venue is already per contract in everything but its membership: tables, proposer and flag points, due times and the registry are all keyed by the contract
+Notice, the venue is already per contract in everything but its membership: tables, proposer and flag points, due times and the registry are all keyed by the contract
 (Section~\ref{sec:venue}), and nothing ties two contracts' members together.
 
-We propose that each contract's members, its \emph{committee}, be drawn at random from a larger \emph{roster} of bonded members. There is then no single venue but one per contract,
-each sampled from the same roster. A member's work falls rather than rises: it serves only the contracts it is drawn for, about $n/R$ of them for committees of $n$ from a roster of $R$. The committee's size is limited by Script (its flag points are counted in a leaf); the roster's
-is not.
+We propose that each contract's members, its \emph{committee}, be drawn at random from a larger \emph{roster} of bonded members. There is then no single venue but one per contract, each sampled from the same roster. A member's work falls rather than rises: it serves only the contracts it is drawn for, about $n/R$ of them for committees of $n$ from a roster of $R$. The committee's size is limited by Script (its flag points are counted in a leaf); the roster's is not.
 
-The choice of members can be using standard provably fair randomness techniques (block hashes etc. etc.), but I suspect that's more interesting academically than in reality; in reality what matters is that each side can choose half the members. Whatever the exact model, it can be arranged that a cheating party needs to convince members to collude with it after the fact. Still possible; less likely.
-
-\paragraph{The importance of the timelocked bond} The above argues for making adversarial behavior less likely, but it cannot prevent it. By adding some non-trivial economic incentives to non-collusion we make the situation better: there are 2 distinct ways that cheating is disincentivized: 1/ the CLTV utxo that is used as the basis for the member's identity represents sacrifice of time value of money just as Joinmarket's fidelity bonds~\cite{fidelity}, 2/ in cases of equivocation and possibly others we'll speculate on shortly, the bond can be spent to miner fees to destroy its value (at least to the owner, subject to non-majority bitcoin miner collusion). Note that the loss of fee revenue after cheating is not a 3rd cost, as you might imagine, in this model: if the only identity is the bond utxo itself, then the adversary simply creates another one (though there might be reputation mechanisms on age, perhaps).
-
-\subsection{A third layer: a suggested more robust design}
-
-It might at first sound slightly absurd, but there is actually a decent argument for creating a third layer of attestation, above the base attestation of Bitcoin transactions that contain limited calculations in script to prove cheating, then the second layer of the ``venue'' in which you publish signed state updates, but to resolve whether those publications are consistent, you need to form them in very specific ways so they can be resolved in Bitcoin Script (a concrete example: you can't have 10000 members attesting to publication or non-publication, attributably, because you can't have 10000 OP\_CHECKSIGADD s in your Script (stack limits)). This limits how cleanly you can claim an unbiased, permissionless quorum. With a third layer you can do that part: have a genuinely unbiased consensus vote on whether the second layer behaved honestly (Figure~\ref{fig:layers}).
-
-An important point is that that 3rd layer could be anywhere.
-
-\begin{center}
-\small
-\begin{tabular}{>{\raggedright\arraybackslash}p{27mm}>{\raggedright\arraybackslash}p{50mm}>{\raggedright\arraybackslash}p{27mm}>{\raggedright\arraybackslash}p{30mm}}
-\toprule
-layer & role & verified by & constraint \\
-\midrule
-Bitcoin & money; the dispute's clock; rare anchoring of the audit layer & Script, everyone & slow, expensive \\
-venue committee & per-contract attestations and flags, legible to Script & Script & small: tens to about a hundred members, one-bit statements \\
-audit layer & the public record of what was published, and when & observers only & none from Script: large, dynamic \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-Every entry is published to the audit layer as it is made, cheaply and
-quickly; the audit layer commits its history to Bitcoin periodically
-(an \texttt{OP\_RETURN} per hour, say, for all contracts at once), which
-fixes it against rewriting at an amortised cost. A committee majority
-that flags a move the audit layer shows as published, or lets stand a
-seal the audit layer shows as late, by more than a tolerance for clock
-skew and propagation, is then caught in either direction,
-without per-move Bitcoin cost. The pattern is familiar: a small
-committee that a constrained verifier can check, attesting to a larger
-system that full observers check, as Ethereum's sync committees do for
-light clients~\cite{synccommittee}; and a public log whose timeliness
-rests on many independent witnesses and on anchoring, as in
-witness-cosigned transparency logs~\cite{ct} and
-OpenTimestamps~\cite{ots}. Script never verifies the audit layer, so the
-limit Script places on quorum size no longer limits the size of the
-trusted set; it limits only each contract's committee.
-
-\begin{figure}[H]
-\centering
-\begin{tikzpicture}[
-  font=\small,
-  lay/.style={draw, rounded corners=3pt, align=center, inner sep=5pt, text width=#1},
-  lay/.default=44mm,
-  >={Stealth[length=5pt]},
-]
-\node[lay=52mm, fill=black!4] (A) at (0,3.6) {\textbf{Audit layer}\\ large, dynamic; the public record of every entry and its time};
-\node[lay, fill=blue!4] (V) at (-3.4,0.9) {\textbf{Venue committee}\\ drawn from the roster per contract; attestations and flags};
-\node[lay, fill=orange!8] (B) at (3.4,0.9) {\textbf{Bitcoin}\\ money, disputes, the claim clock, the roster's bonds};
-\node[lay=40mm, draw=black!40, text=black!70] (C) at (0,-1.6) {\textbf{Contract} (in a channel)};
-\draw[->] (V.south) -- node[pos=0.45, left=3pt, font=\scriptsize, align=right] {signatures\\ read in Script} (C.north west);
-\draw[->] (C.north east) -- node[pos=0.55, right=3pt, font=\scriptsize] {disputes} (B.south);
-\draw[->, densely dashed] ([xshift=-10mm]A.south) -- node[pos=0.5, left=4pt, font=\scriptsize] {audits} (V.north);
-\draw[->, densely dashed] ([xshift=10mm]A.south) -- node[pos=0.5, right=4pt, font=\scriptsize] {periodic anchor} (B.north);
-\end{tikzpicture}
-\caption{Three layers. Only the solid arrows are checked in Script; the
-audit layer makes the committee's statements publicly judgeable after
-the fact.}
-\label{fig:layers}
-\end{figure}
+The choice of members can be using standard provably fair randomness techniques (block hashes etc. etc.), or by other selection procedures. We refer back to the ``probable optimum configuration'' of Section~\ref{sec:security}.
 
 \section{Related work}
 \label{sec:related}
@@ -685,16 +548,10 @@ StackSat-128~\cite{stacksat} is a Script-friendly hash designed for the
 proof-of-work alternative. The attestation primitive is that of Discreet
 Log Contracts~\cite{dlc}: an oracle publishes anticipation points in
 advance and reveals the scalar for the outcome that occurred, and a
-contract conditions on it; the venue is a federation of such oracles,
+contract conditions on it; the venue is a committee of such oracles,
 attesting publication and timeliness rather than external events, and
 its attestations are read out in Script rather than consumed by adaptor
-signatures alone. The accountable venue of
-Section~\ref{sec:accountable} follows the pattern of Ethereum's sync
-committees~\cite{synccommittee} (a sampled committee attesting for a
-constrained verifier) and of witness-cosigned transparency
-logs~\cite{ct}; committee sampling by joint randomness is in the spirit
-of Algorand's sortition~\cite{algorand}. For storage, see
-Section~\ref{sec:storage}; for hidden-information games and Babilonia, Section~\ref{sec:blackjack}.
+signatures alone. For storage, see Section~\ref{sec:storage}; for hidden-information games, Section~\ref{sec:blackjack}.
 
 \section{Conclusion}
 
@@ -712,8 +569,6 @@ Lightning cannot adjudicate silence. If it could, you could, without use of very
 https://blog.blockstream.com/script-state-from-lamport-signatures/}
 
 \bibitem{forcemove} T.~Close and A.~Stewart. ForceMove: an $n$-party state channel protocol. Magmo, 2018.
-
-\bibitem{pagnia} H.~Pagnia and F.~C.~G\"artner. On the impossibility of fair exchange without a trusted third party. Technical report TUD-BS-1999-02, Darmstadt University of Technology, 1999.
 
 \bibitem{toddseals} P.~Todd. Preventing consensus fraud with commitments and single-use-seals, 2016. \url{https://petertodd.org/2016/commitments-and-single-use-seals}
 
@@ -745,23 +600,17 @@ https://blog.blockstream.com/script-state-from-lamport-signatures/}
 
 \bibitem{lngapcode} LN-GAP proof-of-concept code. \url{https://github.com/AdamISZ/ln-gap}
 
+\bibitem{liquid} J.~Nick, A.~Poelstra and G.~Sanders. Liquid: a Bitcoin sidechain, 2020. \url{https://blockstream.com/assets/downloads/pdf/liquid-whitepaper.pdf}
+
 \bibitem{dlc} T.~Dryja. Discreet Log Contracts, 2017. \url{https://adiabat.github.io/dlc.pdf}
-
-\bibitem{ethslash} Ethereum consensus specifications, Phase 0: slashing and the correlation penalty (\texttt{PROPORTIONAL\_SLASHING\_MULTIPLIER}). \url{https://github.com/ethereum/consensus-specs}
-
-\bibitem{synccommittee} Ethereum consensus specifications, Altair: the sync committee. \url{https://github.com/ethereum/consensus-specs}
-
-\bibitem{ct} B.~Laurie, A.~Langley and E.~Kasper. Certificate Transparency. RFC~6962, 2013.
-
-\bibitem{algorand} Y.~Gilad, R.~Hemo, S.~Micali, G.~Vlachos and N.~Zeldovich. Algorand: scaling Byzantine agreements for cryptocurrencies. SOSP 2017.
 
 \bibitem{sia} Sia Foundation. About providing storage on Sia. \url{https://docs.sia.tech/provide-storage/about-hosting-on-sia}
 
 \bibitem{filecoin} Filecoin documentation: slashing. \url{https://docs.filecoin.io/storage-providers/filecoin-economics/slashing}; storage deal flow, \url{https://spec.filecoin.io/systems/filecoin_markets/onchain_storage_market/storage_deal_flow/}
 
-\bibitem{smcbitcoin} M.~Andrychowicz, S.~Dziembowski, D.~Malinowski and {\L}.~Mazurek. Secure multiparty computations on Bitcoin. IEEE Symposium on Security and Privacy, 2014. \url{https://eprint.iacr.org/2013/784}
+\bibitem{lightrollups} J.~Light. Validity rollups on Bitcoin, 2022. \url{https://bitcoinrollups.org}; announced on the bitcoin-dev mailing list, October 2022.
 
-\bibitem{babilonia} waxwing. Babilonia: probabilistic coinjoin and covert betting. Version 2.0 (draft), September 2026. \url{https://github.com/AdamISZ/babilonia-paper}
+\bibitem{smcbitcoin} M.~Andrychowicz, S.~Dziembowski, D.~Malinowski and {\L}.~Mazurek. Secure multiparty computations on Bitcoin. IEEE Symposium on Security and Privacy, 2014. \url{https://eprint.iacr.org/2013/784}
 
 \bibitem{bitstream} R.~Linus. BitStream: decentralized file hosting incentivised via Bitcoin payments, 2023. \url{https://robinlinus.com/bitstream.pdf}
 
