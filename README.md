@@ -1,5 +1,153 @@
 # LN-GAP — Lightning Network Governed by Arbitrary Programs
 
-This is a big set of ideas put together, so, to kee it simple until this is fleshed out: minimize the onscript footprint of disputes in bilateral contracts over some state by using proof of publication on an alternate ledger. This enables things like chess (programs whose internal state is a bit too large to dispute directly onchain) as well as things like name registries that have an external 'fact' that needs to be attested by someone.
+This is a big set of ideas put together, so, to keep it simple: minimize the onscript footprint of disputes in bilateral contracts over some state by using proof of publication on an alternate ledger. This enables things like chess (programs whose internal state is a bit too large to dispute directly onchain) as well as things like service provider contractual relationships and even ZKP verification (with a bisection style proof of the verification passing done *off*-chain).
 
-More details to come.
+All of this is dependent on what's called a **venue**, which is a set trusted only for one thing: validating that an arbitrary string is published in-time.
+
+For the actual whole argument, read the [short paper](docs/paper/lngap-short.pdf) to get the general structure and motivation. An AI-authored much more detailed paper is [also available](docs/paper/lngap_draft.pdf ) can also be used to dive in further.
+
+## Caveat
+
+The code here is intended as a proof-of-concept. It is not fit for any kind of production use with real money.
+
+(It's also worth mentioning that, while the demos are fully functional, as you'll see, some peripheral parts of the design are simply not built, for example fidelity bonds, venue fee payments amongst others).
+
+The demos use a venue of 5 members, no larger roster to choose from; there is only one channel between the two players, and therefore no routing, as would be needed for the aforementioned fees. Bitcoin transaction fees, including the deposit outputs that make them fair, *are* built.
+
+## Building
+
+The proof of concept is a Rust workspace. You need:
+
+- **Rust**, a recent stable toolchain via [rustup](https://rustup.rs)
+  (tested with 1.96);
+- **a C compiler** (`cc`/`clang`/`gcc`): the `secp256k1` crate builds
+  libsecp256k1 from source;
+- **Bitcoin Core** (`bitcoind`), to run the demos and the regtest tests
+  (tested with v31). It must be on your `PATH`, or set `LNGAP_BITCOIND`
+  to the binary's path;
+- **network access to GitHub** on the first build: the zero-knowledge crate
+  (`lngap-zk`) depends on BitVMX's repositories by git, and Cargo fetches
+  every git dependency in the workspace even when you build only the demos.
+
+Clone and build the two demo binaries in release mode:
+
+    git clone https://github.com/AdamISZ/ln-gap
+    cd ln-gap
+    cargo build --release -p lngap-chess-venue -p lngap-blackjack-venue
+
+The binaries are `target/release/lngap-chess-venue` and
+`target/release/lngap-blackjack-venue`. Use release builds for the demos:
+building a game's pre-signed transaction graph is much slower in a debug
+build.
+
+`cargo build --release` builds the whole workspace instead, including the
+test harness and the zero-knowledge tools.
+
+### Running the tests
+
+The tests start their own throwaway regtest nodes, so they also need
+`bitcoind`. For the dispute graphs of the PoS venue (tic-tac-toe, chess,
+blackjack, the channel), and the scenario suites:
+
+    cargo test -p lngap-pos
+    cargo test -p lngap-harness --test pos_stall --test pos_chess --test fee_lock -- --test-threads=2
+
+Limit the harness to two threads: each test drives its own node, and more
+in parallel mainly costs CPU. The zero-knowledge tests run with
+`cargo test -p lngap-zk --release`. The test against the real Groth16
+verifier is opt-in and needs a separate setup.
+
+
+## Running the demos
+
+There are two browser demos, chess and blackjack. Both run on a local
+Bitcoin regtest network. Each demo is three processes on your machine:
+
+- the **venue**: the committee of five members that seals moves and flags
+  missing ones, plus a private regtest `bitcoind` that mines a block every
+  20 seconds;
+- two **parties**, each with its own web page. The parties open a real
+  Lightning-style channel with each other, then play inside it.
+
+Nothing touches mainnet, testnet or signet.
+
+### Requirements
+
+- Bitcoin Core's `bitcoind` on your `PATH`, or set `LNGAP_BITCOIND` to the
+  binary's path.
+- The release binaries `target/release/lngap-chess-venue` and
+  `target/release/lngap-blackjack-venue` (see *Building*).
+- A browser. Everything is served on `127.0.0.1`.
+
+### Chess
+
+Open three terminals in the repository root and start the venue first:
+
+    target/release/lngap-chess-venue venue --web 8090
+    target/release/lngap-chess-venue play white --web 8091
+    target/release/lngap-chess-venue play black --web 8092
+
+The players fund and open their channel by themselves; wait until both
+terminals print `the channel is open`. Then browse:
+
+- <http://127.0.0.1:8090/dashboard>: White, Black and the venue on one
+  screen (the easiest way to follow a game);
+- or each page on its own: White on 8091, Black on 8092, the venue on 8090.
+
+On White's page, **new game** puts each side's stake and dispute deposit
+into the channel. Then play by clicking pieces on the board. Each move has a
+time window (90 seconds by default), and a game is at most 50 moves
+(counting both sides' moves); a game that reaches the limit without a mate
+is a draw. Games end in the channel with no Bitcoin transaction: the winner
+**settles** a mate, either side can **resign**, and **offer draw** /
+**accept draw** split the pot.
+
+To see a dispute, misbehave:
+
+- **On a player's page**, the move menu offers dishonest moves: an illegal
+  move, a garbage-signed move, a malformed one, one signed for the wrong
+  move number, or a late one. You can also simply stop moving.
+- **On the venue's page**, you can silence or wake members, make a member
+  seal a move late, have a rogue member seal an unsigned entry, or mine a
+  block at once.
+
+A game with no agreed result goes on chain by force-close. The pages then
+offer each dispute step (claim, counter, refute, disprove, timely, split)
+as a button, and the log narrates who wins and why.
+
+### Blackjack
+
+The same three processes, with the roles `player` and `house`:
+
+    target/release/lngap-blackjack-venue venue --web 8090
+    target/release/lngap-blackjack-venue play player --web 8091
+    target/release/lngap-blackjack-venue play house --web 8092
+
+Browse the dashboard at <http://127.0.0.1:8090/dashboard>, or the player
+on 8091 and the house on 8092.
+
+The player starts each hand with **new hand**, then **deal**, **hit** and
+**stand**. The house plays itself (its *autopilot*): it reveals its share of
+each card, draws to 17 as the dealer, and settles hands it won. Honest
+hands settle in the channel with no Bitcoin transaction, so you can play
+several in a row.
+
+On the house's page you can make the house cheat on its next reveal: a
+wrong card, drawing past 17, standing below 17, or **withhold**, which
+never reveals and so stalls. The dispute steps are then buttons on the
+pages, or automatic if you switch on **automatic disputes**.
+
+### Options and housekeeping
+
+- `--ell S` sets the seconds per move, and `--max-depth M` the move limit
+  (on the `venue` command). `--deposit SAT` sets each side's dispute
+  deposit. `--dir D` sets the working directory (default `./chess-venue`
+  or `./blackjack-venue`); use a different one to run both demos at once.
+  Run either binary with no arguments for the full list.
+- Every venue start is fresh: it wipes the directory's previous games and
+  starts a new regtest chain.
+- Stop the demo with Ctrl-C in each terminal. The venue's `bitcoind` can
+  outlive it; starting the venue again in the same directory shuts the old
+  node down.
+- The parties can also run without `--web`, taking typed commands in the
+  terminal instead.
