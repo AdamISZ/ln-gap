@@ -56,8 +56,8 @@ fn main() -> Result<()> {
     let mut dir = PathBuf::from("chess-venue");
     let mut block_secs = 20u64;
     // the deposit covers the longest dispute path at the demo's fixed
-    // pre-sign fee: claim or counter, refutation, split (4 x 60k)
-    let mut timing = Timing { ell: 90, backoff: 5, margin: 60, start_secs: 60, deposit: 250_000 };
+    // pre-sign fee: claim or counter, refutation, split (4 x 40k)
+    let mut timing = Timing { ell: 90, backoff: 5, margin: 60, start_secs: 60, deposit: 170_000 };
     let mut max_depth = 20u32;
     let mut web: Option<u16> = None;
     let mut positional = Vec::new();
