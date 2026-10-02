@@ -94,6 +94,13 @@ terminals print `the channel is open`. Then browse:
   screen (the easiest way to follow a game);
 - or each page on its own: White on 8091, Black on 8092, the venue on 8090.
 
+![The chess dashboard: White's page, Black's page and the venue](docs/images/chess-dashboard.png)
+
+*The dashboard seven moves into a game: White (left) and Black (right),
+each with its board, its view of the venue's seals and its channel; below,
+the venue's record of each move, its designated sealer and its seal, and
+the controls for making members misbehave.*
+
 On White's page, **new game** puts each side's stake and dispute deposit
 into the channel. Then play by clicking pieces on the board. Each move has a
 time window (90 seconds by default), and a game is at most 50 moves
@@ -115,6 +122,15 @@ A game with no agreed result goes on chain by force-close. The pages then
 offer each dispute step (claim, counter, refute, disprove, timely, split)
 as a button, and the log narrates who wins and why.
 
+![White's page after a dispute over an illegal move](docs/images/chess-dispute.png)
+
+*White's page after a dispute. Black's move 8 (the queen from d8 to h4,
+through its own knight on f6) was signed and sealed, but is illegal. White
+force-closed the channel and claimed that no valid move 8 was made; Black
+refuted with the sealed move, putting it on chain; White disproved it with
+the one leaf it breaks (`chess_ray`) and took the pot. Three transactions
+after the commitment, whatever the length of the game.*
+
 ### Blackjack
 
 The same three processes, with the roles `player` and `house`:
@@ -131,6 +147,13 @@ The player starts each hand with **new hand**, then **deal**, **hit** and
 each card, draws to 17 as the dealer, and settles hands it won. Honest
 hands settle in the channel with no Bitcoin transaction, so you can play
 several in a row.
+
+![The blackjack dashboard: the player, the house and the venue](docs/images/blackjack-dashboard.png)
+
+*A hand settled in the channel: the player stood on 14, the dealer drew to
+20, and the house's winnings moved by a channel update, with nothing on
+chain. The house's page (right) has the cheat menu and the autopilot
+switches.*
 
 On the house's page you can make the house cheat on its next reveal: a
 wrong card, drawing past 17, standing below 17, or **withhold**, which
