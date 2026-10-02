@@ -77,9 +77,9 @@ This is basically ``\underline{Filecoin without an altcoin}'', as designed in th
 
 Suppose you want to play a game on Lightning, like chess, for a monetary reward, but don't want to have to trust anyone; the money should move specifically according to the agreed game rules.
 
-I mention chess not because it's a good game to bet on (it isn't!) but because it's a game that's sufficiently complex that expressing it in onchain transactions (most specifically, proving a that move is illegal; proving that a move is legal would be way worse!) gets very expensive and we want to avoid it.
+I mention chess not because it's a good game to bet on (it isn't!) but because it's a game that's sufficiently complex that expressing it in onchain transactions (most specifically, proving that a move is illegal; proving that a move is legal would be way worse!) gets very expensive and we want to avoid it.
 
-That such games can be played on chain at all, in today's Bitcoin, was shown by Poelstra~\cite{poelstrastate}: each player signs the next game state with a one-time (Lamport) signature, which Script can read, and a script checks that successive states are related by the rules, so tic-tac-toe needs 27 pre-signed transactions rather than one per path through the game tree (about 550,000), and the same approach extends in principle to chess. His distinction between ``Small Script'', expressive arithmetic on 32-bit values that cannot see the transaction, and ``Big Script'', which can, through \texttt{OP\_CHECKSIG}, is a useful lens for what follows: the predicates that judge a move here are Small Script over one-time-signed state, and only the payout is Big Script. What that work leaves open is the one-move-per-transaction pace of play on chain, which is the subject of the rest of this section.
+That such games can be played on chain at all, in today's Bitcoin, was shown by Poelstra~\cite{poelstrastate}: each player signs the next game state with a one-time (Lamport) signature, which Script can read, and a script checks that successive states are related by the rules, so tic-tac-toe needs 27 pre-signed transactions rather than one per path through the game tree (about 250,000), and the same approach extends in principle to chess. His distinction between ``Small Script'', expressive arithmetic on 32-bit values that cannot see the transaction, and ``Big Script'', which can, through \texttt{OP\_CHECKSIG}, is a useful lens for what follows: the predicates that judge a move here are Small Script over one-time-signed state, and only the payout is Big Script. What that work leaves open is the one-move-per-transaction pace of play on chain, which is the subject of the rest of this section.
 
 One approach to doing this offchain is called ForceMove~\cite{forcemove}. The idea is relatively simple: behave optimistically, and fallback to onchain transactions as the arbiter if your opponent does not follow the rules you agreed to. The reason for its name is that, once on-chain, the opponent is \emph{forced to move} by having a timeout expressed in the blockchain's consensus logic. So in Bitcoin this would mean that the Script controlling the funds has a shape like: 
 
@@ -118,7 +118,7 @@ There's a nuance here worth being precise about:
 \begin{itemize}
 
 \item If one side forces on-chain, publishing a dispute transaction, and says ``the other guy didn't follow the rules! here's proof'', with a signed attestation by the counterparty of an illegal move, no problem: the court can adjudicate the dispute.
-\item If one side forces-on chain, publishing a dispute transaction, and says ``the other guy didn't send his move'', that's very different. How does the ``court'' (blockchain) know whether the move was sent or not? Clearly that's impossible, so the court has to treat both sides fairly, and insist they play out their moves. \uline{We have reverted to exactly the same problem we had in vanilla ForceMove}.
+\item If one side forces on-chain, publishing a dispute transaction, and says ``the other guy didn't send his move'', that's very different. How does the ``court'' (blockchain) know whether the move was sent or not? Clearly that's impossible, so the court has to treat both sides fairly, and insist they play out their moves. \uline{We have reverted to exactly the same problem we had in vanilla ForceMove}.
 \end{itemize}
 
 From this reasoning it's clear: to solve the problem of that last case, we need an \uline{objective fact} that the court can assess, not hearsay. That objective fact must take the form ``by the count of some external attestation, the counterparty did not post a move before the deadline''. In the next section we'll examine two different ways to create that external attestation.
@@ -214,7 +214,7 @@ The content attestation, by the one member, must also be read by Script, and her
 What you need, then:
 
 \begin{itemize}
-\item \textbf{Liveness} : can never be promised, just like in a proof of work chain, but if \emph{any} member of the validator set can enter your publication in a slot, then some approximate ``1 of $n$ liveness'' can be claimed, and this is an acceptable security model.
+\item \textbf{Liveness} : can never be promised, just like in a proof of work chain, but if \emph{any} member of the validator set can enter your publication in a time window, then some approximate ``1 of $n$ liveness'' can be claimed, and this is an acceptable security model.
 \item \textbf{A large enough quorum}: Credibility of the above as well as what follows, requires some relatively large, heterogeneous and ideally permissionless-entry set of validators. At one key per member per move, a quorum of 50 of 100 is practical in Script. Even figures 10 times higher than that are \emph{theoretically} possible, but in practice we would not go much higher.\footnote{Section~\ref{sec:accountable} returns to this: a large, dynamic set need not be verified in Script at all, if its role is to make a small, Script-legible committee accountable.}
 \item \textbf{Fraud is attributable}: this is why the quorum's statements are one-bit signatures by named members and not a threshold signature. A FROST-style signature by its nature cannot reveal which members of the validator set committed the fraud, and punishing the entire set when only a threshold of it committed the fraud is clearly unworkable.
 \item \textbf{Positive incentives in bitcoin}: this is possible in a more general ``sidechain'' model (pay fees to move around coins on the sidechain), but this is not a sidechain, nor any kind of blockchain: the only thing the validators decide is whether each publication was made in time; the semantics of the publications are none of their business. Here we have validators post bonds on bitcoin (timelocked coins) and receive fees for their publication efforts, atomically with those publications, over Lightning channels, using the adaptor points above. This incentivizes honest participation and disincentivizes fraud or dishonesty.
@@ -248,7 +248,9 @@ judge a move must be recoverable from the pair $(S, S')$ plus the move
 itself, with no appeal to the rest of the game's history. For
 tic-tac-toe this is trivial (the board and whose turn it is). For chess
 it means the state carries castling rights, the en-passant square, the
-side to move and a status field, and it rules out adjudicating rules
+side to move and the halfmove clock (but no status field: a mated side
+simply has no legal move, so the game ends by resignation or a stall),
+and it rules out adjudicating rules
 that need the whole history (threefold repetition) unless a digest of
 that history is itself part of the state.
 
@@ -256,8 +258,8 @@ Once the state is self-sufficient, the natural condensation follows: an
 entry need carry only $(m, S', t)$, since the previous depth's entry
 already carries $S$. The court reads both entries out and judges the
 triple $(S, m, S')$. This is the form we use: each entry's \emph{head}
-(48 bytes) holds the new state, the move and the status, the region the
-mover signs; the entry carries the mover's one-time signature over that
+(48 bytes) holds the new state and the move (and, for tic-tac-toe, a
+status), the region the mover signs; the entry carries the mover's one-time signature over that
 region beside the head; and a dispute reads out the heads at depths $d-1$
 and $d$. The mover's signature matters as much as the venue's: a venue
 attestation proves an entry was \emph{published}, the mover's one-time
@@ -511,7 +513,7 @@ cost.
 
 \paragraph{Fees.} A mover pays the member that seals its move,
 atomically, with a point-locked payment inside the mover's channel. The
-lock point is $T = C_h + P_{i,s}$, the sum of the content points the
+lock point is $T = C_h + P_{i,(c,d)}$, the sum of the content points the
 mover's head selects and the intended sealer's proposer point; its
 discrete log is revealed exactly when member $i$ seals exactly that
 head as that move (Section~\ref{sec:graph:fee}). Publication and payment
@@ -532,10 +534,11 @@ hold. PTLCs are not yet deployed on the Lightning Network; the scheme
 relies on them, or on channels that implement the point lock directly,
 as ours do (the lock is an ordinary contract output with an adaptor
 pre-signature, Section~\ref{sec:graph:fee}). The proof of concept
-settles the lock in a single channel, with the sealer as the payer's
-counterparty. Sealing is not contingent on the fee arriving: the lock is
-the member's reward, so a payer's route (in the demonstration, through
-the opponent) cannot be used to censor. This is a rule, not an incentive: a
+builds the single-hop case in its test suite: the lock sits in the
+payer's channel with a hub that also runs the sealing member (the
+browser demonstrations charge no fees). Sealing is not contingent on
+the fee arriving: the lock is the member's reward, so a payer's route
+(in that test, through the opponent) cannot be used to censor. This is a rule, not an incentive: a
 member whose fee is blocked may rationally decline to seal, and
 1-of-$n$ liveness assumes that members honour the rule, their motive
 being the venue's franchise as a whole. Fees should therefore not be
@@ -670,18 +673,33 @@ broadcaster, spending the funding output. Beyond \texttt{to\_local} and
 \emph{contract}: the game output $C$ of value $V$ (both stakes), and,
 while a move's attestation fee is in flight, a \emph{fee lock} output
 $L$ (\S\ref{sec:graph:fee}). Every contract output is a taproot output
-with an unspendable internal key and a tree of named leaves; on the
-broadcaster's version every revocable leaf sits beside the standard
-revocation leaf
+with an unspendable internal key and a tree of named leaves. Like
+\texttt{to\_local}, each contract output ($C$, and $L$ while it exists)
+carries the standard revocation leaf beside its own
 \begin{lstlisting}[style=script]
 revoke:  OP_HASH160 (*\push{h_{\mathrm{rev}}}*) OP_EQUALVERIFY (*\push{P_{\mathrm{cp}}}*) OP_CHECKSIG
 \end{lstlisting}
 where $h_{\mathrm{rev}}$ is the broadcaster's per-state revocation
 hash and $P_{\mathrm{cp}}$ the counterparty's payment key, so a revoked
 state is swept in full by the counterparty exactly as in Lightning.
-Leaves that pay the broadcaster carry an extra $\push{\tsd}\ \op{CSV}\
-\op{DROP}$ so that the revocation window is respected; we omit that
-prefix below except where it changes the argument.
+Every leaf of $C$ that the broadcaster can spend carries an extra
+$\push{\tsd}\ \op{CSV}\ \op{DROP}$, so a revoked commitment's contract
+output is swept before anything can hang off it; the outputs further
+down the graph ($A_d$, $P_d$) therefore need no revocation leaf of
+their own. We omit that prefix below except where it changes the
+argument.
+
+\paragraph{Moves are not channel updates.} The contract output and its
+whole graph, for every depth, are signed when the contract is added to
+the channel. A move is an entry signed by the mover and sealed by the
+venue; the opponent signs nothing, and the latest commitment already
+enforces every later move, since the graph reads the moves from the
+venue. Channel updates happen only to open the contract, to settle it
+(a fold, an agreed result), and for fee locks, and each new commitment
+carries $C$ unchanged with its graph re-signed. So a player cannot stall
+a game by refusing to cosign: the only update near a move is the fee
+lock, and it is not routed through the opponent
+(Section~\ref{sec:venue}).
 
 The game output's tree is
 \begin{align*}
@@ -744,7 +762,7 @@ the venue, and it does three things in one script:
 \begin{enumerate}
 \item it names the proposer: the witness supplies an index $i$ and a
   signature under $P_{i,d}$, made with the scalar $p_{i,d}$ that member
-  $i$ revealed in the block it sealed (\S\ref{sec:graph:math});
+  $i$ revealed in its seal (\S\ref{sec:graph:math});
 \item it \emph{parks} the two heads: the WOTS verification of
   $K^{\mathrm{ref}}_d$ leaves the $192$ message digits (the nibbles of
   $h_{d-1}\|h_d$) on the stack, and the tied authorship check proves the
@@ -775,7 +793,17 @@ claim's dueness. Its output is the depth-$(d-1)$ claim tree verbatim
 (without a counter of its own), so a false counter is refuted by the
 claimant's attested, signed head at $d-1$ and judged by the ordinary
 family, while a true counter means the claim was never due. One level
-closes it.
+closes it. The absence claim is thin, so without the counter the only
+answer to a claim at a depth the game never reached would be a
+refutation, which the mover cannot make: a claimant who stopped
+playing at move $3$ could wait and claim $\texttt{absent}_{99}$, and
+win. With it, the mover answers ``you did not make move $98$'', which
+the claimant cannot refute. An honest claimant claims the first move
+that was not made, where the counter is false; at any later depth the
+claimant's own missing move comes first, and the counter beats the
+claim. This is also why the counter's output has no counter of its
+own: a claimant that could truly answer ``you did not make move
+$d-2$'' should have claimed that depth itself.
 
 \subsection{The refuted output}
 \label{sec:graph:refuted}
@@ -839,11 +867,15 @@ $\dl + \dlp$, so every disprove has had its window.
 \node[outp, right=2mm of C] (L) {$L$ (fee lock)};
 \draw (commit.south) -- ++(0,-1.5mm);
 
+\node[run, below=11mm of C, xshift=-62mm] (revoke) {revoke};
 \node[pre, below=11mm of C, xshift=-34mm] (settle) {settle};
 \node[pre, below=11mm of C, xshift=-4mm] (absent) {absent$_d$};
 \node[pre, below=11mm of C, xshift=34mm] (exhibit) {exhibit$_d$};
 \node[pre, below=11mm of C, xshift=66mm] (equiv) {equiv$_d$};
-\foreach \n in {settle,absent,exhibit,equiv} { \draw (C.south) edge (\n.north); }
+\foreach \n in {revoke,settle,absent,exhibit,equiv} { \draw (C.south) edge (\n.north); }
+
+\node[outp, below=3mm of revoke, font=\scriptsize, align=center] (Prev) {pot $\to$\\counterparty};
+\draw (revoke) -- (Prev);
 
 \node[outp, below=3mm of absent] (Ad) {$A_d$};
 \draw (absent) -- (Ad);
@@ -879,7 +911,9 @@ hanging off it, per depth $d$. Every output is a taproot tree; the
 edges are its leaves. The claim output $A_d$ races the mover's
 refutation against the claimant's timeout; the refuted output $P_d$
 races the claimant's disproves against the mover's self-checking split;
-the counter sends the game one depth back.}
+the counter sends the game one depth back. \texttt{revoke} is
+Lightning's revocation path, also a leaf of \texttt{to\_local} and $L$
+(not drawn); \texttt{exhibit}$_d$ is tic-tac-toe's only.}
 \label{fig:graph}
 \end{figure}
 
@@ -932,7 +966,7 @@ proving that the venue attested $h_d$ signs the refutation transaction
 itself with each revealed $a_{d,j,v_j}$ as a private key, and the
 readout's \op{CHECKSIGVERIFY} under $A_{d,j,v_j}$ succeeds exactly when
 the venue revealed that scalar. Revealing two values at one $(s,j)$ is
-the venue equivocating; it is detectable by anyone holding both blocks
+the venue equivocating; it is detectable by anyone holding both seals
 and is the object the flags and the proposer bit attribute.
 
 \paragraph{The proposer bit and the flag.}
@@ -940,8 +974,8 @@ Content is a $96$-nibble message and costs a table; a statement with no
 content costs one point. Each member $i$ therefore holds two one-bit
 keys per move, $P_{i,s} = p_{i,s} G$ (``I sealed move $s$'') and
 $F_{i,s} = f_{i,s} G$ (``move $s$ was not published by its due time''),
-and reveals the scalar when the statement holds: $p_{i,s}$ in the block
-it seals, $f_{i,s}$ as data. A revealed scalar is again a private key,
+and reveals the scalar when the statement holds: $p_{i,s}$ in the seal
+it makes, $f_{i,s}$ as data. A revealed scalar is again a private key,
 so the disputing party signs its \emph{own} transaction with it. In
 \texttt{refute} the proposer fragment selects $P_{i,d}$ by a witness
 index and demands a signature under it, so every refutation names the
@@ -1011,7 +1045,7 @@ broadcastable only once completed with $t$. \texttt{timeout} refunds
 the payer after \texttt{expiry}. Cooperatively nothing reaches the
 chain: the payee, holding $t$, hands it to the payer and proposes the
 next channel state with $L$ removed and its value credited, and the
-payer's policy accepts iff $tG = T$. A claim with no matching block on
+payer's policy accepts iff $tG = T$. A claim with no matching seal on
 the venue is answered by ejection rather than by script, and what names
 member $i$ depends on the case. Claiming reveals only the sum $t = c_h
 + p_{i,(c,d)}$, and neither part can be found by search; but anyone can
@@ -1024,8 +1058,8 @@ content secrets, could complete a lock to another head; the evidence is
 then the claim's provenance: its signature on Bitcoin, or, settled in
 the channel, a fact known to the payer. Naming $i$ does not repay the
 payer, whose real loss is an unsealed move. Its protection is 1 of $n$:
-handed $t$ with no block, it takes its signed entry to another member
-within the move's window, and it settles a fee only once the block
+handed $t$ with no seal, it takes its signed entry to another member
+within the move's window, and it settles a fee only once the seal
 exists. When the sealer is not the
 payer's counterparty, each hop of the route carries the same output,
 locked to the same $T$, with expiries decreasing towards the sealer as
@@ -1098,7 +1132,11 @@ the header format and not by the game; the game's own rules cost a few
 kilobytes per disprove, and a chess rule and a tic-tac-toe rule are
 the same shape of leaf. Every per-member statement of the venue is one
 point in a script and one signature in a witness, so the number of
-members changes the graph by tens of bytes per leaf.
+members changes the graph by tens of bytes per leaf: going from $5$
+members to $50$ adds about $1\%$ to the chess refutation. The hard
+limit is the flag count: \texttt{not\_timely} holds a witness slot per
+member on a stack of at most $1{,}000$ elements, so a committee cannot
+exceed $999$, and in practice about a hundred is the useful ceiling.
 
 
 \section{A game from open to close}
@@ -1112,10 +1150,10 @@ Figure~\ref{fig:highlevel}:
   depth limit $M$, the registry root, and the one-time keys per depth.
   They sign the new commitment and the graph of Section~\ref{sec:graph}.
 \item[Honest play.] Each move is an entry published on the venue in its
-  time, with its fee paid through the fee lock, and an ordinary channel
-  update between the players. At the end, the loser folds: the channel
-  is updated to the result and the contract output disappears. Nothing
-  reaches Bitcoin.
+  time, with its fee paid through a fee lock; the move itself needs no
+  channel update between the players. At the end, the loser folds: the
+  channel is updated to the result and the contract output disappears.
+  Nothing reaches Bitcoin.
 \item[A stall.] The mover publishes nothing for move $d$. After $T_d+m$
   the claimant broadcasts the absence claim, then after $\delta$ the
   timeout split. Two small transactions, under $400$ vB, at any depth.
@@ -1136,6 +1174,9 @@ Figure~\ref{fig:highlevel}:
   counterparty). Two signatures under a one-time key at one depth are
   their own proof; the \texttt{equiv} leaf pays the claimant, with no
   venue data.
+\item[A claim at the wrong depth.] The claimant claims absence at a
+  depth past the one where the game stopped. The mover counters, the
+  claimant cannot refute the counter, and the timeout pays the mover.
 \item[A revoked state.] As in Lightning.
 \end{description}
 
@@ -1173,8 +1214,8 @@ only the contract's value and the cooperative rules change (and
 proof of concept implements this; with each side depositing 10,000\,sat,
 a false claim's three hops of fees are paid from the claimant's deposit
 and the honest mover receives both stakes and its own deposit back. The price is
-capital: pre-signed fees are bumped at dispute time, so $D$ must be set
-at a pessimistic feerate, and both players lock it for the game's
+capital: pre-signed fees are fixed when the graph is signed, so they
+and $D$ must be set at a pessimistic feerate, and both players lock it for the game's
 duration, recovering it in the cooperative case. The pot floor becomes a
 capital cost rather than a loss, and shrinking the refutation (most of
 it is the readout's script constants) reduces it directly. A player
@@ -1327,9 +1368,10 @@ A public-information game such as chess demonstrates the mechanism, but
 it is a thin market for money. The games people play for money hide
 information, and whether LN-GAP can host them is the more telling test.
 Blackjack is the simplest casino game that needs everything the venue
-provides, and it needs little else. It is designed here, not built;
-the one new Script component has been verified on regtest (the
-\texttt{size\_commit} test of the proof of concept~\cite{lngapcode}).
+provides, and it needs little else. The proof of
+concept~\cite{lngapcode} implements it: one hand per contract, played
+between a player and the house in a real channel, with a browser front
+end.
 
 \paragraph{The game.} A player plays against a dealer (the house).
 Cards count at face value from 2 to 10, ten for a jack, queen or king,
@@ -1375,32 +1417,75 @@ computes the card, is a 137-byte leaf; on regtest a correct spend is
 183\,vB, and a wrong preimage, a string one byte longer, an
 out-of-range share and a wrong claimed card are each rejected.
 
-\paragraph{Play.} The game is a sequence of venue entries, each signed
-by the side whose turn it is, exactly as chess moves are. To deal card
-$k$, both parties reveal their shares, in a fixed order; the player's
-cards and the dealer's up-card are dealt first, the hole card's shares
-only when the player stands. The player's entries are ``hit'' and
-``stand''. In the dealer phase the house reveals the hole card and then
-keeps drawing, both shares per card, until its total reaches 17; its
-entries are forced. Every entry carries the claimed new state (the
-cards so far and the totals), and the last states the outcome, which a
-fold then settles cooperatively in the channel.
+\paragraph{Where the strings travel.} A share string cannot pass
+through the parked heads: the hash and \op{SIZE} act on one stack
+element, and rejoining a string from parked nibbles would need
+\op{CAT}. So the heads carry only the cards (one rank nibble each), and
+the strings ride in the entry's \emph{body}, beside the head and the
+mover's signature. A disprove leaf that needs a share takes the string
+as its own witness element, checks it against the commitment pinned in
+the leaf at open, and reads the value with \op{SIZE}. The claimant has
+the strings because entry bodies are public, and they are public
+because the members check them: for a blackjack contract, the
+registered check that already requires the mover's signature also
+requires each entry to carry, for every card position whose share it
+reveals, a string that opens the mover's commitment to a value in
+$0..12$. An entry without them is not a move: honest members neither
+seal it nor count it at its due time. Availability is the venue's;
+correctness stays with the leaves.
 
-\paragraph{Disputes.} The disprove family covers: a share that does not
-open its commitment; a card computed wrongly from its shares; a total
-updated wrongly, including the soft ace; an action where none is
-allowed (hitting after a bust or a stand); the dealer standing below 17
-or hitting at 17 or above; and a wrong outcome. Each is a comparison or
-a few additions, of the size of tic-tac-toe's leaves. Timeliness is the
-venue's, as in any game.
+\paragraph{Play.} The game is a sequence of venue entries, the player
+moving at odd depths and the house at even ones, each signed by its
+mover exactly as chess moves are. For every card the player reveals its
+share first and the house second. The player's first entry reveals its
+shares of its two cards and the dealer's up-card, and the house's
+reply reveals its own, dealing them. Then the player either hits,
+revealing one share, which the house answers with the card, or stands,
+revealing its shares for the hole card and every possible dealer draw,
+which the house answers with the whole dealer phase in one entry: its
+play is forced, so nothing is lost by making it at once. Revealing
+second, the house learns each card first and could refuse to reveal
+one that goes against it; that refusal is a stall, and loses the pot.
+Every entry carries the claimed new state (the cards so far, the
+counters, the phase and the status), and a hand ends with a status that
+the channel settles.
+
+\paragraph{Disputes.} The disprove family covers: a share string that
+does not open to a value in $0..12$; a card that is not the sum of its
+two shares modulo $13$; an action not allowed in the phase, or the
+wrong next phase; counters not moved as the action requires; a dealt
+card changed; a wrong status (a bust, the showdown, a push); the dealer
+stopping below 17 with cards left, or drawing at 17 or above; and
+malformed fields. Each is a comparison or a few additions, of the size
+of tic-tac-toe's leaves. Timeliness is the venue's, as in any game. One
+detail differs from chess. There, a refuted depth's result always
+favours its mover, so the mover's checked split is gated by the
+mover's outcome code. In blackjack the house can park a hand it lost,
+and could then lock the pot by never revealing its code; so blackjack's
+checked split proves the result in the leaf without the code, and
+either party can broadcast it after $\delta+\delta'$.
+
+\paragraph{In the channel.} A hand is a contract of its own: adding it
+is a channel update carrying both stakes and both dispute deposits, and
+the winner proposes the update that removes it at the result, which the
+loser's client accepts only if it computed the same result. A hand the
+loser will not settle goes on chain by a force-close, and is disputed
+off the confirmed commitment's graph. On regtest, three honest hands
+settled in six channel updates with no chain transaction; a hand with
+a wrongly computed card was force-closed (commitment 180\,vB), claimed
+(197\,vB), refuted (36,690\,vB) and disproved (4,926\,vB). Chess runs in
+the same channel layer: a mate is settled by the winner, a resignation
+or an agreed draw by update, and an illegal move goes on chain the same
+way.
 
 \paragraph{Simplifications.} Cards are drawn from an infinite deck (each
 rank independently, ten-value cards four times as likely), which is close
 to the six- or eight-deck shoes casinos use and avoids shuffling in
 Script altogether; dealing without replacement would need a mental-poker
-shuffle, which is much heavier. Payouts are one to one. A session of many
-hands is one contract with a running balance, within the horizon of
-Section~\ref{sec:security}.
+shuffle, which is much heavier. Payouts are one to one, and a push
+refunds both stakes; the dealer stands on every 17. Sixteen card
+positions bound a hand. A session of many hands is a sequence of
+contracts in one channel, each added and settled in turn.
 
 \paragraph{Why it matters.} ``Provably fair'' online casinos let a
 player verify, after the fact, that the outcomes were honestly random,
@@ -1510,34 +1595,63 @@ final equality gives a disprove leaf that is sound but not complete: an
 assertion that fails aborts the spend, and Script has no conditional
 way to succeed after one, so a read record inconsistent with its opcode
 fires no leaf. At the final step we therefore use BitVMX's orientation.
-The prover's refutation parks the disputed step's record across the
-pair of heads, and the refuted output offers the prover a
-\texttt{prove} leaf per instruction class after $\delta$ (BitVMX's
-script unchanged, then the step's hash checked with BitVMX's BLAKE3),
-and the claimant a timeout after $\delta+\delta'$. The rest of BitVMX's
-verifier challenges become the claimant's disproves on the same output:
-the program counter read is the previous step's written one, the opcode
-is the program's instruction at that address, a read value is the last
-value written there (after a second search for the write), the halt,
-and reads of the input and of initialised memory. These are not yet
-built; until they are, a prover that lies about a read value, with an
-execution consistent with the lie, passes.
+The prover's refutation parks the disputed step's record, and the
+refuted output offers, in windows that each belong to one side, the
+claimant's disproves after $\delta$; the prover a \texttt{prove} leaf
+per instruction class after $\delta+\delta'$; and the claimant a
+timeout after $\delta+2\delta'$, so a proof cannot pre-empt a disprove.
+A \texttt{prove} leaf is BitVMX's script for the class unchanged,
+followed by the step's hash checked with BitVMX's BLAKE3, and preceded
+by a guard that the opcode belongs to the leaf's class: two of BitVMX's
+scripts never check the opcode, so without the guard any step could be
+``proved'' as a no-op. The proof covers execution, not the truth of
+the reads, so BitVMX's other verifier challenges become the claimant's
+disproves on the same output: the program counter read is the previous
+step's written one; the opcode is the program's instruction at that
+address; the halt; reads of initialised and uninitialised memory; and
+reads of the input, which the prover signs word by word under one-time
+keys when it makes its claim. A read that claims to return the last
+value written to its address is checked as BitVMX checks it, by a
+second search for that write, played as a second phase of the same
+game, with BitVMX's two challenges at its end.
+
+\paragraph{The search as a game.} Each round of the search is a move:
+the prover posts the hash at the midpoint of the disputed interval, and
+the verifier chooses a half (a binary search: BitVMX's $n$-ary search
+with $n = 2$, its decision code unchanged). The search's state (the two
+agreed endpoint hashes, the interval's first step and a digest of the
+claim) is 64 bytes, more than a head holds; so, as for blackjack's
+share strings, the entry's body carries the state and its head the
+state's 20-byte BLAKE3 digest. A leaf that needs the state takes it as
+witness and checks the digest in Script, and the members' registered
+check requires every body to open its head's digests, so the state is
+always available. A wrong transition fires a disprove like an illegal
+chess move, a stalled round is an absence claim, and only the last step
+reaches the chain.
 
 \paragraph{What the proof of concept does.} The program is BitVMX's
 Groth16 verifier, a RISC-V build of a pairing-based verifier, checking
 a RISC0~\cite{risc0} proof that a STARK receipt of a guest program is
-valid. On a genuine proof it halts with success after 478{,}727{,}216
-steps; an 8-ary search takes ten rounds to reach the final
-\texttt{ecall}, and the prover's proof of it confirms on regtest at
-$22{,}736$ vB (a \texttt{prove} leaf is about 86\,KB of script, peak
-stack 700). With one bit of the proof flipped the verifier halts with
-failure, the prover cannot prove the halting step, and the claimant's
-timeout confirms at $137$ vB. The search itself runs between the two
-parties in one process, using BitVMX's own search code, not yet as venue
-moves: a round carries $n-1$ hashes of 20 bytes (seven in the 8-ary
-search above), more than our 48-byte heads hold, so it needs either larger heads or a head that carries a
-digest of data travelling in the entry body. (The verifier program's
-public constants are set to the RISC0 version of the available proof.)
+valid. On a genuine proof it halts with success after
+$478{,}727{,}216$ steps. Challenged, BitVMX's search code takes $29$
+rounds (some nine minutes off chain), which is a contract of $119$
+depths: $2{,}058$ pre-signed transactions, with $1{,}919$ disprove
+leaves and $62$ \texttt{prove} leaves at the final depth of the first
+phase. All $59$ moves of that phase were sealed by the venue, and on
+regtest the dispute was the claim ($220$\,vB), the refutation
+($36.7$\,kvB) and the proof of the halting \texttt{ecall}
+($58.5$\,kvB). The on-chain cost does not depend on the program's
+length. The leaves are large (a \texttt{prove} leaf is about $228$\,KB
+of script, at a peak stack of $948$ of the $1{,}000$ allowed), but they
+depend only on the contract's keys, so they are built once per contract
+and channel updates reuse them. The read challenge's second phase runs
+end to end on regtest on a smaller program, through the fault cases of
+BitVMX's own tests, but not yet on the Groth16 verifier. Two caveats:
+the verifier program's public constants are set to the RISC0 version of
+the available proof; and the second phase's first round is posted
+afresh rather than reused from the first, so a prover that posts a
+different hash there is not caught as such (BitVMX's protocol does not
+give it the chance).
 
 \subsection{Claims that carry their own proof}
 \label{sec:zkclaims}
@@ -1589,7 +1703,8 @@ inside the proven statement, none of which the venue has to attest. A
 shared fact is a problem for this design only when its truth can merely
 be attested; when it can be proved, it is one more move of the game.
 The practical costs remain: the claim carries the proof, 256 bytes and
-its public inputs, which again needs more than a 48-byte head; the
+its public inputs, which, like the search's state, must ride in the
+entry's body with its digest in the head; the
 other system's data must be available to the claimant and to any
 challenger; and a counter-proof must be published before its deadline,
 the same assumption on the venue's timing and on Bitcoin's liveness as
@@ -1665,6 +1780,7 @@ answering a claim with an entry the mover did not sign & authorship check in \te
 a player signing two moves at one depth & \texttt{equiv} leaf & cryptographic \\
 a stall & absence claim and timeout & Lightning's \\
 a false absence claim & refutation with the venue's attestation & 1 of $n$ (some member sealed the move) \\
+an absence claim at a depth the game never reached & \texttt{counter} & cryptographic \\
 censorship of a mover (no member seals) & nothing in Script; fee income, member independence & 1 of $n$ \\
 a late seal colluding with the mover & \texttt{not\_timely}: $t$ flags & majority \\
 false flags against a timely move & none in Script; flaggers named; provable only with an audit layer (\S\ref{sec:accountable}) & majority; economic \\
@@ -1673,6 +1789,7 @@ an unsigned seal & provable from the seal; ejection & economic \\
 two different signed moves at one depth & \texttt{equiv} leaf (the mover's fault) & cryptographic \\
 fee lock completed without sealing & $t$ itself if the member sealed nothing for the move, else the claim's provenance; ejection; the payer re-routes in time & economic \\
 the venue halting & none: see below & --- \\
+$n-t+1$ members withdrawing together (compelled, or offline) & none: sealing continues but no move can be shown late, so stalls go unpunished & committee composition \\
 a shared fact shown differently to different contracts & attribution; ejection; optional burn & economic ($G$: aggregate) \\
 refusing to refresh at the horizon & the horizon's default outcome & design \\
 \bottomrule
@@ -1716,15 +1833,21 @@ what the majority decides, and what it holds.
   instance by admitting withdrawals only to approved addresses. Here
   there is nothing to freeze. Every user's funds sit in its own channel,
   a unilateral close is always available, and if the venue falls
-  silent the contracts resolve by their deadlines.
+  silent the contracts still resolve on Bitcoin (below).
 \item \emph{Who the members are.} A federation's members must be known,
   since users trust them by name and their legal exposure is part of
   the security, which is also what makes them compellable. The venue's
   members need no legal identity: each is a bonded output and a key.
   Whether they are pseudonymous members of an open roster or identified
   operators with reputations at stake is a choice for the roster and the
-  contracting parties, and committees can mix the two; the design does
-  not choose. Either way, compelling a member achieves little, since it
+  contracting parties, and committees can mix the two. The two kinds
+  of guarantee pull different ways: open, pseudonymous entry can only
+  help the 1-of-$n$ guarantees, since one honest member suffices and
+  Sybils cost nothing there, while the majority guarantees are exactly
+  what Sybils attack, and members with reputations at stake add a cost
+  beyond the bond. A committee mixing identified operators with members
+  of an open roster, across jurisdictions, is the configuration this
+  suggests; the design does not require it. Either way, compelling a member achieves little, since it
   holds nothing; the most it can be made to do is misstate the time of a
   move in a contract it serves, under its own key.
 \end{itemize}
@@ -1746,6 +1869,29 @@ only self-contradiction, do not reach it. Publishing the entry on
 Bitcoin makes such a refusal publicly visible
 (Section~\ref{sec:accountable}).
 
+\paragraph{What is 1 of $n$, and what is not.} Publication is 1 of
+$n$: one live, honest member seals a move. Timeliness is not. Flags
+count only when $t$ members reveal them, so \texttt{not\_timely} needs $t$ members
+live and honest at the due time, and any $n-t+1$ members acting
+together, by collusion or by compulsion, can switch it off. Consider a
+committee whose majority are companies in one jurisdiction that,
+partway through a contract, are obliged by law to stop serving its
+parties. They cannot freeze the funds, which they never held, and must
+not side with either party. The other members still seal, so the game
+can go on; but no move can now be shown to be late, so an absence claim
+is no longer safe against a deliberate staller, who answers it with a
+late move sealed by a remaining member, leaving the claimant no flags
+to show. (The claim still wins against a party that has truly gone.)
+Stalling becomes a free option for whoever is losing, and the contract
+falls back on what needs no flags: a cooperative settlement, the
+deadline's \texttt{settle}, or a fresh contract under another committee
+(the members are fixed at open, since the graph embeds their points; a
+protocol to move a live contract to a new committee is future work).
+That is far better than a custodian's freeze, but it is a degradation,
+and it shows what a committee's composition must guard against: not
+only a colluding group of $t$, but any group of $n-t+1$ that can be
+compelled together, such as one jurisdiction, host or operator.
+
 \paragraph{Bitcoin's liveness.} Every branch of the dispute graph is a
 race against a timelock: a refutation must confirm before the
 claimant's timeout, a disprove before the mover's split. The contract
@@ -1760,7 +1906,7 @@ Lightning's mitigations; the windows $\delta$ and $\delta'$ are what
 buys time for either.
 
 \paragraph{The majority.} Flags are the only place the design needs a
-threshold, and it is there for \emph{order}, not for stake: two blocks
+threshold, and it is there for \emph{order}, not for stake: two statements
 by two members (``move $d$ was not published'', ``here is move $d$'')
 cannot be ordered by any third fact, so canonical timing needs agreement
 among the members, or an external clock. A colluding majority can kill
@@ -2155,9 +2301,14 @@ is ForceMove played on Bitcoin with the rounds as moves. It needs no
 trust beyond Bitcoin's eventual freedom from censorship, and a dispute
 costs a number of transactions, and of timelock waits, logarithmic in
 the length of the trace. We avoid on-chain bisection by giving each
-game a family of single-step disprove leaves; the same search could
-instead be played as a venue game, with only its final step on chain,
-which Section~\ref{sec:zk} develops for a zero-knowledge verifier.
+game a family of single-step disprove leaves, and where a program is
+too large for that, we play BitVMX's search as a venue game, with only
+its final step on chain (Section~\ref{sec:zk}); its CPU, emulator,
+search, step scripts and Groth16 verifier program are taken from the
+BitVMX codebase. ESSPI~\cite{esspi}, from the same authors, publishes
+large program inputs on Bitcoin before a timelocked deadline: the
+public clock of this paper, used once per dispute rather than once per
+move.
 StackSat-128~\cite{stacksat} is a Script-friendly hash designed for the
 proof-of-work alternative. The attestation primitive is that of Discreet
 Log Contracts~\cite{dlc}: an oracle publishes anticipation points in
@@ -2182,10 +2333,12 @@ read, and flags by majority what it did not, closes the gap with
 $O(1)$ transactions per dispute and no change to Bitcoin. Content stays
 cryptographic; time becomes a 1-of-$n$ and majority fact about a bonded,
 fee-paid set of members; shared facts are secured economically, up to a
-bound set by the venue's revenue. A proof of concept, with the venue,
-the dispute graph for tic-tac-toe and chess, their scenario suites on
-regtest, and an interactive chess demonstration in the browser, is
-available~\cite{lngapcode}. The remaining weakness, a colluding
+bound set by the venue's revenue. A proof of concept is
+available~\cite{lngapcode}: the venue; the dispute graph for
+tic-tac-toe and chess, with their scenario suites on regtest; blackjack
+and chess played in a real channel, in the browser; and a dispute over
+a Groth16 verifier's execution, searched on the venue with one step on
+chain. The remaining weakness, a colluding
 majority of the venue, can be made both harder to assemble and
 accountable rather than deniable: committees drawn per contract from a
 large bonded roster, and an audit layer, anchored to Bitcoin, against
