@@ -333,7 +333,7 @@ impl Hand {
                 let n = f.iter().filter(|x| x.is_some()).count();
                 self.flags.insert(d, f);
                 if matches!(self.phase, Some(Phase::Playing) | Some(Phase::Disputed)) {
-                    s.say(format!("venue: move {d} was due at t+{}s with no valid seal — {n} of {K} members flagged it", self.rel(self.due(d))));
+                    s.say(format!("venue: move {d} was due at {} with no valid seal — {n} of {K} members flagged it", t_rel(self.rel(self.due(d)))));
                 }
             }
         }
@@ -397,7 +397,7 @@ impl Hand {
         match rules.judge(self, slot, &head, &entry[48 + n_sig..]) {
             Ok(desc) => {
                 self.depth = slot;
-                s.say(format!("venue: move {slot} sealed by member {by} at t+{when}s: {mover_s} — {desc}"));
+                s.say(format!("venue: move {slot} sealed by member {by} at {}: {mover_s} — {desc}", t_rel(when)));
             }
             Err(why) => {
                 self.bad_slots.insert(slot, why.clone());
@@ -574,7 +574,7 @@ impl Hand {
         let at = self.inst.as_ref()?.claim_from(d);
         let mtp = s.rt.mtp().unwrap_or(0);
         if mtp <= at {
-            return Some(format!("its lock is median-time-past > t+{}s; MTP is t+{}s", self.rel(at), self.rel(mtp)));
+            return Some(format!("its lock is median-time-past > {}; MTP is {}", t_rel(self.rel(at)), t_rel(self.rel(mtp))));
         }
         let h = s.height();
         let csv = h0 + u32::from(s.params.to_self_delay);
@@ -709,7 +709,7 @@ impl Hand {
         let p = self.skel(&label)?;
         let mut tx = p.tx.clone();
         tx.input[0].witness = tapscript_witness(&[sh, su], &p.leaf.script, &p.control_block);
-        s.say(format!("claiming: no valid move {d} by its due time t+{}s", self.rel(self.due(d))));
+        s.say(format!("claiming: no valid move {d} by its due time {}", t_rel(self.rel(self.due(d)))));
         Self::broadcast(s, &tx, &format!("`{label}`"))
     }
 
@@ -866,4 +866,10 @@ impl Hand {
         let mempool = self.mempool_labels(s).iter().map(|l| (s.ui)(l)).collect();
         (slots, live, mempool)
     }
+}
+
+/// A time relative to the game's start as the pages show it: `t+5s`, or
+/// `t-5s` for a move sealed before its game's clock started.
+pub fn t_rel(x: i64) -> String {
+    if x < 0 { format!("t{x}s") } else { format!("t+{x}s") }
 }

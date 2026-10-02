@@ -66,6 +66,7 @@ tr.bad td{color:var(--bad)}tr.late td{background:#fff3e0}
 </div>
 </main>
 <script>
+const R=x=>(x<0?"t"+x:"t+"+x)+"s";
 const glyph={K:"♔",Q:"♕",R:"♖",B:"♗",N:"♘",P:"♙",k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
 const files="abcdefgh";
 let sel=null, legal=[], snap=null;
@@ -99,7 +100,7 @@ async function poll(){
   $("chaninfo").innerHTML="<b>"+c.status+"</b>, update "+c.seq+": White holds <b>"+c.user.toLocaleString()+"</b> sat, Black <b>"+c.hub.toLocaleString()+"</b>"+(c.in_play?", <b>"+c.in_play.toLocaleString()+"</b> in game "+snap.game+"'s contract":"")+(snap.draw_offered?" · <b>a draw is offered</b>":"");
   $("results").textContent=snap.results.length?("settled: "+snap.results.join(" · ")):"";
   if(!snap.game){$("clock").textContent="no game yet · Bitcoin height "+snap.height}else
-  $("clock").textContent="game "+snap.game+" ("+(snap.game_phase||"")+") · t+"+snap.now+"s · move "+(snap.depth+1)+" due t+"+snap.next_due+"s ("+(snap.next_due-snap.now)+"s) · a move every "+snap.ell+"s · Bitcoin height "+snap.height+", MTP t+"+snap.mtp+"s";
+  $("clock").textContent="game "+snap.game+" ("+(snap.game_phase||"")+") · "+R(snap.now)+" · move "+(snap.depth+1)+" due "+R(snap.next_due)+" ("+(snap.next_due-snap.now)+"s) · a move every "+snap.ell+"s · Bitcoin height "+snap.height+", MTP "+R(snap.mtp);
   $("turn").textContent=snap.terminal?("game over: "+snap.terminal):("depth "+snap.depth+" · "+(snap.to_move==="user"?"white":"black")+" to move");
   $("pot").textContent="on chain: "+snap.balance_sat.toLocaleString()+" sat";
   render();

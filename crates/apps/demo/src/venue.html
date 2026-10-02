@@ -29,13 +29,14 @@ input,select{font:inherit;padding:4px 6px}
 </div>
 </main>
 <script>
+const R=x=>(x<0?"t"+x:"t+"+x)+"s";
 const $=id=>document.getElementById(id);const v=id=>$(id).value.trim();
 async function cmd(c){const r=await (await fetch("/cmd",{method:"POST",body:JSON.stringify({cmd:c})})).json();$("out").textContent=(r.ok?"":"! ")+r.output;poll()}
 async function poll(){let s;try{s=await (await fetch("/state")).json()}catch(e){return}
- $("clock").textContent=(s.clock==null?"no game registered yet":"t+"+s.clock+"s")+" · a move every "+s.ell+"s, fallback "+s.backoff+"s, claims "+s.margin+"s past a due time";$("tick").textContent="Bitcoin height "+s.height+" (MTP t+"+(s.t0?s.mtp-s.t0:0)+"s), next block in "+s.next_block_secs+"s"+(s.ready?"":" · waiting for the players");
+ $("clock").textContent=(s.clock==null?"no game registered yet":R(s.clock))+" · a move every "+s.ell+"s, fallback "+s.backoff+"s, claims "+s.margin+"s past a due time";$("tick").textContent="Bitcoin height "+s.height+" (MTP "+R(s.t0?s.mtp-s.t0:0)+"), next block in "+s.next_block_secs+"s"+(s.ready?"":" · waiting for the players");
  $("hint").textContent=s.n+" members, threshold "+s.threshold;$("thr").textContent=s.threshold+" of "+s.n;
  const M=$("members");M.innerHTML="";for(let i=0;i<s.n;i++){const d=document.createElement("span");d.className="m"+(s.silent.includes(i)?" silent":"");d.textContent="member "+i;M.appendChild(d)}
- const T=$("slots").querySelector("tbody");T.innerHTML="";for(const d of s.depths){const tr=document.createElement("tr");const late=d.seals.some(x=>x.late||x.rogue);tr.className=late?"late":"";const seals=d.seals.length?d.seals.map(x=>"member "+x.proposer+" at t+"+x.sealed_at+"s"+(x.late?" (LATE)":"")+(x.rogue?" (ROGUE)":"")).join("; "):(d.due<s.clock?"nothing sealed":"");tr.innerHTML=`<td>${d.depth}</td><td>${d.mover}</td><td>t+${d.due}s</td><td>member ${d.designated}</td><td>${seals}</td><td>${d.flags==null?"":d.flags+" of "+s.n}</td>`;T.appendChild(tr)}
+ const T=$("slots").querySelector("tbody");T.innerHTML="";for(const d of s.depths){const tr=document.createElement("tr");const late=d.seals.some(x=>x.late||x.rogue);tr.className=late?"late":"";const seals=d.seals.length?d.seals.map(x=>"member "+x.proposer+" at "+R(x.sealed_at)+(x.late?" (LATE)":"")+(x.rogue?" (ROGUE)":"")).join("; "):(d.due<s.clock?"nothing sealed":"");tr.innerHTML=`<td>${d.depth}</td><td>${d.mover}</td><td>t+${d.due}s</td><td>member ${d.designated}</td><td>${seals}</td><td>${d.flags==null?"":d.flags+" of "+s.n}</td>`;T.appendChild(tr)}
  const held=[].concat(s.inbox.map(x=>"in flight: "+x),s.late.map(x=>"LATE (held): "+x),s.refused.map(x=>"REFUSED as unsigned (held): "+x));$("inbox").textContent=held.length?held.join("\n"):"nothing held";
 }
 poll();setInterval(poll,1000);
