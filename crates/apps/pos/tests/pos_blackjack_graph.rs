@@ -221,8 +221,10 @@ impl Path {
             let pair = g.ks(mover).sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap();
             self.pair_sig = Some(pair.clone());
             let prev_block = &self.sealed[&(d - 1)];
-            let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx0, &a_prev, &p.leaf.script)).collect();
-            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair, &[&new_sig])
+            // the prior is bound by the claimant's signature, from its entry
+            let prev_key = g.ks(mover.other()).wots_public(&instance::state_label(CONTRACT_ID, 1, d - 1)).unwrap();
+            let prev_sig = refute::entry_auth_sig(&prev_key, &blackjack::auth_message(&prev_head), &prev_block.entry).expect("the prior entry carries its mover's signature");
+            refute::refute_witness_pair_signed(&sigs_new, &pair, [&new_sig, &prev_sig])
         } else {
             let sig = g.ks(mover).sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());

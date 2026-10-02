@@ -402,7 +402,7 @@ impl Path {
             msg.extend_from_slice(&new_head);
             let pair_sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap();
             self.pair_sig = Some(pair_sig.clone());
-            let _prev_sig = auth_sig(g, d - 1, &prev_head); // chess authorship is new-head-only (D42); the call keeps the keystore's one-time discipline
+            let prev_sig = auth_sig(g, d - 1, &prev_head); // the prior is bound by the claimant's signature
             let new_sig = auth_sig(g, d, &new_head);
             let new_block = &self.venue.sealed[&d];
             let prev_block = &self.venue.sealed[&(d - 1)];
@@ -412,7 +412,8 @@ impl Path {
             let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig])
+            let _ = sigs_prev;
+            refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&new_sig, &prev_sig])
         } else {
             let sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());
@@ -465,7 +466,9 @@ impl Path {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, a_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&junk_r]);
+        let _ = sigs_prev;
+        let prev_sig = auth_sig(g, d - 1, &prev_head);
+        let mut w = refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&junk_r, &prev_sig]);
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, tx, a_prev, &p.leaf.script), new_block.proposer));
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
         w.push(mover_sig);

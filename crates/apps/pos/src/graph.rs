@@ -168,19 +168,13 @@ pub fn proposer_witness(sig_p: Vec<u8>, i: usize) -> Vec<Vec<u8>> {
 #[allow(clippy::too_many_arguments)]
 pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>, proposers: &[XOnlyPublicKey]) -> Leaf {
     let body = match table_prev {
-        Some(tp) => refute::refute_leaf_pair_gated(tp, table, &keys.refute, |b| {
-            // the D41 authorship gate: tic-tac-toe checks BOTH parked heads
-            // (21 bits each, cheap); chess checks the NEW head alone — the
-            // judged move's — because 2 x 336 preimage blocks do not fit
-            // the 1,000-element stack under the readout (D42). The prior
-            // head's authenticity is inductive: an unauthored head at d-1
-            // is unrefutable at d-1's own claim, so a game never continues
-            // past one.
+        // the prior is bound by the claimant's signature, not read out
+        // (refute_leaf_pair_signed): the gate checks BOTH parked heads'
+        // authorship, the new head under the mover's key and the prior
+        // under the claimant's one-time key for depth d-1, for every game
+        Some(_) => refute::refute_leaf_pair_signed(table, &keys.refute, |b| {
             let b = authorship(b, game, l.file, l.new, &keys.state);
-            match game {
-                Game::Ttt => authorship(b, game, l.file, 0, &keys_prev.expect("a pair has a prior").state),
-                Game::Chess | Game::Blackjack | Game::Zk => b,
-            }
+            authorship(b, game, l.file, 0, &keys_prev.expect("a pair has a prior").state)
         }),
         None => refute::refute_leaf(table, &keys.refute, |b| authorship(b, game, l.file, 0, &keys.state)),
     };

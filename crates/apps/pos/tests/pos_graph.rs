@@ -299,7 +299,8 @@ impl Path {
             let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
                 .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
                 .collect();
-            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig, &prev_sig])
+            let _ = sigs_prev; // the prior is bound by the claimant's signature
+            refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&new_sig, &prev_sig])
         } else {
             let sig = g.keys_of(instance::mover_at(d)).0.sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());
@@ -349,7 +350,8 @@ impl Path {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], tx, a_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&mk_junk(&new_head), &mk_junk(&prev_head)]);
+        let _ = sigs_prev;
+        let mut w = refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&mk_junk(&new_head), &mk_junk(&prev_head)]);
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, tx, a_prev, &p.leaf.script), new_block.proposer));
         let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
         w.push(mover_sig);
@@ -793,7 +795,8 @@ fn wired_pos_graph() {
         let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
             .map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script))
             .collect();
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_sig, &prev_sig]);
+        let _ = sigs_prev;
+        let mut w = refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&new_sig, &prev_sig]);
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, &tx, &a_prev, &p.leaf.script), new_block.proposer));
         w.push(sign_tx(g.payment_of(instance::mover_at(D)), &tx, &a_prev, &p.leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);

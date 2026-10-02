@@ -270,7 +270,10 @@ fn blackjack_hands_in_a_channel() {
     let pair = w.ks[1].sign_wots(&instance::refute_label(2, 1, 2), &[prev_head.as_slice(), new_head.as_slice()].concat()).unwrap();
     let auth = w.ks[1].sign_wots(&instance::state_label(2, 1, 2), &blackjack::auth_message(&new_head)).unwrap();
     let chunk_sigs = |b: &SealedBlock| -> Vec<Vec<u8>> { (0..HEAD_CHUNKS).map(|j| sign_with(&b.attestation.secrets[HEAD_CHUNK_START + j], &p.tx, &a_prev, &p.leaf.script)).collect() };
-    let mut wit = refute::refute_witness_pair(&chunk_sigs(&h2.sealed[&1]), &chunk_sigs(&h2.sealed[&2]), &pair, &[&auth]);
+    // the prior is bound by the player's signature, from its sealed entry
+    let prev_key = w.ks[0].wots_public(&instance::state_label(2, 1, 1)).unwrap();
+    let prev_auth = refute::entry_auth_sig(&prev_key, &blackjack::auth_message(&prev_head), &h2.sealed[&1].entry).expect("the player's entry is signed");
+    let mut wit = refute::refute_witness_pair_signed(&chunk_sigs(&h2.sealed[&2]), &pair, [&auth, &prev_auth]);
     let blk = &h2.sealed[&2];
     wit.extend(proposer_witness(sign_with(&blk.proposer_secret, &p.tx, &a_prev, &p.leaf.script), blk.proposer));
     wit.push(sign_tx(&w.hub.keys.payment, &p.tx, &a_prev, &p.leaf.script));

@@ -202,8 +202,8 @@ impl World {
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the claim at {d} must mine: {e}"));
         println!("  claim absent_{d}: {} vB", tx.vsize());
     }
-    /// The mover's refutation at `d`: the readout of heads d-1 and d, the
-    /// pair reveal, the new head's authorship, the proposer, the mover.
+    /// The mover's refutation at `d`: the readout of head d, the pair
+    /// reveal, both heads' authorship, the proposer, the mover.
     fn refute(&mut self, rt: &Regtest, d: u32) -> (OutPoint, TxOut) {
         let id = self.inst.id;
         let p = self.skel(&format!("absent_{d}/refute")).clone();
@@ -218,9 +218,11 @@ impl World {
             let prev_head = self.head(d - 1);
             let pair = self.ks[mover.idx()].sign_wots(&instance::refute_label(id, 1, d), &[prev_head.as_slice(), new_head.as_slice()].concat()).unwrap();
             let prev_block = &self.sealed[&(d - 1)];
-            let sigs_prev: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|j| sign_with(&prev_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script)).collect();
             self.pair_sig = Some(pair.clone());
-            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair, &[&auth])
+            // the prior is bound by the claimant's signature, from its entry
+            let prev_key = self.ks[mover.other().idx()].wots_public(&instance::state_label(id, 1, d - 1)).unwrap();
+            let prev_auth = refute::entry_auth_sig(&prev_key, &prev_head[4..], &prev_block.entry).expect("the prior entry carries its mover's signature");
+            refute::refute_witness_pair_signed(&sigs_new, &pair, [&auth, &prev_auth])
         } else {
             let pair = self.ks[mover.idx()].sign_wots(&instance::refute_label(id, 1, d), &new_head).unwrap();
             self.pair_sig = Some(pair.clone());

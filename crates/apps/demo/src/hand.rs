@@ -745,8 +745,12 @@ impl Hand {
         let sign_at = |b: &SealedBlock| -> Vec<Vec<u8>> { (0..HEAD_CHUNKS).map(|j| sig_bytes(&Keypair::from_secret_key(SECP256K1, &b.attestation.secrets[HEAD_CHUNK_START + j]), &tx, &prev, &leaf)).collect() };
         let sigs_new = sign_at(&new);
         let mut w = if d >= 2 {
+            // the prior is bound by the opponent's own signature, taken from
+            // its sealed entry; only the new head is read out
             let prior = self.blocks.get(&(d - 1)).ok_or_else(|| anyhow!("no seal for move {}", d - 1))?;
-            refute::refute_witness_pair(&sign_at(prior), &sigs_new, &pair_sig, &[&auth])
+            let key = self.their_state_keys.get(&(d - 1)).ok_or_else(|| anyhow!("no state key for move {}", d - 1))?;
+            let prior_auth = refute::entry_auth_sig(key, &rules.auth_message(&prior.header.head()), &prior.entry).ok_or_else(|| anyhow!("move {} is not signed by its mover", d - 1))?;
+            refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&auth, &prior_auth])
         } else {
             refute::refute_witness(&sigs_new, &pair_sig, &auth)
         };

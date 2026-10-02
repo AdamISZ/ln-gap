@@ -528,8 +528,14 @@ impl PosGame {
             (0..HEAD_CHUNKS).map(|j| sign_tx(&Keypair::from_secret_key(SECP256K1, &block.attestation.secrets[HEAD_CHUNK_START + j]), &tx, &prev, &leaf)).collect()
         };
         let sigs_new = sign_at(&self.sealed[&d]);
-        let sigs_prev = sign_at(&self.sealed[&(d - 1)]);
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r, &prev_r]);
+        // the exhibit still reads both heads out; a refutation reads the new
+        // head alone, the prior bound by the claimant's signature
+        let mut w = if label.starts_with("exhibit") {
+            let sigs_prev = sign_at(&self.sealed[&(d - 1)]);
+            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r, &prev_r])
+        } else {
+            refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&new_r, &prev_r])
+        };
         // the proposer fragment (D53): the block's proposer scalar signs too, naming the member
         let blk = &self.sealed[&d];
         w.extend(proposer_witness(sign_tx(&Keypair::from_secret_key(SECP256K1, &blk.proposer_secret), &tx, &prev, &leaf), blk.proposer));

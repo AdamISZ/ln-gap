@@ -4,7 +4,7 @@
 //! the source of truth for the crypto; this catches stack bugs.
 
 use lngap_ec_wots::Attester;
-use lngap_pos::refute::{pair_key, refute_key, refute_leaf, refute_leaf_pair_gated, refute_witness, refute_witness_pair, HEAD_CHUNKS};
+use lngap_pos::refute::{pair_key, refute_key, refute_leaf, refute_leaf_pair_gated, refute_leaf_pair_signed, refute_witness, refute_witness_pair, refute_witness_pair_signed, HEAD_CHUNKS};
 use lngap_pos::HEADER_CHUNKS;
 
 const DUMMY_SIG: [u8; 64] = [0x30; 64];
@@ -150,4 +150,50 @@ fn refute_pair_rejects_a_mismatched_recommitment() {
         leaf.as_script(),
         refute_witness_pair(&sigs, &sigs, &sig, &[&zero_state_sig(2), &zero_state_sig(1)]),
     );
+}
+
+// ----- the prior bound by the claimant's signature (refute_leaf_pair_signed) -----
+
+#[test]
+fn refute_pair_signed_runs() {
+    // only the new head is read out; the prior's 96 parked digits are judged
+    // by the claimant's authorship block and dropped
+    let (_t1, t2, h1, h2) = pair_setup();
+    let key = pair_key([9u8; 32]);
+    let sig = key.sign(&pair_msg(&h1, &h2)).unwrap();
+    let leaf = refute_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
+    let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
+    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness_pair_signed(&sigs, &sig, [&zero_state_sig(2), &zero_state_sig(1)]))
+        .expect("a correct signed-prior refutation must run");
+    assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1 and a clean stack");
+}
+
+#[test]
+fn refute_pair_signed_rejects_a_prior_the_claimant_did_not_sign() {
+    // the mover parks a prior whose claimed state (byte 7) the claimant
+    // never signed: the claimant's authorship block (over state 0) no
+    // longer matches the parked digits, and the leaf fails. This is the
+    // check that replaces the prior's readout, and unlike the readout's
+    // point selection the sim runs it for real (HASH160 chains).
+    let (_t1, t2, _h1, h2) = pair_setup();
+    let mut forged = [0u8; 48];
+    forged[7] = 0x01;
+    let key = pair_key([9u8; 32]);
+    let sig = key.sign(&pair_msg(&forged, &h2)).unwrap();
+    let leaf = refute_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
+    let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
+    assert!(
+        lngap_script32::sim::run(leaf.as_script(), refute_witness_pair_signed(&sigs, &sig, [&zero_state_sig(2), &zero_state_sig(1)])).is_err(),
+        "a prior the claimant did not sign must not refute"
+    );
+}
+
+#[test]
+fn refute_pair_signed_is_about_half_the_script() {
+    let (t1, t2, _h1, _h2) = pair_setup();
+    let key = pair_key([9u8; 32]);
+    let old = refute_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
+    let new = refute_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
+    println!("pair refute script: both heads read out {} B, prior by signature {} B", old.len(), new.len());
+    assert!(new.len() * 10 < old.len() * 6, "dropping one head's readout must save over 40% of the script");
 }

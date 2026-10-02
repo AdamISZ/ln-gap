@@ -552,12 +552,13 @@ impl ChessPosGame {
         } else {
             self.auth_sig(d, &new_head)
         };
+        // the prior is bound by the claimant's signature from its entry
+        let prev_r = self.auth_sig(d - 1, &prev_head);
         let sign_at = |block: &SealedBlock| -> Vec<Vec<u8>> {
             (0..HEAD_CHUNKS).map(|j| sign_tx(&Keypair::from_secret_key(SECP256K1, &block.attestation.secrets[HEAD_CHUNK_START + j]), &tx, &prev, &leaf)).collect()
         };
         let sigs_new = sign_at(&self.sealed[&d]);
-        let sigs_prev = sign_at(&self.sealed[&(d - 1)]);
-        let mut w = refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r]);
+        let mut w = refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&new_r, &prev_r]);
         // the proposer fragment (D53): the block's proposer scalar signs too, naming the member
         let blk = &self.sealed[&d];
         w.extend(proposer_witness(sign_tx(&Keypair::from_secret_key(SECP256K1, &blk.proposer_secret), &tx, &prev, &leaf), blk.proposer));

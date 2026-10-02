@@ -126,6 +126,18 @@ pub fn check_entry_sig(pk: &WotsPublic, msg: &[u8], sigs: &[[u8; 20]]) -> bool {
     }
 }
 
+/// An entry's authorship signature (`entry = head || reveal hashes || body`)
+/// as a [`WotsSig`] over `msg`, the game's `auth_message` of its head:
+/// what a refutation carries for the claimant's prior head, taken from the
+/// claimant's own published entry. `None` if the entry is too short or the
+/// hashes do not form a signature of `msg`.
+pub fn entry_auth_sig(pk: &WotsPublic, msg: &[u8], entry: &[u8]) -> Option<WotsSig> {
+    let n_sig = pk.params.total_digits() as usize * 20;
+    let hashes: Vec<[u8; 20]> = entry.get(HEAD_BYTES..HEAD_BYTES + n_sig)?.chunks(20).map(|c| c.try_into().expect("20 bytes")).collect();
+    let sig = WotsSig::from_hashes(pk.params, msg, hashes).ok()?;
+    pk.verify(&sig).is_ok().then_some(sig)
+}
+
 /// The disprove witness: the re-commitment reveal alone.
 pub fn disprove_witness(sig: &WotsSig) -> Vec<Vec<u8>> {
     wots_wire(sig)
@@ -177,6 +189,54 @@ pub fn refute_leaf_pair_gated(
         b = readout_tied_fragment(b, &table.points[j]);
     }
     b.push_int(1).into_script()
+}
+
+/// The two-head refutation leaf with the PRIOR head bound by signature, not
+/// by the venue (the prior-by-signature change): `gate` must check BOTH
+/// parked heads' authorship — the new head under the mover's depth-`d`
+/// state key and the prior under the claimant's depth-`d-1` key. That key
+/// is one-time, so only one prior can carry it (two are the claimant's
+/// equivocation), and the disprove family judges the claimant's own move
+/// `d-1` as surely as a readout would pin it. Only the NEW head is read out:
+/// the claim is "move `d` was not published", and the prior's publication
+/// is the counter's question, whose tree reads it out as its own new head.
+/// Half the readout's script constants go (about 17 kvB of a 36.6 kvB
+/// chess refutation). Each game's signed region must cover every prior
+/// field its leaves read; word0, which no game signs, is pinned by
+/// `wrong_slot`, so a forged prior word0 fires against the mover.
+pub fn refute_leaf_pair_signed(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Builder) -> Builder) -> ScriptBuf {
+    let mut b = gate(Builder::new().wots_verify(key));
+    // the new head's digits (the file's top 96) to the altstack, its
+    // digit 0 coming out first; the prior's 96, now judged by the gate's
+    // signature alone, are dropped
+    for _ in 0..HEAD_CHUNKS {
+        b = b.push_opcode(OP_TOALTSTACK);
+    }
+    for _ in 0..HEAD_CHUNKS / 2 {
+        b = b.push_opcode(OP_2DROP);
+    }
+    for j in HEAD_CHUNK_START..HEAD_CHUNK_START + HEAD_CHUNKS {
+        b = readout_tied_fragment(b, &table.points[j]);
+    }
+    b.push_int(1).into_script()
+}
+
+/// The witness of [`refute_leaf_pair_signed`], wire order: the NEW head's
+/// chunk sigs (descending), then both authorship blocks, then the pair
+/// reveal. `auth` is `[new, prior]` in consumption order (the new head's
+/// block is checked first).
+pub fn refute_witness_pair_signed(sigs: &[Vec<u8>], sig: &WotsSig, auth: [&WotsSig; 2]) -> Vec<Vec<u8>> {
+    assert_eq!(sigs.len(), HEAD_CHUNKS);
+    let n_auth: usize = auth.iter().map(|s| s.params.total_digits() as usize + s.params.checksum_digits as usize).sum();
+    let mut w = Vec::with_capacity(HEAD_CHUNKS + n_auth + 2 * sig.params.total_digits() as usize);
+    for j in (0..HEAD_CHUNKS).rev() {
+        w.push(sigs[j].clone());
+    }
+    for block in auth.iter().rev() {
+        w.extend(wots_wire_tied(block));
+    }
+    w.extend(wots_wire(sig));
+    w
 }
 
 /// The two-head refutation witness, wire order: the NEW head's chunk sigs
