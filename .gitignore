@@ -8,3 +8,4 @@
 # the interactive chess-on-the-venue game's runtime directory (the node, the venue's blocks, the players' offers)
 /chess-venue/
 upstream/
+/docs/design-notes/
