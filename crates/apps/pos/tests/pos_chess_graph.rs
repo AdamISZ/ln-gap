@@ -664,6 +664,12 @@ fn wired_pos_chess_graph() {
             "the wired chess graph: settle + {MAX_DEPTH} x (claim, refute, 3 + 3 splits) + {MAX_DEPTH} per-depth equivocation exhibits (D39, D43) + {} x (counter, refute, 3 + 3 splits) (D44); NO exhibit family (D42)",
             MAX_DEPTH - 1
         );
+        // settle, the fallback at the deadline (a game that reached its move
+        // limit without a mate, or was abandoned), pays chess a draw: the
+        // two outputs are equal
+        let settle = &skel(&path.graph, "settle").tx;
+        assert_eq!(settle.output.len(), 2, "settle pays both sides");
+        assert_eq!(settle.output[0].value, settle.output[1].value, "chess settles as a draw");
         // slot 1: user's legal e2e4; slot 2: hub's c8e6 — a bishop jumping
         // the d7 pawn
         rt.mine(1).unwrap();

@@ -525,10 +525,12 @@ impl PosInstance {
         let fee = ctx.params.presign_fee;
         let mut out = Vec::new();
         let tree0 = self.tree(ctx)?;
-        // settle's resolution: tic-tac-toe's and chess's R(initial); for
-        // blackjack a refund (D57: the draw)
+        // settle's resolution: tic-tac-toe's R(initial); for blackjack a
+        // refund (D57: the draw); for chess the draw too, since settle is
+        // what a game that reached its move limit without a mate (or that
+        // both sides abandoned) resolves to
         let r = match self.game {
-            Game::Blackjack => self.outcomes.iter().find(|o| o.code == 2).cloned().expect("the draw outcome"),
+            Game::Blackjack | Game::Chess => self.outcomes.iter().find(|o| o.code == 2).cloned().expect("the draw outcome"),
             // D60: silence until the deadline is acceptance
             Game::Zk => {
                 let c = self.family()?.settle_code();

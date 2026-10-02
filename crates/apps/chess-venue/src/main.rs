@@ -58,7 +58,9 @@ fn main() -> Result<()> {
     // the deposit covers the longest dispute path at the demo's fixed
     // pre-sign fee: claim or counter, refutation, split (4 x 40k)
     let mut timing = Timing { ell: 90, backoff: 5, margin: 60, start_secs: 60, deposit: 170_000 };
-    let mut max_depth = 20u32;
+    // the last move of a game, in plies (moves by either side): a game
+    // that reaches it without a mate is a draw
+    let mut max_depth = 50u32;
     let mut web: Option<u16> = None;
     let mut positional = Vec::new();
     let mut i = 0;

@@ -9,7 +9,10 @@
 //! its client sees the same mate); a stalemate is settled as a draw; RESIGN
 //! concedes the game (always acceptable to the opponent); OFFER DRAW agrees
 //! to an even split and tells the opponent, whose ACCEPT DRAW proposes it.
-//! A game with no agreed result goes on chain by force-close.
+//! A game that reaches the move limit (the venue's `max_depth`, in plies)
+//! without a mate is a draw, settled like a stalemate; on chain, the
+//! contract's `settle` at its deadline pays the same draw. A game with no
+//! agreed result goes on chain by force-close.
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -66,11 +69,33 @@ fn win_for(r: Role) -> Payout {
 pub struct ChessRules {
     /// The position after the last valid move.
     pub state: ChessState,
+    /// The last move of a game (the venue's `max_depth`, in plies).
+    pub max_depth: u32,
+}
+
+/// How a game ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ending {
+    Checkmate,
+    Stalemate,
+    /// The last move was played without a mate: a draw.
+    MoveLimit,
 }
 
 impl ChessRules {
     fn state_of(head: &[u8; 48]) -> Option<ChessState> {
         ChessState::from_e(head[8..48].try_into().ok()?).ok()
+    }
+
+    /// The game's ending, if it is over: a mate or a stalemate, or, past
+    /// the last move, the move limit.
+    pub fn ending(&self) -> Option<Ending> {
+        match lngap_chess::terminal(&self.state.pos) {
+            Some(Terminal::Checkmate) => Some(Ending::Checkmate),
+            Some(Terminal::Stalemate) => Some(Ending::Stalemate),
+            None if u32::from(self.state.depth) >= self.max_depth => Some(Ending::MoveLimit),
+            None => None,
+        }
     }
 }
 
@@ -108,7 +133,11 @@ impl Rules for ChessRules {
                     return Err(format!("the position claimed for {} is not its result", new.mv));
                 }
                 self.state = new;
-                let term = lngap_chess::terminal(&self.state.pos).map(|t| format!(" — {t:?}")).unwrap_or_default();
+                let term = match self.ending() {
+                    Some(Ending::MoveLimit) => format!(" — the move limit ({}): a draw", self.max_depth),
+                    Some(e) => format!(" — {e:?}"),
+                    None => String::new(),
+                };
                 Ok(format!("{} (signed, legal){term}", self.state.mv))
             }
             Err(v) => Err(format!("{} is ILLEGAL ({v})", new.mv)),
@@ -156,10 +185,10 @@ impl Rules for ChessRules {
     }
 
     fn result(&self) -> Option<Payout> {
-        match lngap_chess::terminal(&self.state.pos)? {
+        match self.ending()? {
             // the side to move is mated: the other side wins
-            Terminal::Checkmate => Some(if self.state.pos.side == lngap_chess::Colour::White { Payout::HubAll } else { Payout::UserAll }),
-            Terminal::Stalemate => Some(Payout::Even),
+            Ending::Checkmate => Some(if self.state.pos.side == lngap_chess::Colour::White { Payout::HubAll } else { Payout::UserAll }),
+            Ending::Stalemate | Ending::MoveLimit => Some(Payout::Even),
         }
     }
 }
@@ -173,7 +202,8 @@ pub struct Player {
 impl Player {
     pub fn open(dir: PathBuf, me: Role) -> Result<Player> {
         let s = Session::open(dir, me, "chess-venue", side, ui)?;
-        Ok(Player { s, h: Hand::default(), r: ChessRules { state: ChessState::initial() } })
+        let max_depth = s.vparams.max_depth;
+        Ok(Player { s, h: Hand::default(), r: ChessRules { state: ChessState::initial(), max_depth } })
     }
 
     fn me(&self) -> Role {
@@ -208,7 +238,7 @@ impl Player {
         let mover = instance::mover_at(d);
         let playing = h.playing();
         let in_chan = s.in_channel(h.id);
-        let terminal = lngap_chess::terminal(&self.r.state.pos);
+        let terminal = self.r.ending();
         let mut v = Vec::new();
         if self.me() == Role::User {
             v.push(if s.channel_open() && matches!(h.phase, None | Some(Phase::Settled)) && s.idle() {
@@ -237,9 +267,12 @@ impl Player {
             p => p == win_for(self.me()),
         });
         v.push(if playing && in_chan && my_result && s.idle() {
-            ActionView::ok("settle", &format!("{:?}: pay it in the channel, now", terminal.expect("a result is terminal")))
+            ActionView::ok("settle", &format!("{}: pay it in the channel, now", match terminal.expect("a result is terminal") {
+                Ending::MoveLimit => format!("the move limit ({} moves), a draw", self.r.max_depth),
+                e => format!("{e:?}"),
+            }))
         } else if playing && terminal.is_some() {
-            ActionView::no("settle", "the winner settles it")
+            ActionView::no("settle", if self.r.result() == Some(Payout::Even) { "a draw: White settles it" } else { "the winner settles it" })
         } else {
             ActionView::no("settle", "the game is not over")
         });
@@ -262,7 +295,7 @@ impl Player {
     }
 
     fn resign(&mut self) -> Result<()> {
-        ensure!(lngap_chess::terminal(&self.r.state.pos).is_none(), "the game is over: settle it");
+        ensure!(self.r.ending().is_none(), "the game is over: settle it");
         self.s.say(format!("game {}: {} RESIGNS", self.h.id, side(self.me())));
         let p = win_for(self.me().other());
         self.h.settle(&mut self.s, p)
@@ -298,6 +331,7 @@ impl Player {
 
     fn play_move(&mut self, uci: &str) -> Result<()> {
         ensure!(self.h.playing(), "no game in play");
+        ensure!(self.r.ending().is_none(), "the game is over: settle it");
         let d = self.h.depth + 1;
         ensure!(instance::mover_at(d) == self.me(), "it is {}'s move (move {d})", side(instance::mover_at(d)));
         ensure!(unix_now() <= self.h.due(d), "your move {d} was due at t+{}s", self.h.rel(self.h.due(d)));
@@ -388,7 +422,10 @@ impl Player {
             draw_offered: self.draw_offered_by(Role::User) || self.draw_offered_by(Role::Hub),
             fen: self.r.state.pos.to_fen(),
             to_move: instance::mover_at(d + 1).name().into(),
-            terminal: lngap_chess::terminal(&self.r.state.pos).map(|t| format!("{t:?}")),
+            terminal: self.r.ending().map(|e| match e {
+                Ending::MoveLimit => format!("draw at the move limit ({})", self.r.max_depth),
+                e => format!("{e:?}"),
+            }),
             last_move: (d >= 1).then(|| self.r.state.mv.to_string()),
             n: self.s.vparams.n,
             threshold: self.s.vparams.threshold,

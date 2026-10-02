@@ -719,8 +719,10 @@ equiv_d:    2-of-2-VERIFY  WOTS-VERIFY((*$K^{\mathrm{st}}_d$*))  (*park digits*)
             WOTS-VERIFY((*$K^{\mathrm{st}}_d$*))  (*restore*)
             (*some digit differs*) OP_VERIFY  OP_1
 \end{lstlisting}
-\texttt{settle} pays $R(\text{empty board})$ after the contract's
-deadline and is the fallback when nobody claims. \texttt{absent}$_d$ is
+\texttt{settle} is the fallback when nobody claims: after the
+contract's deadline it pays tic-tac-toe $R(\text{empty board})$, and
+chess and blackjack a draw, which is how a chess game that reaches its
+move limit without a mate ends. \texttt{absent}$_d$ is
 the claimant's \emph{thin absence claim}: ``the mover published no valid
 move $d$ by its due time''. It asserts nothing about venue content, which is
 what keeps it two hundred bytes; the venue enters only if the mover
