@@ -260,12 +260,14 @@ already carries $S$. The court reads both entries out and judges the
 triple $(S, m, S')$. This is the form we use: each entry's \emph{head}
 (48 bytes) holds the new state and the move (and, for tic-tac-toe, a
 status), the region the mover signs; the entry carries the mover's one-time signature over that
-region beside the head; and a dispute reads out the heads at depths $d-1$
+region beside the head; and a dispute parks the heads at depths $d-1$
 and $d$. The mover's signature matters as much as the venue's: a venue
 attestation proves an entry was \emph{published}, the mover's one-time
-signature proves the mover \emph{made} it, and a refutation needs both,
-or anyone could answer a claim with any junk the venue happened to
-seal.
+signature proves the mover \emph{made} it, and a refutation needs both
+for the new head, or anyone could answer a claim with any junk the
+venue happened to seal. For the prior head the claimant's signature is
+enough: it pins the claimant's own move $d-1$, and whether that move
+was published is a different question (Section~\ref{sec:graph:claim}).
 
 What the court needs from the venue is therefore exactly three kinds of
 statement per move of each contract, and nothing about the game:
@@ -748,10 +750,10 @@ refute:    (*\push{P_{m(d)}}*) OP_CHECKSIGVERIFY
            (*\push{P_{1,d}}*) ... (*\push{P_{n,d}}*) (*\push{n}*) OP_PICK (*\push{n{-}1}*) OP_SWAP OP_SUB OP_PICK
                 (*\push{n{+}2}*) OP_ROLL OP_SWAP OP_CHECKSIGVERIFY  (*drop $n{+}1$*)
            WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))               (*192 digits on the stack*)
-           AUTHORSHIP((*$K^{\mathrm{st}}_d$*) over the new head's digits)
-           OP_TOALTSTACK (*$\times 192$*)
-           READOUT((*$A_{d-1,j,\cdot}$*), (*$j \in 80..175$*))          (*prior head*)
-           READOUT((*$A_{d,j,\cdot}$*),   (*$j \in 80..175$*))          (*new head*)
+           AUTHORSHIP((*$K^{\mathrm{st}}_d$*) over the new head's digits)      (*the mover's*)
+           AUTHORSHIP((*$K^{\mathrm{st}}_{d-1}$*) over the prior head's digits)  (*the claimant's*)
+           OP_TOALTSTACK (*$\times 96$*)  OP_2DROP (*$\times 48$*)
+           READOUT((*$A_{d,j,\cdot}$*), (*$j \in 80..175$*))            (*new head only*)
            OP_1
 \end{lstlisting}
 The claimant's \texttt{split}$_X$ is the timeout: after $\dl$ blocks
@@ -765,10 +767,16 @@ the venue, and it does three things in one script:
   $i$ revealed in its seal (\S\ref{sec:graph:math});
 \item it \emph{parks} the two heads: the WOTS verification of
   $K^{\mathrm{ref}}_d$ leaves the $192$ message digits (the nibbles of
-  $h_{d-1}\|h_d$) on the stack, and the tied authorship check proves the
-  mover's state key signed the new head's state region, so a
-  garbage-signed entry cannot be refuted with;
-\item it \emph{reads out} the venue: for each head chunk $j$ the script
+  $h_{d-1}\|h_d$) on the stack, and two tied authorship checks prove
+  that the mover's state key signed the new head's signed region, so a
+  garbage-signed entry cannot be refuted with, and that the
+  \emph{claimant's} state key for depth $d-1$ signed the prior's. That
+  key is one-time, so only one prior can carry it (two would be the
+  claimant's equivocation), and the mover takes the signature from the
+  claimant's published entry. The prior is thereby the claimant's own
+  move $d-1$, which is all the disprove family needs of it; its digits
+  are then dropped;
+\item it \emph{reads out} the venue for the new head: for each head chunk $j$ the script
   pushes the sixteen points $A_{s,j,0..15}$, selects the one indexed by
   the parked digit, and requires a signature under it. Since the digit
   \emph{is} the parked value, the readout ties ``what the venue attested''
@@ -785,7 +793,15 @@ OP_2DROP (*$\times 8$*)  OP_DROP
 \end{lstlisting}
 $16 \times 33$ bytes of constants and $20$ opcodes per chunk; $96$
 chunks per head. A wrong digit selects a point whose secret nobody
-holds, and the leaf aborts.
+holds, and the leaf aborts. Only the new head is read out because the
+claim asks only whether move $d$ was published; whether move $d-1$ was
+is the counter's question, below, and the counter's tree reads $h_{d-1}$
+out as its own new head. Binding the prior by signature rather than by
+a second readout needs each game's signed region to cover every field
+of the prior that its leaves read. It does for all four games here; the
+unsigned first word of a head is read only by \texttt{wrong\_slot}, which
+pins it to a constant, so forging it only fires that leaf against the
+mover.
 
 \texttt{counter} (from $d \ge 2$) is the mover's own thin claim one
 depth back, ``the claimant did not move at $d-1$'': the negation of the
@@ -937,7 +953,7 @@ tic-tac-toe, per terminal depth the exhibit with its three splits. With
 $M=9$ this is $166$ transactions; for chess with $M=8$ and no exhibit
 family, $129$. The disproves and \texttt{not\_timely} are not counted:
 they are the challenger's own transactions. Building the graph is
-dominated by hashing the refutation scripts (about $100$\,KB each, one
+dominated by hashing the refutation scripts (about $70$\,KB each, one
 per depth per version); signing $166$ transactions is a few
 milliseconds.
 
@@ -997,12 +1013,13 @@ chain element $\sigma_i = \mathrm{HASH160}^{(d_i)}(\mathrm{sk}_i)$, and
 the script checks $\mathrm{HASH160}^{(15-d_i)}(\sigma_i) =
 \mathrm{pk}_i$ digit by digit, with the usual checksum digits
 preventing a downward forgery. What remains on the stack afterwards is
-the $192$ digits themselves. The readout consumes them as the selectors
-$v_j$; the disprove predicates and the resolution check read them as
-the tuple. Since the key is one-time and the claim, exhibit and counter
-contexts are mutually exclusive spends of $C$, the mover can park at
-most one tuple per depth, and a disprove built from the confirmed
-refutation's witness always judges the tuple the venue attested.
+the $192$ digits themselves. The readout consumes the new head's as the
+selectors $v_j$; the disprove predicates and the resolution check read
+all of them as the tuple. Since the key is one-time and the claim,
+exhibit and counter contexts are mutually exclusive spends of $C$, the
+mover can park at most one tuple per depth, and a disprove built from
+the confirmed refutation's witness always judges a new head the venue
+attested, after the claimant's own signed prior.
 
 \paragraph{The fee lock.}
 A mover pays the member that seals its move, atomically, with a
@@ -1106,8 +1123,8 @@ commitment (two balances, one contract) & broadcaster & $\approx 240$ \\
 \texttt{absent}$_d$ & claimant & $188$ \\
 \texttt{split}$_X$ (timeout, off $A_d$) & claimant & $193$--$201$ \\
 \texttt{counter} & mover & $178$ \\
-\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $\approx 34{,}800$ \\
-\texttt{refute}, chess, $d \ge 2$ & mover & $36{,}607$ \\
+\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $20{,}073$ \\
+\texttt{refute}, chess, $d \ge 2$ & mover & $24{,}104$ \\
 \texttt{refute}, chess, $d = 1$ (one head) & mover & $19{,}532$ \\
 \texttt{disprove}, chess (one exhibit) & claimant & $\approx 4{,}950$ \\
 \texttt{not\_timely} ($3$ of $5$ flags) & claimant & $254$ \\
@@ -1118,9 +1135,10 @@ fee \texttt{timeout} & payer & $147$ \\
 \end{tabular}
 \caption{Confirmed virtual sizes. A stall costs the claimant two small
 transactions at any depth; the refutation is the one large transaction
-and is paid by the party that answers a claim, its cost being the
-venue readout ($96$ possession proofs per head, $16$ points each, as
-script constants) rather than any signature or hash chain.}
+and is paid by the party that answers a claim, its cost being mostly
+the venue readout of the new head ($96$ possession proofs, $16$ points
+each, as script constants); the prior head is bound by the claimant's
+signature instead, which costs about a quarter as much.}
 \label{tab:sizes}
 \end{table}
 
@@ -1158,8 +1176,9 @@ Figure~\ref{fig:highlevel}:
   the claimant broadcasts the absence claim, then after $\delta$ the
   timeout split. Two small transactions, under $400$ vB, at any depth.
 \item[A false stall claim.] The mover did publish. He answers with the
-  refutation: the venue's attestation of his entry and the previous
-  one, his own signature, and the name of the sealing member. The
+  refutation: the venue's attestation of his entry, his own signature
+  on it, the claimant's signature on the previous move, and the name of
+  the sealing member. The
   claimant has nothing to disprove; after $\delta + \delta'$ the mover's
   checked split pays him.
 \item[An illegal move.] The mover published and signed an illegal move,
@@ -1187,7 +1206,7 @@ Winning does not, however, recover what the dispute cost: the
 pre-signed fees come out of the pot, so they fall on the winner. A
 player about to lose can therefore make a false claim for a few hundred
 virtual bytes and force the winner to pay for a refutation of some
-36\,kvB, and some hours of delay, at no further cost to itself. The
+24\,kvB, and some hours of delay, at no further cost to itself. The
 dispute ends the contract, so this can be done once, not every move; but
 it is a lever for extortion, and it puts a floor under the pot below
 which an honest refutation does not pay.
@@ -1208,7 +1227,7 @@ refutation, so the claimant wins and is reimbursed; the only ways to
 drive an honest claimant into an expensive path (an invalid refutation,
 a false counter) are deviations that lose to it. A false claim costs the
 honest mover nothing net, provided $D$ covers the most expensive path
-it can be forced into, about 42\,kvB for chess. The graph is unchanged;
+it can be forced into, about 30\,kvB for chess. The graph is unchanged;
 only the contract's value and the cooperative rules change (and
 \texttt{settle}, the no-dispute fallback, returns each deposit). The
 proof of concept implements this; with each side depositing 10,000\,sat,
@@ -1473,7 +1492,7 @@ loser will not settle goes on chain by a force-close, and is disputed
 off the confirmed commitment's graph. On regtest, three honest hands
 settled in six channel updates with no chain transaction; a hand with
 a wrongly computed card was force-closed (commitment 180\,vB), claimed
-(197\,vB), refuted (36,690\,vB) and disproved (4,926\,vB). Chess runs in
+(189\,vB), refuted (24,282\,vB) and disproved (4,916\,vB). Chess runs in
 the same channel layer: a mate is settled by the winner, a resignation
 or an agreed draw by update, and an illegal move goes on chain the same
 way.
@@ -1639,7 +1658,8 @@ depths: $2{,}058$ pre-signed transactions, with $1{,}919$ disprove
 leaves and $62$ \texttt{prove} leaves at the final depth of the first
 phase. All $59$ moves of that phase were sealed by the venue, and on
 regtest the dispute was the claim ($220$\,vB), the refutation
-($36.7$\,kvB) and the proof of the halting \texttt{ecall}
+($24.3$\,kvB, as re-measured on a smaller program: its size depends
+on the heads, not the program) and the proof of the halting \texttt{ecall}
 ($58.5$\,kvB). The on-chain cost does not depend on the program's
 length. The leaves are large (a \texttt{prove} leaf is about $228$\,KB
 of script, at a peak stack of $948$ of the $1{,}000$ allowed), but they

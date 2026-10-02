@@ -384,8 +384,8 @@ commitment (two balances, one contract) & broadcaster & $\approx 240$ \\
 \texttt{absent}$_d$ & claimant & $188$ \\
 \texttt{split}$_X$ (timeout, off $A_d$) & claimant & $193$--$201$ \\
 \texttt{counter} & mover & $178$ \\
-\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $\approx 34{,}800$ \\
-\texttt{refute}, chess, $d \ge 2$ & mover & $36{,}607$ \\
+\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $20{,}073$ \\
+\texttt{refute}, chess, $d \ge 2$ & mover & $24{,}104$ \\
 \texttt{refute}, chess, $d = 1$ (one head) & mover & $19{,}532$ \\
 \texttt{disprove}, chess (one exhibit) & claimant & $\approx 4{,}950$ \\
 \texttt{not\_timely} ($3$ of $5$ flags) & claimant & $254$ \\
@@ -396,9 +396,10 @@ fee \texttt{timeout} & payer & $147$ \\
 \end{tabular}
 \caption{Confirmed virtual sizes. A stall costs the claimant two small
 transactions at any depth; the refutation is the one large transaction
-and is paid by the party that answers a claim, its cost being the
-venue readout ($96$ possession proofs per head, $16$ points each, as
-script constants) rather than any signature or hash chain. Changing from a 5 member venue to 50 is likely only to add 1\% to the size of the chess refute transaction; it's linear but very small in magnitude, and the committee size is not practical above about 100 most likely, and impossible above 999 in the current design.}
+and is paid by the party that answers a claim, its cost being mostly
+the venue readout of the new head ($96$ possession proofs, $16$ points
+each, as script constants); the prior head is bound by the claimant's
+own signature instead. Changing from a 5 member venue to 50 is likely only to add 1\% to the size of the chess refute transaction; it's linear but very small in magnitude, and the committee size is not practical above about 100 most likely, and impossible above 999 in the current design.}
 \label{tab:sizes}
 \end{table}
 
