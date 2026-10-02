@@ -300,7 +300,7 @@ In setup, the two parties agree several things: first the committee of members i
 
 That whole setup \emph{is} linear in the finite number of moves that the contract or game can take up: worth emphasizing, because it means that our applications must consider only reasonable finite-length games (at least, in this design). The dispute graph (see Figure~\ref{fig:graph}) must be pre-signed for all future moves.
 
-What remains is an augmentation of Lightning: cosigning a commitment transaction which now has a special contract output $C$. Like to\_local, $C$ and every output below it carry Lightning's revocation leaf, so a revoked state is swept in full; and $C$ has has equivocation leaves that work similarly: if a party signs two different states at the same depth with its Winternitz key, the counterparty takes the whole pot.
+What remains is an augmentation of Lightning: cosigning a commitment transaction which now has a special contract output $C$. Like to\_local, $C$ carries Lightning's revocation leaf, so a revoked state is swept in full (every leaf of $C$ that the broadcaster could use first waits out the channel's \texttt{to\_self\_delay}, so nothing escapes the sweep by spending $C$ early); and $C$ has equivocation leaves that work similarly: if a party signs two different states at the same depth with its Winternitz key, the counterparty takes the whole pot.
 
 A move thus does not require a channel update; though, a fee might; this can be avoided; \underline{see the long version of the paper} for details on this and a lot more about this design.
 
@@ -362,7 +362,7 @@ hanging off it, per depth $d$. Every output is a taproot tree; the
 edges are its leaves. The claim output $A_d$ races the mover's
 refutation against the claimant's timeout; the refuted output $P_d$
 races the claimant's disproves against the mover's self-checking split;
-the counter sends the game one depth back. ``revoke'' is Lightning's revocation path; it is also a leaf of to\_local, $L$, $A_d$ and $P_d$ (not drawn).}
+the counter sends the game one depth back. ``revoke'' is Lightning's revocation path; it is also a leaf of to\_local and $L$ (not drawn).}
 \label{fig:graph}
 \end{figure}
 
