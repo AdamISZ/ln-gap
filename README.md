@@ -6,6 +6,8 @@ All of this is dependent on what's called a **venue**, which is a set trusted on
 
 For the actual whole argument, read the [short paper](docs/paper/lngap-short.pdf) to get the general structure and motivation. An AI-authored much more detailed paper is [also available](docs/paper/lngap_draft.pdf ) can also be used to dive in further.
 
+For diagram-led explanations of the key mechanics (how a game rule is tested in Script, the one-time signatures, the venue's attestations, the pre-signed dispute graph), see [docs/](docs/README.md).
+
 ## Caveat
 
 The code here is intended as a proof-of-concept. It is not fit for any kind of production use with real money.

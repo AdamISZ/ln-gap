@@ -2637,11 +2637,11 @@ The venue attests it (the venue checks signatures, not chess).
 position. Once the claim lock $T_2 + m$ has passed it broadcasts the
 thin absence claim \texttt{absent}$_2$ ($189$ vB), ``$\Pb$ did not move
 at depth 2''. As a statement about the venue the claim is false, and
-$\Pb$ answers with \texttt{refute} ($36{,}615$ vB): the venue's attestation
-of heads 1 and 2, the proposer fragments, and the Winternitz
-signature under $K^{\mathrm{ref}}_2$ that parks
+$\Pb$ answers with \texttt{refute} ($24{,}121$ vB): the venue's attestation
+of head 2, both movers' signatures over their heads, the proposer
+fragment, and the Winternitz signature under $K^{\mathrm{ref}}_2$ that parks
 $\mathrm{head}(1)\,\|\,\mathrm{head}(2)$ in the output $P_2$. The
-refutation is valid: the heads \emph{were} attested. What it has done
+refutation is valid: head 2 \emph{was} attested, and both heads were signed. What it has done
 is put $\Pb$'s move on chain in a form Script can read.
 
 \paragraph{Finding the predicate.} $\Pa$ runs the family off-chain on
@@ -2694,8 +2694,8 @@ computation opcode by opcode.
 $\Pa$ builds \texttt{disprove\_chess\_ray} spending $P_2$: witness
 $[\,1,\ \text{the }195\text{ reveal pairs from the refutation's
 witness},\ \sigma_{\Pa}\,]$, the leaf script and its control block. It
-confirms at $4{,}955$ vB and pays the whole contract output to $\Pa$.
-The three transactions total $41{,}759$ vB. $\Pb$'s checked
+confirms at $4{,}947$ vB and pays the whole contract output to $\Pa$.
+The three transactions total $29{,}257$ vB. $\Pb$'s checked
 \texttt{split}$_X$ on the same output was locked for $\dl + \dlp$, so
 the output is gone before it could open.
 
