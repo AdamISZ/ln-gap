@@ -1,10 +1,10 @@
 # LN-GAP — Lightning Network Governed by Arbitrary Programs
 
-This is a big set of ideas put together, so, to keep it simple: minimize the onscript footprint of disputes in bilateral contracts over some state by using proof of publication on an alternate ledger. This enables things like chess (programs whose internal state is a bit too large to dispute directly onchain) as well as things like service provider contractual relationships and even ZKP verification (with a bisection style proof of the verification passing done *off*-chain).
+This is a big set of ideas put together, so, to keep it simple: minimize the onscript footprint of disputes in bilateral contracts over some state by publishing updates ("moves") before a time deadline. This enables things like chess (programs whose internal state is a bit too large to dispute directly onchain) as well as things like service provider contractual relationships and even ZKP verification (with a bisection style proof of the verification passing done *off*-chain).
 
 All of this is dependent on what's called a **venue**, which is a set trusted only for one thing: validating that an arbitrary string is published in-time.
 
-For the actual whole argument, read the [short paper](docs/paper/lngap-short.pdf) to get the general structure and motivation. An AI-authored much more detailed paper is [also available](docs/paper/lngap_draft.pdf ) can also be used to dive in further.
+For the actual whole argument, read the [short paper](docs/paper/lngap-short.pdf) to get the general structure and motivation. An AI-authored much more detailed paper is [also available](docs/paper/lngap_draft.pdf ) and can also be used to dive in further.
 
 For diagram-led explanations of the key mechanics (how a game rule is tested in Script, the one-time signatures, the venue's attestations, the pre-signed dispute graph), see [docs/](docs/README.md).
 

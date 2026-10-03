@@ -3,13 +3,15 @@
 Script can't verify a Schnorr signature over an arbitrary message
 (`OP_CHECKSIG` only checks signatures over the spending transaction). It
 *can* verify a hash-based one-time signature, and that is how every
-message in a dispute reaches the stack: a move, a pair of heads, an
-outcome code. This page shows the Winternitz scheme used throughout the
+message which a player signs (e.g. a move, a pair of heads, an
+outcome code) in a dispute reaches the stack. This page shows the Winternitz scheme used throughout the
 repository, the script that verifies it, and why the verified message
 stays on the stack afterwards as the **register file** that the
 [disprove leaves](tictactoe-predicates.md) read.
 
 ## One digit, one hash chain
+
+(I'd advise you to make sure you grok the basic ideas of Lamport and then Winternitz signatures before progressing. Rootstock have a decent explainer [here](https://www.rootstocklabs.com/blog/exploring-lamport-and-winternitz-signatures-for-stateful-bitcoin-scripts/), and you might find others but to be honest you're better off having an LLM take you through it, with diagrams and so on.)
 
 The message is cut into 4-bit digits (nibbles). Each digit `i` gets a
 secret `sk_i`, and the public key is the end of a 15-step `HASH160` chain:
