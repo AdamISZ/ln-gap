@@ -8,7 +8,7 @@ down to the opcodes.
 
 ## Where the move comes from
 
-In a dispute the mover has already *refuted* an absence claim, which put
+In a dispute the mover has already *refuted* (note the special meaning of this: it's more a rebuttal, i.e. a claim of refutation, which we are now trying to disprove, in the below; see the short paper for the outline logic) an absence claim, which put
 two consecutive venue entries on chain under its one-time Winternitz key:
 the head before its move and the head after it
 ([the pre-signed graph](presigned-graph.md) shows where this happens).
@@ -98,7 +98,7 @@ OP_FROMALTSTACK ×3             bring them back
 ```
 
 Each copy goes straight to the altstack, so the depths stay fixed while
-gathering. Afterwards the three inputs sit on top of the untouched file:
+gathering (thus, use of the altstack is not actually necessary in this case; it does make the bookkeeping with indices easier, though). Afterwards the three inputs sit on top of the untouched file:
 
 ```
  stack (top on the right):   … 192 digits …  nib=1  hi=0  lo=4
@@ -118,7 +118,7 @@ OP_0NOTEQUAL          … 1    1                 cell 4 is marked
 OP_BOOLAND            … 1                      both: the rule was broken
 ```
 
-Script has no division or bit operations, so `split4` takes a nibble apart
+Script has no division or bit operations, so `split4` (see in code [here](https://github.com/AdamISZ/ln-gap/blame/0a9049ac291cf1b8cff1d8767d0da081c29842cd/crates/apps/pos/src/ttt.rs#L192)) takes a nibble apart
 with comparisons and doublings: is it ≥ 8? subtract 8 and remember the
 bit; is the rest ≥ 4? subtract 4 and remember that bit; reassemble the high
 pair as 2·b₃ + b₂ and keep the low pair. It's 28 opcodes, and the same
@@ -137,6 +137,8 @@ the move wasn't cell 4, the spend is invalid and the claimant tries another
 leaf. The whole predicate is 156 bytes. The leaf is 14,408 bytes, because
 the Winternitz verification in front of it (shared by every leaf) is
 about 14.2 KB.
+
+As per the script snippet above, taproot has something called "cleanstack", by consensus of BIP342: a Script does not pass because its top element is truthy; you are not allowed to have any other elements on the stack at the end, leading to the amusing spectacle of a huge number of repeated `OP_2DROP` opcodes at the end to get rid of what remains (the "register file"). In this case, since the witness is so large, this extra 96 bytes is not problematic.
 
 ## The spend
 
