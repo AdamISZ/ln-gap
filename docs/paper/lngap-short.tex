@@ -354,7 +354,7 @@ A move thus does not require a channel update; though, a fee might; this can be 
 
 
 \node[anchor=north west, font=\scriptsize, align=left] at ($(disprove.south west)+(0,-9mm)$)
-  {shaded: pre-signed at each channel update (2-of-2, or the mover's key for \texttt{refute});\\
+  {shaded: pre-signed (2-of-2) at each channel update;\\
    dashed: built at dispute time by one party.};
 \end{tikzpicture}
 \caption{The game output $C$ on one commitment and the transactions
@@ -384,9 +384,9 @@ commitment (two balances, one contract) & broadcaster & $\approx 240$ \\
 \texttt{absent}$_d$ & claimant & $188$ \\
 \texttt{split}$_X$ (timeout, off $A_d$) & claimant & $193$--$201$ \\
 \texttt{counter} & mover & $178$ \\
-\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $20{,}073$ \\
-\texttt{refute}, chess, $d \ge 2$ & mover & $24{,}104$ \\
-\texttt{refute}, chess, $d = 1$ (one head) & mover & $19{,}532$ \\
+\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $20{,}106$ \\
+\texttt{refute}, chess, $d \ge 2$ & mover & $24{,}121$ \\
+\texttt{refute}, chess, $d = 1$ (one head) & mover & $19{,}558$ \\
 \texttt{disprove}, chess (one exhibit) & claimant & $\approx 4{,}950$ \\
 \texttt{not\_timely} ($3$ of $5$ flags) & claimant & $254$ \\
 \texttt{split}$_X$ (checked, off $P_d$) & mover & $\approx 4{,}900$ \\

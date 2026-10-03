@@ -748,7 +748,7 @@ $A_d$ carries the claim tree
 split_X:   (*\push{\dl}*) OP_CSV OP_DROP  2-of-2-VERIFY
            LAMPORT-EXPECT((*$K^{\mathrm{ccode}}_d$*), X)  OP_1
 counter:   2-of-2-VERIFY  OP_1
-refute:    (*\push{P_{m(d)}}*) OP_CHECKSIGVERIFY
+refute:    2-of-2-VERIFY
            (*\push{P_{1,d}}*) ... (*\push{P_{n,d}}*) (*\push{n}*) OP_PICK (*\push{n{-}1}*) OP_SWAP OP_SUB OP_PICK
                 (*\push{n{+}2}*) OP_ROLL OP_SWAP OP_CHECKSIGVERIFY  (*drop $n{+}1$*)
            WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))               (*192 digits on the stack*)
@@ -826,8 +826,13 @@ $d-2$'' should have claimed that depth itself.
 \subsection{The refuted output}
 \label{sec:graph:refuted}
 
-\texttt{refute} is pre-signed too (the mover's payment key gates it),
-so its output $P_d$ is pinned to the \emph{refuted tree}
+\texttt{refute} is pre-signed too: it opens with the 2-of-2, so the
+refutation must be the transaction both parties signed in advance, and
+its output $P_d$ is pinned to the \emph{refuted tree}. (A gate under the
+mover's key alone would pin nothing, since every other key in the
+refutation's witness, the venue's revealed scalars and the proposer
+scalar, is the mover's too: a mover could then refute with an illegal
+move and pay the claim output to itself, skipping the disproves.)
 \begin{align*}
   P_d:\quad & \texttt{disprove}_\pi\ (\pi \in \Pi_d),\ \texttt{not\_timely},\
   \texttt{split}_X.
@@ -921,7 +926,7 @@ $\dl + \dlp$, so every disprove has had its window.
 \node[right=1mm of L, font=\scriptsize] {(Fig.~\ref{fig:fee})};
 
 \node[anchor=north west, font=\scriptsize, align=left] at ($(disprove.south west)+(0,-9mm)$)
-  {shaded: pre-signed at each channel update (2-of-2, or the mover's key for \texttt{refute});\\
+  {shaded: pre-signed (2-of-2) at each channel update;\\
    dashed: built at dispute time by one party.};
 \end{tikzpicture}
 \caption{The game output $C$ on one commitment and the transactions
@@ -1125,9 +1130,9 @@ commitment (two balances, one contract) & broadcaster & $\approx 240$ \\
 \texttt{absent}$_d$ & claimant & $188$ \\
 \texttt{split}$_X$ (timeout, off $A_d$) & claimant & $193$--$201$ \\
 \texttt{counter} & mover & $178$ \\
-\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $20{,}073$ \\
-\texttt{refute}, chess, $d \ge 2$ & mover & $24{,}104$ \\
-\texttt{refute}, chess, $d = 1$ (one head) & mover & $19{,}532$ \\
+\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $20{,}106$ \\
+\texttt{refute}, chess, $d \ge 2$ & mover & $24{,}121$ \\
+\texttt{refute}, chess, $d = 1$ (one head) & mover & $19{,}558$ \\
 \texttt{disprove}, chess (one exhibit) & claimant & $\approx 4{,}950$ \\
 \texttt{not\_timely} ($3$ of $5$ flags) & claimant & $254$ \\
 \texttt{split}$_X$ (checked, off $P_d$) & mover & $\approx 4{,}900$ \\
@@ -1494,7 +1499,7 @@ loser will not settle goes on chain by a force-close, and is disputed
 off the confirmed commitment's graph. On regtest, three honest hands
 settled in six channel updates with no chain transaction; a hand with
 a wrongly computed card was force-closed (commitment 180\,vB), claimed
-(189\,vB), refuted (24,282\,vB) and disproved (4,916\,vB). Chess runs in
+(189\,vB), refuted (24,307\,vB) and disproved (4,916\,vB). Chess runs in
 the same channel layer: a mate is settled by the winner, a resignation
 or an agreed draw by update, and an illegal move goes on chain the same
 way.

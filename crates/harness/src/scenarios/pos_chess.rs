@@ -570,11 +570,10 @@ impl ChessPosGame {
     fn refute_junk(&mut self, d: u32) -> Result<Transaction> {
         let label = format!("absent_{d}/refute");
         let (mut w, _psig) = self.readout_witness(&label, d, true)?;
-        let msig = {
-            let p = self.skel(&label);
-            sign_tx(self.payment(instance::mover_at(d)), &p.tx, &p.prevouts[0], &p.leaf.script)
-        };
-        w.push(msig);
+        // the refutation is 2-of-2: the pre-signed skeleton, both signatures
+        let [sig_h, sig_u] = self.sigs22(&label);
+        w.push(sig_h);
+        w.push(sig_u);
         Ok(self.dry(&label, w))
     }
 
@@ -602,11 +601,10 @@ impl ChessPosGame {
         let mover = instance::mover_at(d);
         let label = format!("{base}/refute");
         let (mut w, pair_sig) = self.readout_witness(&label, d, false)?;
-        let msig = {
-            let p = self.skel(&label);
-            sign_tx(self.payment(mover), &p.tx, &p.prevouts[0], &p.leaf.script)
-        };
-        w.push(msig);
+        // the refutation is 2-of-2: the pre-signed skeleton, both signatures
+        let [sig_h, sig_u] = self.sigs22(&label);
+        w.push(sig_h);
+        w.push(sig_u);
         self.say(format!("{mover} refutes: the venue attested moves {} and {d}", d - 1));
         let (h, op, prev) = self.run(&label, w, mover)?;
         Ok((pair_sig, h, op, prev))

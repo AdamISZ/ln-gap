@@ -231,7 +231,9 @@ impl Path {
             refute::refute_witness(&sigs_new, &sig, &new_sig)
         };
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, &tx0, &a_prev, &p.leaf.script), new_block.proposer));
-        w.push(sign_tx(g.payment(mover), &tx0, &a_prev, &p.leaf.script));
+        // the refutation is 2-of-2: the hub's signature, then the user's
+        w.push(sign_tx(&g.hub.payment, &tx0, &a_prev, &p.leaf.script));
+        w.push(sign_tx(&g.user.payment, &tx0, &a_prev, &p.leaf.script));
         let mut tx = tx0;
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the refutation at depth {d} must mine: {e}"));

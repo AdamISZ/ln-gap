@@ -157,9 +157,13 @@ pub fn proposer_witness(sig_p: Vec<u8>, i: usize) -> Vec<Vec<u8>> {
     vec![sig_p, lngap_ec_wots::snum(i as u8)]
 }
 
-/// The mover's refutation leaf on the claim output: the mover's payment
-/// signature first (the pre-signed skeleton pins the output to the refuted
-/// tree), then the proposer fragment over slot `d`'s member points (D53),
+/// The mover's refutation leaf on the claim output: 2-of-2 first, so the
+/// refutation is the skeleton both parties pre-signed and its output is
+/// pinned to the refuted tree (a gate under the mover's key alone pinned
+/// nothing: every other key in the witness is the mover's too, so a mover
+/// could refute an illegal move and pay the claim output to itself,
+/// skipping the disprove stage), then the proposer fragment over slot
+/// `d`'s member points (D53),
 /// then the readout-and-park. The D41 authorship fragment rides the
 /// gate slot: per parked head, the witness must carry THAT head's mover's
 /// state-key signature over the head's signed region (the D43 tied-WOTS
@@ -178,7 +182,7 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
         }),
         None => refute::refute_leaf(table, &keys.refute, |b| authorship(b, game, l.file, 0, &keys.state)),
     };
-    let mut b = proposer_fragment(Builder::new().checksigverify(&ctx.key(l.mover).payment), proposers);
+    let mut b = proposer_fragment(ctx.two_of_two_verify(Builder::new()), proposers);
     for ins in body.instructions() {
         b = match ins.expect("valid script") {
             bitcoin::script::Instruction::Op(op) => b.push_opcode(op),

@@ -501,9 +501,13 @@ impl Hand {
         let total = params.total_digits() as usize;
         let w = &tx.input[0].witness;
         let n = w.len();
-        ensure!(n >= 2 + 3 + 2 * total, "witness too short");
+        // the reveal sits below the four elements the leaf consumes first:
+        // the proposer's signature and index, then the 2-of-2's two
+        // signatures (the script and control block follow them)
+        const AFTER: usize = 4;
+        ensure!(n >= 2 + AFTER + 2 * total, "witness too short");
         let args: Vec<Vec<u8>> = (0..n - 2).map(|i| w.nth(i).unwrap().to_vec()).collect();
-        let block = &args[args.len() - 3 - 2 * total..args.len() - 3];
+        let block = &args[args.len() - AFTER - 2 * total..args.len() - AFTER];
         let hashes: Vec<[u8; 20]> = block.iter().step_by(2).map(|h| h.as_slice().try_into().map_err(|_| anyhow!("a reveal hash is 20 bytes"))).collect::<Result<_>>()?;
         let msg = self.parked_message(d)?;
         WotsSig::from_hashes(params, &msg, hashes).map_err(|e| anyhow!("{e}"))
@@ -755,7 +759,8 @@ impl Hand {
             refute::refute_witness(&sigs_new, &pair_sig, &auth)
         };
         w.extend(proposer_witness(sig_bytes(&Keypair::from_secret_key(SECP256K1, &new.proposer_secret), &tx, &prev, &leaf), new.proposer));
-        w.push(sig_bytes(&s.chan.keys.payment, &tx, &prev, &leaf));
+        // the refutation is 2-of-2: both parties' pre-signatures of the skeleton
+        w.extend(self.sigs22(&label)?);
         let mut tx = tx;
         tx.input[0].witness = tapscript_witness(&w, &leaf, &control);
         self.reveals.insert(base.clone(), pair_sig);

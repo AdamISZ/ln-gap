@@ -328,6 +328,8 @@ struct Path {
     /// The pair reveal, public once a refutation is mined (the disprove
     /// and checked-split spends copy it).
     pair_sig: Option<WotsSig>,
+    /// The redirect probe's destination for the next refutation.
+    redirect: Option<bitcoin::ScriptBuf>,
 }
 
 impl Path {
@@ -341,6 +343,7 @@ impl Path {
             graph,
             state: ChessState::initial(),
             pair_sig: None,
+            redirect: None,
         }
     }
 
@@ -394,6 +397,11 @@ impl Path {
     fn refute_under(&mut self, rt: &Regtest, g: &mut Game, d: u32, base: &str) -> (OutPoint, TxOut) {
         let p = skel(&self.graph, &format!("{base}/refute"));
         let mut tx = p.tx.clone();
+        // the redirect probe: the mover pays the claim output to itself
+        // instead of to the refuted tree, skipping the disprove stage
+        if let Some(spk) = self.redirect.take() {
+            tx.output[0].script_pubkey = spk;
+        }
         let a_prev = p.prevouts[0].clone();
         let new_head = self.venue.head(d);
         let w = if d >= 2 {
@@ -424,12 +432,19 @@ impl Path {
                 .collect();
             refute::refute_witness(&sigs, &sig, &new_sig)
         };
-        let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), &tx, &a_prev, &p.leaf.script);
+        // the refutation is 2-of-2: the claimant's signature is its
+        // pre-signature of the SKELETON (so a mover that changes the
+        // outputs cannot get it), the mover signs what it broadcasts
+        let mover = instance::mover_at(d);
+        let claimant_sig = sign_tx(g.payment_of(mover.other()), &p.tx, &a_prev, &p.leaf.script);
+        let mover_sig = sign_tx(g.payment_of(mover), &tx, &a_prev, &p.leaf.script);
+        let [sig_h, sig_u] = if mover == Role::Hub { [mover_sig, claimant_sig] } else { [claimant_sig, mover_sig] };
         let mut w = w;
         // the proposer fragment (D53): the block's proposer scalar signs too, naming the member
         let blk = &self.venue.sealed[&d];
         w.extend(proposer_witness(sign_with(&blk.proposer_secret, &tx, &a_prev, &p.leaf.script), blk.proposer));
-        w.push(mover_sig);
+        w.push(sig_h);
+        w.push(sig_u);
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         // with the fee now adequate, test_accept failure would be a real
         // script problem — surface it, but the mine is the assertion
@@ -470,8 +485,8 @@ impl Path {
         let prev_sig = auth_sig(g, d - 1, &prev_head);
         let mut w = refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&junk_r, &prev_sig]);
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, tx, a_prev, &p.leaf.script), new_block.proposer));
-        let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
-        w.push(mover_sig);
+        w.push(sign_tx(g.payment_of(Role::Hub), tx, a_prev, &p.leaf.script));
+        w.push(sign_tx(g.payment_of(Role::User), tx, a_prev, &p.leaf.script));
         let mut tx = p.tx.clone();
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         tx
@@ -1023,4 +1038,26 @@ fn wired_pos_chess_graph() {
         println!("REGTEST PC: not_timely ({T} of {K} flags): {} vB, script {} B", ntx.vsize(), g.inst.refuted_tree(&g.ctx(), D).unwrap().leaf("not_timely").unwrap().script.len());
         assert_eq!(rt.balance_of(&g.user.public().payout_spk).unwrap() - before, value - g.params.presign_fee - g.params.presign_fee - g.params.presign_fee, "the pot less three hops' fees");
     }
+}
+
+/// The refutation's output must be the refuted tree: a mover that
+/// refutes with an illegal move and pays the claim output to itself would
+/// skip the disprove stage. The probe builds exactly that spend.
+#[test]
+fn refute_cannot_redirect_the_claim_output() {
+    let rt = Regtest::start().unwrap();
+    let registry = registry();
+    let value = Amount::from_sat(400_000);
+    let mut g = Game::open(clock(&rt), deadline(&rt), value, &registry);
+    let mut path = Path::open(&rt, &g);
+    rt.mine(1).unwrap();
+    path.seal(&mut g, 1, "e2e4", true);
+    rt.mine(1).unwrap();
+    path.seal(&mut g, 2, "c8e6", false); // a bishop jumping the d7 pawn
+    rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
+    rt.make_time_final(g.inst.claim_from(D)).unwrap();
+    let _ = path.claim(&rt, &g, D);
+    path.redirect = Some(g.keys_of_pub(instance::mover_at(D)).payout_spk.clone());
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| path.refute(&rt, &mut g, D)));
+    assert!(r.is_err(), "a refutation paying the mover directly mined: the disprove stage can be skipped");
 }

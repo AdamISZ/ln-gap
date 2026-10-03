@@ -311,12 +311,19 @@ impl Path {
                 .collect();
             refute::refute_witness(&sigs, &sig, &new_sig)
         };
-        let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), &tx, &a_prev, &p.leaf.script);
+        // the refutation is 2-of-2: the claimant's signature is its
+        // pre-signature of the SKELETON (so a mover that changes the
+        // outputs cannot get it), the mover signs what it broadcasts
+        let mover = instance::mover_at(d);
+        let claimant_sig = sign_tx(g.payment_of(mover.other()), &p.tx, &a_prev, &p.leaf.script);
+        let mover_sig = sign_tx(g.payment_of(mover), &tx, &a_prev, &p.leaf.script);
+        let [sig_h, sig_u] = if mover == Role::Hub { [mover_sig, claimant_sig] } else { [claimant_sig, mover_sig] };
         let mut w = w;
         // the proposer fragment (D53): the block's proposer scalar signs too, naming the member
         let blk = &self.venue.sealed[&d];
         w.extend(proposer_witness(sign_with(&blk.proposer_secret, &tx, &a_prev, &p.leaf.script), blk.proposer));
-        w.push(mover_sig);
+        w.push(sig_h);
+        w.push(sig_u);
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the refutation at depth {d} must mine: {e}"));
         println!("REGTEST 4b: refutation at depth {d}: {} vB", tx.vsize());
@@ -353,8 +360,8 @@ impl Path {
         let _ = sigs_prev;
         let mut w = refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&mk_junk(&new_head), &mk_junk(&prev_head)]);
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, tx, a_prev, &p.leaf.script), new_block.proposer));
-        let mover_sig = sign_tx(g.payment_of(instance::mover_at(d)), tx, a_prev, &p.leaf.script);
-        w.push(mover_sig);
+        w.push(sign_tx(g.payment_of(Role::Hub), tx, a_prev, &p.leaf.script));
+        w.push(sign_tx(g.payment_of(Role::User), tx, a_prev, &p.leaf.script));
         let mut tx = p.tx.clone();
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         tx
@@ -798,7 +805,8 @@ fn wired_pos_graph() {
         let _ = sigs_prev;
         let mut w = refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&new_sig, &prev_sig]);
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, &tx, &a_prev, &p.leaf.script), new_block.proposer));
-        w.push(sign_tx(g.payment_of(instance::mover_at(D)), &tx, &a_prev, &p.leaf.script));
+        w.push(sign_tx(g.payment_of(Role::Hub), &tx, &a_prev, &p.leaf.script));
+        w.push(sign_tx(g.payment_of(Role::User), &tx, &a_prev, &p.leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         // mine_with (generateblock), not test_accept: the fee placeholder is
         // below the relay floor for a ~30 kvB tx and must not mask the

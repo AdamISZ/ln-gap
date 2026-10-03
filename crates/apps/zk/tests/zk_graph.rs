@@ -229,7 +229,9 @@ impl World {
             refute::refute_witness(&sigs_new, &pair, &auth)
         };
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, &tx, &a_prev, &p.leaf.script), new_block.proposer));
-        w.push(sign_tx(self.payment(mover), &tx, &a_prev, &p.leaf.script));
+        // the refutation is 2-of-2: the hub's signature, then the user's
+        w.push(sign_tx(self.payment(Role::Hub), &tx, &a_prev, &p.leaf.script));
+        w.push(sign_tx(self.payment(Role::User), &tx, &a_prev, &p.leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the refutation at {d} must mine: {e}"));
         println!("  refutation at {d}: {} vB", tx.vsize());

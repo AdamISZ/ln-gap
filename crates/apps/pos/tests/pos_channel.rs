@@ -276,7 +276,9 @@ fn blackjack_hands_in_a_channel() {
     let mut wit = refute::refute_witness_pair_signed(&chunk_sigs(&h2.sealed[&2]), &pair, [&auth, &prev_auth]);
     let blk = &h2.sealed[&2];
     wit.extend(proposer_witness(sign_with(&blk.proposer_secret, &p.tx, &a_prev, &p.leaf.script), blk.proposer));
+    // the refutation is 2-of-2: the hub's signature, then the user's
     wit.push(sign_tx(&w.hub.keys.payment, &p.tx, &a_prev, &p.leaf.script));
+    wit.push(sign_tx(&w.user.keys.payment, &p.tx, &a_prev, &p.leaf.script));
     let mut rtx = p.tx.clone();
     rtx.input[0].witness = tapscript_witness(&wit, &p.leaf.script, &p.control_block);
     w.rt.mine_with(&[rtx.clone()]).unwrap_or_else(|e| panic!("the refutation must mine: {e}"));
