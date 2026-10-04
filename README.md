@@ -1,5 +1,11 @@
 # LN-GAP — Lightning Network Governed by Arbitrary Programs
 
+### Preliminary note:
+
+This codebase is AI-generated; the "short paper" linked in the intro is where I would start, and is written by me. As is much of this README, so I would suggest order of ingestion is: first half of README, then short paper, then second half of README leads you through how to run the demos to see it in action. Then if you want to dive deeper, go into docs/ and look through the explainers of the Script and cryptography mechanics being used.
+
+## Introduction
+
 This is a big set of ideas put together, so, to keep it simple: minimize the onscript footprint of disputes in bilateral contracts over some state by publishing updates ("moves") before a time deadline. This enables things like chess (programs whose internal state is a bit too large to dispute directly onchain) as well as things like service provider contractual relationships and even ZKP verification (with a bisection style proof of the verification passing done *off*-chain).
 
 All of this is dependent on what's called a **venue**, which is a set trusted only for one thing: validating that an arbitrary string is published in-time.
