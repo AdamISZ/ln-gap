@@ -5,11 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-lngap-btc = { path = "../../btc" }
-lngap-lamport = { path = "../../lamport" }
-lngap-channel = { path = "../../channel" }
-lngap-contract = { path = "../../contract" }
-lngap-party = { path = "../../party" }
+lngap-btc = { path = "../../crates/btc" }
+lngap-lamport = { path = "../../crates/lamport" }
+lngap-channel = { path = "../../crates/channel" }
+lngap-contract = { path = "../../crates/contract" }
+lngap-party = { path = "../party" }
 lngap-spv = { path = "../spv" }
 bitcoin.workspace = true
 anyhow.workspace = true

@@ -16,6 +16,28 @@ The code here is intended as a proof-of-concept. It is not fit for any kind of p
 
 The demos use a venue of 5 members, no larger roster to choose from; there is only one channel between the two players, and therefore no routing, as would be needed for the aforementioned fees. Bitcoin transaction fees, including the deposit outputs that make them fair, *are* built.
 
+## Repository layout
+
+The current design is under `crates/`; earlier iterations are under
+[`archive/`](archive/README.md).
+
+| crate | role |
+|---|---|
+| `crates/apps/pos` | the venue (sealing, flags, the registry), the dispute graph and the disprove families for tic-tac-toe, chess and blackjack |
+| `crates/apps/demo`, `chess-venue`, `blackjack-venue` | the browser demos: a shared channel-and-venue layer, and the two games |
+| `crates/apps/zk` | a disputed computation (BitVMX's search) played as a venue game, up to a Groth16 verifier |
+| `crates/channel` | a Poon-Dryja channel whose commitments carry contract outputs and their pre-signed graphs |
+| `crates/ec-wots` | EC-OTS: the venue's anticipation-point tables, flags, and the fee lock's adaptor |
+| `crates/lamport` | Winternitz and Lamport one-time signatures, and their Script verifiers |
+| `crates/btc`, `crates/script32` | Bitcoin plumbing (keys, taproot trees, regtest), and a Script simulator for testing leaves |
+| `crates/apps/chess`, `tictactoe`, `blackjack` | the games' rules, kept independent of the dispute machinery |
+| `crates/harness` | regtest test worlds and scenario suites (`pos_*` and `fee_lock` are current; the rest exercise older designs) |
+
+Some crates date from the earlier proof-of-work design but remain
+dependencies of the current one: `factchain` (the venue still uses its
+header and head formats), `contract` (outcomes and shared leaf builders),
+`chess-fc` (the chess state encoding) and `n4bit` (a Script-friendly hash).
+
 ## Building
 
 The proof of concept is a Rust workspace. You need:

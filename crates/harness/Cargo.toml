@@ -9,18 +9,18 @@ lngap-btc = { path = "../btc" }
 lngap-lamport = { path = "../lamport" }
 lngap-channel = { path = "../channel" }
 lngap-contract = { path = "../contract" }
-lngap-party = { path = "../party" }
+lngap-party = { path = "../../archive/party" }
 bitcoin.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 lngap-tictactoe = { path = "../apps/tictactoe" }
-lngap-names = { path = "../apps/names" }
-lngap-spv = { path = "../apps/spv" }
+lngap-names = { path = "../../archive/names" }
+lngap-spv = { path = "../../archive/spv" }
 lngap-n4bit = { path = "../n4bit" }
 lngap-factchain = { path = "../apps/factchain" }
-lngap-names-fc = { path = "../apps/names-fc" }
-lngap-tictactoe-fc = { path = "../apps/tictactoe-fc" }
+lngap-names-fc = { path = "../../archive/names-fc" }
+lngap-tictactoe-fc = { path = "../../archive/tictactoe-fc" }
 lngap-chess-fc = { path = "../apps/chess-fc" }
 lngap-chess = { path = "../apps/chess" }
 lngap-pos = { path = "../apps/pos" }
