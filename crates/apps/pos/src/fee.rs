@@ -21,7 +21,7 @@ use lngap_channel::{FeeLock, Role};
 use lngap_ec_wots::{Attester, EpochTable};
 use lngap_factchain::HEAD_BYTES;
 
-use crate::refute::{HEAD_CHUNK_START, HEAD_CHUNKS};
+use crate::rebut::{HEAD_CHUNK_START, HEAD_CHUNKS};
 use crate::roster::Registry;
 use crate::SealedBlock;
 

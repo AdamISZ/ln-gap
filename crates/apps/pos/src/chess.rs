@@ -4,7 +4,7 @@
 //! A chess venue entry's head uses all 48 bytes: `word0 || move<<16 ||
 //! state` (the 40-byte [`ChessState::to_e`], the same encoding chess-fc's
 //! PoW entries carry — the head IS the PoW entry's first 48 bytes). After a
-//! refutation at depth `d` the parked register file is the pair
+//! rebuttal at depth `d` the parked register file is the pair
 //! `head(d-1) || head(d)` exactly as in tic-tac-toe (192 digits, the prior
 //! head at 0..96, the new at 96..192), so the chess state regions sit at
 //! digits 16..96 (prior) and 112..192 (new) — and the whole
@@ -29,10 +29,10 @@
 //!   not a field (mate/stalemate = move-existence, not Script-computable),
 //!   and it is not needed: mate at depth `t` leaves the mated side with no
 //!   legal move, so the absence claim at `t + 1` is unanswerable (any
-//!   refutation attempt is an illegal transition and is disproved), and a
+//!   rebuttal attempt is an illegal transition and is disproved), and a
 //!   dead-depth false claim at `t + 2` by the mated side is countered
 //!   (D44: the winner's counter "you did not move at `t + 1`" is true and
-//!   unrefutable — no race on CLTV order). The last-depth
+//!   unrebuttable — no race on CLTV order). The last-depth
 //!   corner is excluded by chess-fc's standing assumption that the game
 //!   ends before `w_max`, and interior draws do not exist under the PoC's
 //!   stalemate-loses-by-stall reading (chess-fc's deferral) — so D37's
@@ -152,7 +152,7 @@ fn state_of_head(h: &[u8; HEAD_BYTES]) -> anyhow::Result<ChessState> {
     ChessState::from_e(h[8..8 + STATE_BYTES].try_into().unwrap())
 }
 
-/// The disprove family for the refuted output at this layout: `wrong_slot`
+/// The disprove family for the rebuttal output at this layout: `wrong_slot`
 /// (ttt's), the twelve kinds over the register file, then
 /// `chess_malformed` (D45), each with its native mirror.
 pub fn disprove_leaves(l: &Layout, key: &WotsPublic) -> Vec<PosLeaf> {
@@ -309,7 +309,7 @@ pub fn auth_message(head: &[u8; HEAD_BYTES]) -> Vec<u8> {
 /// WOTS signature over the head's signed region, the message digits PICKed
 /// off the register file (ttt's fragment docs apply — the D43 tied-WOTS
 /// form). 84 message + 3 checksum digits where the Lamport form carried
-/// 336 preimages (~9 kvB of script per head, ~30 KB); the pair refute's
+/// 336 preimages (~9 kvB of script per head, ~30 KB); the pair rebut's
 /// stack budget relaxes by the same factor (the D42 new-head-only
 /// narrowing is now a size choice, not a necessity).
 pub fn authorship_fragment(b: Builder, file: usize, head_off: usize, key: &WotsPublic) -> Builder {
@@ -317,7 +317,7 @@ pub fn authorship_fragment(b: Builder, file: usize, head_off: usize, key: &WotsP
     b.wots_verify_tied(key, file, &authorship_positions(head_off))
 }
 
-// ----- the self-checking split (the refuted output's mover splits) ----
+// ----- the self-checking split (the rebuttal output's mover splits) ----
 
 /// The new state's side nibble's file digit: state byte 32's low nibble =
 /// head digit `16 + 65` = 81.
@@ -342,7 +342,7 @@ pub fn resolution_fragment(mut b: Builder, file: usize, new_off: usize, code: u8
     b
 }
 
-/// The self-checking split leaf of the refuted output at this layout: the
+/// The self-checking split leaf of the rebuttal output at this layout: the
 /// chess analogue of ttt's (`ttt::checked_split_leaf`'s docs apply): after
 /// `delta + delta'` the mover splits by its revealed outcome code, the leaf
 /// proving `code == R(parked new state)` in-leaf. The witness is ttt's

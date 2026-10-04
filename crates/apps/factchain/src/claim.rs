@@ -131,8 +131,8 @@ pub struct FactChainShape {
 }
 
 impl FactChainShape {
-    /// The refutation shape: one header longer from the same checkpoint.
-    pub fn refutation(&self) -> FactChainShape {
+    /// The rebuttal shape: one header longer from the same checkpoint.
+    pub fn rebuttal(&self) -> FactChainShape {
         FactChainShape {
             checkpoint: self.checkpoint,
             target: self.target,

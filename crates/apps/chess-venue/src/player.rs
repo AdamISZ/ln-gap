@@ -158,7 +158,7 @@ impl Rules for ChessRules {
         let l = inst.layout(d);
         let prior = if d >= 2 { Self::state_of(&prior_head) } else { Some(ChessState::initial()) };
         let after = Self::state_of(&new_head);
-        chess::disprove_leaves(&l, &inst.depth_keys(d).refute)
+        chess::disprove_leaves(&l, &inst.depth_keys(d).rebut)
             .into_iter()
             .filter(|pl| (pl.fires)(&prior_head, &new_head))
             .map(|pl| {
@@ -462,7 +462,7 @@ impl Player {
             "close" => self.s.close_channel().map(|_| String::new()),
             "claim" => self.h.claim(&mut self.s, arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
             "counter" => self.h.counter(&mut self.s, arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
-            "refute" => self.h.refute(&mut self.s, &self.r).map(|_| String::new()),
+            "rebut" => self.h.rebut(&mut self.s, &self.r).map(|_| String::new()),
             "disprove" => self.h.disprove(&mut self.s, &self.r, arg).map(|_| String::new()),
             "timely" => self.h.timely(&mut self.s).map(|_| String::new()),
             "split" => self.split().map(|_| String::new()),
@@ -515,7 +515,7 @@ const HELP: &str = "commands:
   cheat <uci> [how]     publish dishonestly: illegal (default) | garbage | malformed | wrongdepth | late
   settle | resign | draw | accept
                         end the game in the channel: settle a mate, resign, offer / accept a draw
-  force | claim [d] | counter [d] | refute | disprove [kind] | timely | split
+  force | claim [d] | counter [d] | rebut | disprove [kind] | timely | split
                         disputes (force: force-close the channel, putting the game on chain)
   close                 close the channel cooperatively (no game in it)
   board                 the position

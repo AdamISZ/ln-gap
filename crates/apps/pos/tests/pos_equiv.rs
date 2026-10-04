@@ -35,7 +35,7 @@ use lngap_factchain::slot::{SlotEntry, STATE_BITS};
 use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsSig;
 use lngap_pos::instance::{self, GameClock, PosInstance};
-use lngap_pos::refute;
+use lngap_pos::rebut;
 use lngap_pos::{Authorship, Member, PosClient, PosMiner, Registry, SealedBlock};
 use lngap_tictactoe::{Board, TicTacToe};
 
@@ -203,8 +203,8 @@ fn skel<'a>(graph: &'a [PresignedTx], label: &str) -> &'a PresignedTx {
 fn exhibit_witness(g: &Game, p: &PresignedTx, sig_a: &WotsSig, sig_b: &WotsSig) -> Vec<Vec<u8>> {
     let sig_u = sign_tx(&g.user.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
     let sig_h = sign_tx(&g.hub.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
-    let mut w = refute::wots_wire(sig_a);
-    w.extend(refute::wots_wire(sig_b));
+    let mut w = rebut::wots_wire(sig_a);
+    w.extend(rebut::wots_wire(sig_b));
     w.push(sig_h);
     w.push(sig_u);
     w
@@ -228,7 +228,7 @@ fn player_equivocation_leaf() {
         assert_eq!(
             graph.len(),
             166,
-            "settle + 9 x (claim, refute, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43) + 8 x (counter, refute, 3 + 3 splits) (D44)"
+            "settle + 9 x (claim, rebut, 3 + 3 splits) + 5 x (exhibit, 3 splits) + 9 per-depth equivocation exhibits (D39, D43) + 8 x (counter, rebut, 3 + 3 splits) (D44)"
         );
         let mut venue = Venue::new(g.inst.authorship());
         let mut client = PosClient::new(CONTRACT_ID);

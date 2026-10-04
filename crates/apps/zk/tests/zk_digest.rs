@@ -17,7 +17,7 @@ use bitcoin_script_functions::hash::blake3;
 use bitcoin_script_stack::stack::StackTracker;
 use lngap_lamport::winternitz::{WotsExt, WotsSecret};
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::{disprove_witness, pair_key};
+use lngap_pos::rebut::{disprove_witness, pair_key};
 use lngap_pos::ttt::Layout;
 use rand::{Rng, SeedableRng};
 

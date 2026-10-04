@@ -23,13 +23,13 @@ flowchart TB
     C --> EQ["equiv_d<br/>(two signed moves at d)"]:::pre
 
     ABS --> A["A_d: the claim output"]
-    A --> REF["refute<br/>(the mover shows move d)"]:::pre
+    A --> REF["rebut<br/>(the mover shows move d)"]:::pre
     A --> CTR["counter<br/>'you never made move d−1'"]:::pre
     A --> TS["split (timeout)<br/>claimant wins"]:::pre
 
     CTR --> A2["the depth-(d−1) claim tree,<br/>with no counter of its own"]
 
-    REF --> P["P_d: the refuted output"]
+    REF --> P["P_d: the rebuttal output"]
     P --> DIS["disprove_π<br/>(a rule the move broke)"]:::run
     P --> NT["not_timely<br/>(a majority flagged move d)"]:::run
     P --> CS["split (checked)<br/>mover wins, R proved in the leaf"]:::pre
@@ -44,8 +44,8 @@ leaf of that output's taproot tree; each grey box is a transaction whose
 outputs were fixed when it was signed.
 
 There is one `absent_d` per move `d = 1..M`, each with its own claim
-output, refutation, counter and splits. A dispute uses one path through
-this graph: at most a claim, a counter, a refutation and one final spend,
+output, rebuttal, counter and splits. A dispute uses one path through
+this graph: at most a claim, a counter, a rebuttal and one final spend,
 whatever the length of the game.
 
 ## Who signs what, and why
@@ -58,7 +58,7 @@ The rule is simple:
 
 | transaction | leaf | why |
 |---|---|---|
-| `absent_d`, `counter`, `refute`, the splits, `equiv_d`, `settle` | 2-of-2 | each must land in a specific tree (or pay a specific split): the counterparty's signature, given in advance, is what pins the outputs |
+| `absent_d`, `counter`, `rebut`, the splits, `equiv_d`, `settle` | 2-of-2 | each must land in a specific tree (or pay a specific split): the counterparty's signature, given in advance, is what pins the outputs |
 | `disprove_π`, `not_timely` | the claimant's key, after a window | they pay the claimant the whole output; nothing needs pinning |
 | `revoke` | revocation secret + counterparty key | Lightning's penalty |
 
@@ -66,11 +66,11 @@ The rule is simple:
 hash commits to the transaction's outputs. A pre-signed transaction is
 "pinned" only if it needs a signature from someone who *wouldn't* sign
 anything else, which is the party the transaction protects. The
-refutation is the cautionary case: it was once gated by the **mover's**
+rebuttal is the cautionary case: it was once gated by the **mover's**
 key alone. Every other key in its witness is also the mover's (the
 venue's revealed readout scalars, the proposer scalar), so the mover could
 redirect the claim output to itself and skip the disprove stage. It's
-2-of-2 now; the test `refute_cannot_redirect_the_claim_output` keeps it
+2-of-2 now; the test `rebut_cannot_redirect_the_claim_output` keeps it
 that way.
 
 ## The timelocks
@@ -79,7 +79,7 @@ that way.
  move d due at T_d = t₀ + d·ℓ                       (wall-clock, kept by the venue)
  absent_d     CLTV: median-time-past ≥ T_d + m      the only read of Bitcoin's clock
  ───────────────────────────────────────────────────────────────────────────────
- A_d   refute, counter     immediately              the mover answers within δ
+ A_d   rebut, counter     immediately              the mover answers within δ
        split (timeout)     CSV δ                    nobody answered: claimant wins
  P_d   disprove, not_timely  CSV δ                  the claimant's window
        split (checked)       CSV δ + δ′              after every disprove has had its chance
@@ -102,7 +102,7 @@ as the commitment signature.
 sequenceDiagram
     participant U as User
     participant H as Hub
-    Note over U,H: adding a game: both pick per-depth one-time keys<br/>(refute, state and code keys) and fetch the venue's registry
+    Note over U,H: adding a game: both pick per-depth one-time keys<br/>(rebut, state and code keys) and fetch the venue's registry
     U->>H: propose state k+1 (the new contract output) + my keys
     H->>U: my keys
     Note over U,H: each builds the same contract instance,<br/>the same trees and the same graph, independently
@@ -129,9 +129,9 @@ tic-tac-toe adds four transactions per depth from 5):
 
 ```
  1                      settle
- + M × (1 + 1 + 3 + 3)  per depth: the claim, the refutation, 3 timeout splits, 3 checked splits
+ + M × (1 + 1 + 3 + 3)  per depth: the claim, the rebuttal, 3 timeout splits, 3 checked splits
  + M                    per depth: equiv_d
- + (M−1) × (1+1+3+3)    per depth from 2: the counter, its refutation, its splits
+ + (M−1) × (1+1+3+3)    per depth from 2: the counter, its rebuttal, its splits
 ```
 
 | game | M | transactions per version | signatures per update |
@@ -141,7 +141,7 @@ tic-tac-toe adds four transactions per depth from 5):
 | the Groth16 verifier search | 119 | 2,058 | 8,232 |
 
 Signing is cheap (a few milliseconds per hundred transactions). What costs
-time is building the leaves: each refutation script is about 70 KB and has
+time is building the leaves: each rebuttal script is about 70 KB and has
 to be hashed into its tree. The trees depend only on the contract's keys,
 so they're built once per contract and cached; later updates only re-sign.
 
@@ -150,9 +150,9 @@ so they're built once per contract and cached; later updates only re-sign.
 ```mermaid
 flowchart LR
     S1["a stall"] --> X1["absent_d → split (timeout)<br/>2 small txs: claimant wins"]
-    S2["a false claim"] --> X2["absent_d → refute → split (checked)<br/>mover wins"]
-    S3["an illegal move"] --> X3["absent_d → refute → disprove<br/>claimant wins"]
-    S4["a late move"] --> X4["absent_d → refute → not_timely<br/>claimant wins"]
+    S2["a false claim"] --> X2["absent_d → rebut → split (checked)<br/>mover wins"]
+    S3["an illegal move"] --> X3["absent_d → rebut → disprove<br/>claimant wins"]
+    S4["a late move"] --> X4["absent_d → rebut → not_timely<br/>claimant wins"]
     S5["a claim too far ahead"] --> X5["absent_d → counter → split (timeout)<br/>mover wins"]
 ```
 

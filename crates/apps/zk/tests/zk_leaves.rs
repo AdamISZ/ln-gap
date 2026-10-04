@@ -31,7 +31,7 @@ use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::{disprove_witness, pair_key};
+use lngap_pos::rebut::{disprove_witness, pair_key};
 use lngap_pos::ttt::{Layout, PosLeaf};
 use lngap_zk::*;
 
@@ -182,7 +182,7 @@ fn final_step_on_regtest() {
     let step = trace()[0];
     let pl = prove_leaf_for(&sk, 0);
 
-    // the final step's refuted output, as D59 shapes it
+    // the final step's rebuttal output, as D59 shapes it
     let prove = {
         let mut b = Builder::new().csv(PROVE).checksigverify(&xonly(&prover)).into_script().into_bytes();
         b.extend_from_slice(pl.script.as_bytes());

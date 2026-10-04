@@ -391,7 +391,7 @@ impl Player {
             let r = match a.name.as_str() {
                 "settle" => self.settle(),
                 "force close" if self.h.grievance(&self.s).is_some() && self.mode != Mode::Withhold && !settling => self.s.force_close(),
-                "refute" if !pool.iter().any(|l| l.ends_with("/refute")) => self.h.refute(&mut self.s, &self.r),
+                "rebut" if !pool.iter().any(|l| l.ends_with("/rebut")) => self.h.rebut(&mut self.s, &self.r),
                 "claim" if self.mode != Mode::Withhold => {
                     let dd = a.cmd.split_whitespace().nth(1).and_then(|x| x.parse().ok());
                     self.h.claim(&mut self.s, dd)
@@ -593,7 +593,7 @@ impl Player {
             }
             "claim" => self.h.claim(&mut self.s, arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
             "counter" => self.h.counter(&mut self.s, arg.and_then(|a| a.parse().ok())).map(|_| String::new()),
-            "refute" => self.h.refute(&mut self.s, &self.r).map(|_| String::new()),
+            "rebut" => self.h.rebut(&mut self.s, &self.r).map(|_| String::new()),
             "disprove" => self.h.disprove(&mut self.s, &self.r, arg).map(|_| String::new()),
             "timely" => self.h.timely(&mut self.s).map(|_| String::new()),
             "split" => self.split().map(|_| String::new()),
@@ -631,7 +631,7 @@ impl Page for Player {
 const HELP: &str = "commands:
   new | deal | hit | stand | settle
                         the player's session and moves (settle: pay the hand's result in the channel)
-  force | claim [d] | counter [d] | refute | disprove [name] | timely | split
+  force | claim [d] | counter [d] | rebut | disprove [name] | timely | split
                         disputes (force: force-close the channel, putting the hand on chain)
   close                 close the channel cooperatively (no hand in it)
   mode honest|wrongcard|drawat17|standon16|withhold   the house's next move

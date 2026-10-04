@@ -9,7 +9,7 @@
 //! * `programs`: the contract programs — `nreg` (bonded registration: the
 //!   hub promises an anchor height and a proof shape, the user claims if
 //!   the entry is not anchored, the hub answers with an inclusion proof, the
-//!   user may refute the chain) and `anchorpay` (a payment gated on an
+//!   user may rebut the chain) and `anchorpay` (a payment gated on an
 //!   inclusion proof).
 //! * `hub`: the registry operator; `user`: a name owner; `audit`: the
 //!   off-chain auditor the harness runs.

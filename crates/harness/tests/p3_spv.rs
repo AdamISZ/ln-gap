@@ -3,7 +3,7 @@
 //! in the last block of a valid header chain from a checkpoint; the user checks
 //! the claim's predicates natively and disputes what fails: a header that
 //! does not link, a header without proof of work, a wrong Merkle sibling,
-//! a wrong ledger sibling. The user may also refute the hub's chain with a
+//! a wrong ledger sibling. The user may also rebut the hub's chain with a
 //! heavier one (a fork scenario), itself disputable by the hub.
 
 use std::sync::Arc;
@@ -109,7 +109,7 @@ impl World {
         World { rt, hub_claim, real_chain, anchor_txid: tx.compute_txid() }
     }
 
-    /// A harness whose `spv` program carries the hub's claim and the user's refutation.
+    /// A harness whose `spv` program carries the hub's claim and the user's rebuttal.
     fn harness(&self, label: &str, hub: (ClaimSpec, ClaimData), user: (ClaimSpec, ClaimData)) -> Harness {
         let prog = Arc::new(Spv { hub, user }) as Arc<dyn Program>;
         let mut h = Harness::with_regtest(self.rt.clone(), label, ProgramRegistry::new().with(prog)).unwrap();
@@ -240,11 +240,11 @@ fn wrong_ledger_sibling_is_disproved() {
     println!("{}", h.narrative());
 }
 
-/// The hub anchored in a private fork; the user refutes with the real,
-/// longer chain (depth 2). The hub disputes the refutation anyway, finds
+/// The hub anchored in a private fork; the user rebuts with the real,
+/// longer chain (depth 2). The hub disputes the rebuttal anyway, finds
 /// nothing to disprove, and is timed out: the user wins.
 #[test]
-fn heavier_chain_refutes_the_fork() {
+fn heavier_chain_rebuts_the_fork() {
     let w = World::new(3, true);
     let hub = w.hub_claim.build();
     assert_eq!(first_failing_step(&hub.0, &hub.1), None, "the fork is internally valid");
@@ -264,10 +264,10 @@ fn heavier_chain_refutes_the_fork() {
     println!("SIZES {}", sizes(&h));
 }
 
-/// A false refutation: the user's chain has a header that does not link;
+/// A false rebuttal: the user's chain has a header that does not link;
 /// the hub disputes and disproves it.
 #[test]
-fn false_refutation_is_disproved() {
+fn false_rebuttal_is_disproved() {
     let w = World::new(3, true);
     let hub = w.hub_claim.build();
     let mut chain = w.real_chain.clone();

@@ -143,7 +143,7 @@ The following diagram (Figure~\ref{fig:highlevel}) shows at a high-level how thi
 \node[box=30mm, thick] (clm) at (3.8,-2.3) {\textbf{Claim}\\ ``no legal move $d$ was published by its due time''};
 \foreach \n in {rev,set,eqv,clm} \draw[->] (C.south) -- (\n.north);
 
-\node[box=33mm, thick] (ref) at (1.5,-5.0) {\textbf{Refute}\\ the mover shows his move and the venue's attestation of it};
+\node[box=33mm, thick] (ref) at (1.5,-5.0) {\textbf{Rebut}\\ the mover shows his move and the venue's attestation of it};
 \node[box] (to1) at (5.6,-5.0) {\textbf{Timeout}\\ nobody answers: claimant wins};
 \draw[->] (clm.south) -- (ref.north);
 \draw[->] (clm.south) -- (to1.north);
@@ -193,7 +193,7 @@ As already noted, proving inclusion in Bitcoin's PoW chain with its SHA2 linked 
 
 Considering that arithmetic in Bitcoin Script is more or less limited to what Poelstra calls ``Small Script''~\cite{poelstrastate}, which operates on 4 byte numbers, what we can do is design the proof of work algorithm to use nibble arithmetic only. This is realized in our sample code, in the \texttt{n4bit} crate of the proof of concept~\cite{lngapcode}. Note that there had already been a very similar construction made in 2025 by AbdelStark, see StackSat-128~\cite{stacksat}. So in general terms, imagine the proof of work hashing uses this nibble based algo, such that proving a hash chain is correct in Bitcoin Script is actually feasible. This would mean a contract participant can post something to the proof of publication ledger, and if their counterparty challenges, saying ``you didn't publish anything'', they can prove that in fact they did, in Script, thus winning the dispute over the pot.
 
-Consider reorgs and canonical history: the key feature of proof of work is that the canonical history is defined by the heaviest chain. So imagine: Alice says ``Bob didn't publish his move'', then Bob says ``yes I did: it's in this PoP ledger block at this height, and here's the header chain back to genesis/checkpoint''. Alice can counter-refute: ``no you didn't: here's an alternate header chain with more weight, proving that yours is not canonical''. This is of course both necessary but also shows the fragility: necessary because otherwise Bob can "mine" a super-cheap chain that costs almost no PoW, fragile because without the kind of enormous weight of something like Bitcoin's PoW chain, reorgs could be easy and frequent even without adversarial behavior.
+Consider reorgs and canonical history: the key feature of proof of work is that the canonical history is defined by the heaviest chain. So imagine: Alice says ``Bob didn't publish his move'', then Bob says ``yes I did: it's in this PoP ledger block at this height, and here's the header chain back to genesis/checkpoint''. Alice can counter-rebut: ``no you didn't: here's an alternate header chain with more weight, proving that yours is not canonical''. This is of course both necessary but also shows the fragility: necessary because otherwise Bob can "mine" a super-cheap chain that costs almost no PoW, fragile because without the kind of enormous weight of something like Bitcoin's PoW chain, reorgs could be easy and frequent even without adversarial behavior.
 
 The least desirable aspect of the PoW option is in there: it's that this costs significant resources to maintain, otherwise it offers no security at all. How are miners compensated for this work? Merge mining seems not to apply straightforwardly, but the biggest count against this idea is the following:
 
@@ -263,7 +263,7 @@ status), the region the mover signs; the entry carries the mover's one-time sign
 region beside the head; and a dispute parks the heads at depths $d-1$
 and $d$. The mover's signature matters as much as the venue's: a venue
 attestation proves an entry was \emph{published}, the mover's one-time
-signature proves the mover \emph{made} it, and a refutation needs both
+signature proves the mover \emph{made} it, and a rebuttal needs both
 for the new head, or anyone could answer a claim with any junk the
 venue happened to seal. For the prior head the claimant's signature is
 enough: it pins the claimant's own move $d-1$, and whether that move
@@ -291,7 +291,7 @@ carries the whole position after move 4, so it commits him to one
 particular move 3 by Alice. If she plays it, the game continues and Bob
 has only shown her his reply in advance; if she plays anything else,
 his move 4 no longer follows from her move 3 and the disprove family
-refutes it; and he cannot replace it, since his one-time key for move 4
+rebuts it; and he cannot replace it, since his one-time key for move 4
 is spent and a second move 4 is an equivocation. An early move is a
 binding, conditional commitment that can hurt only its maker. (A
 correspondence player once answered 1.e4 with ``1\ldots b6, and 2\ldots
@@ -368,7 +368,7 @@ next member in the rotation, and so on. Inclusion therefore needs only
 one honest, live member within the move's time (``1 of $n$ liveness'').
 A shared key cannot say who used it, so each member also holds, per
 move, a \emph{proposer} key $P_{i,(c,d)} = p_{i,(c,d)}G$ and reveals
-$p_{i,(c,d)}$ in the seal it makes. Every refutation on Bitcoin names the
+$p_{i,(c,d)}$ in the seal it makes. Every rebuttal on Bitcoin names the
 member whose seal it relies on (Section~\ref{sec:graph:claim}).
 
 A seal counts only if it reaches the members before the move's due time,
@@ -388,7 +388,7 @@ registration carries the movers' per-move state keys, and a member
 checks the signature (never the move's legality, which is the disprove
 family's business). A member that seals an unsigned entry is caught by
 the entry itself, and ejected; the seal is inert in any contract, since
-a refutation must carry the mover's signature.
+a rebuttal must carry the mover's signature.
 
 Two seals of the same move are therefore one of four things: the same
 entry sealed by two members (byte-identical attestations: the shared
@@ -409,7 +409,7 @@ member holds, per move, a \emph{flag} key $F_{i,(c,d)} = f_{i,(c,d)}G$
 and reveals $f_{i,(c,d)}$ if at $T_d$ it held no attested, mover-signed
 entry for the move. A flag is a single point whose secret is revealed or
 not, so a script counts flags with \op{CHECKSIGADD} at the cost of one key
-per member. A refutation relying on a seal that $t$ members flagged is
+per member. A rebuttal relying on a seal that $t$ members flagged is
 killed by the \texttt{not\_timely} leaf. The threshold is a bare
 majority, $t = \lceil (n+1)/2 \rceil$: a flag is one-sided (false
 absence costs $t$ named flaggers; a late seal left standing costs its
@@ -419,7 +419,7 @@ failure costs balance at the majority.
 This is what makes timeliness enforceable against a colluding member.
 Honest members do not seal a move after its due time; a member that
 does, for a stalling player, produces a perfectly valid attestation,
-and without flags a refutation built on it would defeat an honest
+and without flags a rebuttal built on it would defeat an honest
 absence claim. With flags, the honest majority's on-time statement
 ``move $d$ was not published'' outweighs the late seal.
 
@@ -638,7 +638,7 @@ channel keys, the draft fixes, per depth $d \in 1..M$ (move $d$ is made
 by the \emph{mover} $m(d)$, alternating from $\Pa$ at $d=1$; the other
 party is the \emph{claimant} $c(d)$):
 \begin{itemize}
-\item $K^{\mathrm{ref}}_d$, the mover's \emph{refute key}: a Winternitz
+\item $K^{\mathrm{reb}}_d$, the mover's \emph{rebuttal key}: a Winternitz
   one-time key (w = 16, HASH160) over the pair of venue heads
   $h_{d-1}\,\|\,h_d$ ($96$ bytes, $192$ message digits plus $3$ checksum
   digits; $48$ bytes at $d=1$, where the prior state is the constant
@@ -663,7 +663,7 @@ $d$ (key index $s = (c, d)$):
   $t = \lceil (n+1)/2 \rceil$.
 \end{itemize}
 Only the $96$ head chunks of each table ($j \in 80..175$, the entry head
-inside the $96$-byte header) are ever embedded in a script; a refutation
+inside the $96$-byte header) are ever embedded in a script; a rebuttal
 reads the head out, not the whole header.
 
 \subsection{The commitment transaction}
@@ -714,7 +714,7 @@ settle:     (*\push{\mathrm{deadline}}*) OP_CLTV OP_DROP  (*\push{\tsd}*) OP_CSV
             2-of-2
 absent_d:   (*\push{T_d+m}*) OP_CLTV OP_DROP  2-of-2-VERIFY  OP_1
 exhibit_d:  (*\push{T_d+m}*) OP_CLTV OP_DROP  2-of-2-VERIFY  (*proposer fragment*)
-            (*two-head readout tied to $K^{\mathrm{ref}}_d$, gated on "terminal"*)
+            (*two-head readout tied to $K^{\mathrm{reb}}_d$, gated on "terminal"*)
 equiv_d:    2-of-2-VERIFY  WOTS-VERIFY((*$K^{\mathrm{st}}_d$*))  (*park digits*)
             WOTS-VERIFY((*$K^{\mathrm{st}}_d$*))  (*restore*)
             (*some digit differs*) OP_VERIFY  OP_1
@@ -727,7 +727,7 @@ the claimant's \emph{thin absence claim}: ``the mover published no valid
 move $d$ by its due time''. It asserts nothing about venue content, which is
 what keeps it two hundred bytes; the venue enters only if the mover
 answers. \texttt{exhibit}$_d$ (tic-tac-toe only; chess needs none,
-because a mated side simply has no move to refute with) lets the mover
+because a mated side simply has no move to rebut with) lets the mover
 of a terminal move park the attested pair directly and split by its
 result. \texttt{equiv}$_d$ pays the non-mover the whole pot on
 exhibiting two distinct valid signatures under $K^{\mathrm{st}}_d$: a
@@ -735,23 +735,23 @@ Winternitz signature is forced by its message, so two signatures of
 different states are a proof that the mover double-signed at that
 depth, and no venue data is needed.
 
-\subsection{The claim output and the refutation}
+\subsection{The claim output and the rebuttal}
 \label{sec:graph:claim}
 
 \texttt{absent}$_d$ is a pre-signed transaction whose single output
 $A_d$ carries the claim tree
 \begin{align*}
-  A_d:\quad & \texttt{refute},\ \texttt{counter}\ (d \ge 2),\
+  A_d:\quad & \texttt{rebut},\ \texttt{counter}\ (d \ge 2),\
   \texttt{split}_X\ (X \in \{\text{A},\text{B},\text{D}\}: A wins, B wins, draw).
 \end{align*}
 \begin{lstlisting}[style=script]
 split_X:   (*\push{\dl}*) OP_CSV OP_DROP  2-of-2-VERIFY
            LAMPORT-EXPECT((*$K^{\mathrm{ccode}}_d$*), X)  OP_1
 counter:   2-of-2-VERIFY  OP_1
-refute:    2-of-2-VERIFY
+rebut:    2-of-2-VERIFY
            (*\push{P_{1,d}}*) ... (*\push{P_{n,d}}*) (*\push{n}*) OP_PICK (*\push{n{-}1}*) OP_SWAP OP_SUB OP_PICK
                 (*\push{n{+}2}*) OP_ROLL OP_SWAP OP_CHECKSIGVERIFY  (*drop $n{+}1$*)
-           WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))               (*192 digits on the stack*)
+           WOTS-VERIFY((*$K^{\mathrm{reb}}_d$*))               (*192 digits on the stack*)
            AUTHORSHIP((*$K^{\mathrm{st}}_d$*) over the new head's digits)      (*the mover's*)
            AUTHORSHIP((*$K^{\mathrm{st}}_{d-1}$*) over the prior head's digits)  (*the claimant's*)
            OP_TOALTSTACK (*$\times 96$*)  OP_2DROP (*$\times 48$*)
@@ -759,19 +759,19 @@ refute:    2-of-2-VERIFY
            OP_1
 \end{lstlisting}
 The claimant's \texttt{split}$_X$ is the timeout: after $\dl$ blocks
-with no refutation, the claimant reveals its code key to the outcome it
+with no rebuttal, the claimant reveals its code key to the outcome it
 asserts and both pre-signed signatures pay the corresponding
-distribution. The mover's \texttt{refute} is the only leaf that touches
+distribution. The mover's \texttt{rebut} is the only leaf that touches
 the venue, and it does three things in one script:
 \begin{enumerate}
 \item it names the proposer: the witness supplies an index $i$ and a
   signature under $P_{i,d}$, made with the scalar $p_{i,d}$ that member
   $i$ revealed in its seal (\S\ref{sec:graph:math});
 \item it \emph{parks} the two heads: the WOTS verification of
-  $K^{\mathrm{ref}}_d$ leaves the $192$ message digits (the nibbles of
+  $K^{\mathrm{reb}}_d$ leaves the $192$ message digits (the nibbles of
   $h_{d-1}\|h_d$) on the stack, and two tied authorship checks prove
   that the mover's state key signed the new head's signed region, so a
-  garbage-signed entry cannot be refuted with, and that the
+  garbage-signed entry cannot be rebutted with, and that the
   \emph{claimant's} state key for depth $d-1$ signed the prior's. That
   key is one-time, so only one prior can carry it (two would be the
   claimant's equivocation), and the mover takes the signature from the
@@ -808,30 +808,30 @@ mover.
 \texttt{counter} (from $d \ge 2$) is the mover's own thin claim one
 depth back, ``the claimant did not move at $d-1$'': the negation of the
 claim's dueness. Its output is the depth-$(d-1)$ claim tree verbatim
-(without a counter of its own), so a false counter is refuted by the
+(without a counter of its own), so a false counter is rebutted by the
 claimant's attested, signed head at $d-1$ and judged by the ordinary
 family, while a true counter means the claim was never due. One level
 closes it. The absence claim is thin, so without the counter the only
 answer to a claim at a depth the game never reached would be a
-refutation, which the mover cannot make: a claimant who stopped
+rebuttal, which the mover cannot make: a claimant who stopped
 playing at move $3$ could wait and claim $\texttt{absent}_{99}$, and
 win. With it, the mover answers ``you did not make move $98$'', which
-the claimant cannot refute. An honest claimant claims the first move
+the claimant cannot rebut. An honest claimant claims the first move
 that was not made, where the counter is false; at any later depth the
 claimant's own missing move comes first, and the counter beats the
 claim. This is also why the counter's output has no counter of its
 own: a claimant that could truly answer ``you did not make move
 $d-2$'' should have claimed that depth itself.
 
-\subsection{The refuted output}
-\label{sec:graph:refuted}
+\subsection{The rebuttal output}
+\label{sec:graph:rebutted}
 
-\texttt{refute} is pre-signed too: it opens with the 2-of-2, so the
-refutation must be the transaction both parties signed in advance, and
-its output $P_d$ is pinned to the \emph{refuted tree}. (A gate under the
+\texttt{rebut} is pre-signed too: it opens with the 2-of-2, so the
+rebuttal must be the transaction both parties signed in advance, and
+its output $P_d$ is pinned to the \emph{rebuttal tree}. (A gate under the
 mover's key alone would pin nothing, since every other key in the
-refutation's witness, the venue's revealed scalars and the proposer
-scalar, is the mover's too: a mover could then refute with an illegal
+rebuttal's witness, the venue's revealed scalars and the proposer
+scalar, is the mover's too: a mover could then rebut with an illegal
 move and pay the claim output to itself, skipping the disproves.)
 \begin{align*}
   P_d:\quad & \texttt{disprove}_\pi\ (\pi \in \Pi_d),\ \texttt{not\_timely},\
@@ -839,13 +839,13 @@ move and pay the claim output to itself, skipping the disproves.)
 \end{align*}
 \begin{lstlisting}[style=script]
 disprove_(*$\pi$*):  (*\push{\dl}*) OP_CSV OP_DROP  (*\push{P_{c(d)}}*) OP_CHECKSIGVERIFY
-             WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))  PREDICATE((*$\pi$*) over the 192 digits)  OP_VERIFY
+             WOTS-VERIFY((*$K^{\mathrm{reb}}_d$*))  PREDICATE((*$\pi$*) over the 192 digits)  OP_VERIFY
              OP_2DROP (*$\times 96$*)  OP_1
 not_timely:  (*\push{\dl}*) OP_CSV OP_DROP  (*\push{P_{c(d)}}*) OP_CHECKSIGVERIFY
              (*\push{F_{1,d}}*) OP_CHECKSIG  (*\push{F_{2,d}}*) OP_CHECKSIGADD  ...
              (*\push{F_{n,d}}*) OP_CHECKSIGADD  (*\push{t}*) OP_GREATERTHANOREQUAL
 split_X:     (*\push{\dl+\dlp}*) OP_CSV OP_DROP  2-of-2-VERIFY
-             LAMPORT-EXPECT((*$K^{\mathrm{code}}_d$*), X)  WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))
+             LAMPORT-EXPECT((*$K^{\mathrm{code}}_d$*), X)  WOTS-VERIFY((*$K^{\mathrm{reb}}_d$*))
              RESOLUTION(new head) (*$= X$*)  OP_VERIFY  OP_2DROP (*$\times 96$*)  OP_1
 \end{lstlisting}
 The \emph{disprove family} $\Pi_d$ is the game's rule set expressed as
@@ -860,14 +860,14 @@ Appendix~\ref{app:chess} lists every chess predicate, with the layout
 of the 192 parked digits it reads, and follows one disproof (a bishop
 moving through a pawn) from the parked tuple to the spend. A disprove is
 not pre-signed: the claimant builds it at dispute time, copies the
-mover's WOTS reveal from the confirmed refutation's witness, signs with
+mover's WOTS reveal from the confirmed rebuttal's witness, signs with
 its own key, and takes the pot. \texttt{not\_timely} is the timeliness
 disprove (\S\ref{sec:graph:math}): it counts signatures under the
-members' flag points and kills a refutation whose move $t$ members
+members' flag points and kills a rebuttal whose move $t$ members
 flagged as empty at its deadline. The mover's \texttt{split}$_X$ is
 \emph{self-checking}: unlike the claim output's timeout split, it must
 also re-park the pair and prove in script that $R(\text{parked new
-state}) = X$, because a refutation carries no adjudicated outcome for
+state}) = X$, because a rebuttal carries no adjudicated outcome for
 a Lightning-style code-mismatch leaf to judge. It fires only after
 $\dl + \dlp$, so every disprove has had its window.
 
@@ -902,13 +902,13 @@ $\dl + \dlp$, so every disprove has had its window.
 
 \node[outp, below=3mm of absent] (Ad) {$A_d$};
 \draw (absent) -- (Ad);
-\node[pre, below=8mm of Ad, xshift=-30mm] (refute) {refute};
+\node[pre, below=8mm of Ad, xshift=-30mm] (rebut) {rebut};
 \node[pre, below=8mm of Ad, xshift=0mm] (counter) {counter};
 \node[pre, below=8mm of Ad, xshift=30mm] (tsplit) {split$_X$ (timeout)};
-\foreach \n in {refute,counter,tsplit} { \draw (Ad.south) edge (\n.north); }
+\foreach \n in {rebut,counter,tsplit} { \draw (Ad.south) edge (\n.north); }
 
-\node[outp, below=3mm of refute] (Pd) {$P_d$};
-\draw (refute) -- (Pd);
+\node[outp, below=3mm of rebut] (Pd) {$P_d$};
+\draw (rebut) -- (Pd);
 \node[run, below=12mm of Pd, xshift=-22mm] (disprove) {disprove$_\pi$};
 \node[run, below=12mm of Pd, xshift=2mm] (nt) {not\_timely};
 \node[pre, below=12mm of Pd, xshift=28mm] (csplit) {split$_X$ (checked)};
@@ -917,7 +917,7 @@ $\dl + \dlp$, so every disprove has had its window.
 \node[outp, below=3mm of counter, align=center] (Adm) {$A'_{d-1}$: the depth-$(d{-}1)$\\claim tree, no counter};
 \draw (counter) -- (Adm);
 
-\node[outp, below=3mm of exhibit, align=center] (Pe) {$P_d$: the refuted\\tree, as below};
+\node[outp, below=3mm of exhibit, align=center] (Pe) {$P_d$: the rebuttal\\tree, as below};
 \draw (exhibit) -- (Pe);
 
 \node[outp, below=3mm of equiv, font=\scriptsize] (Peq) {pot $\to c(d)$};
@@ -932,7 +932,7 @@ $\dl + \dlp$, so every disprove has had its window.
 \caption{The game output $C$ on one commitment and the transactions
 hanging off it, per depth $d$. Every output is a taproot tree; the
 edges are its leaves. The claim output $A_d$ races the mover's
-refutation against the claimant's timeout; the refuted output $P_d$
+rebuttal against the claimant's timeout; the rebuttal output $P_d$
 races the claimant's disproves against the mover's self-checking split;
 the counter sends the game one depth back. \texttt{revoke} is
 Lightning's revocation path, also a leaf of \texttt{to\_local} and $L$
@@ -953,14 +953,14 @@ are fixed by $M$:
   1 \;+\; M\,(1 + 1 + 3 + 3) \;+\; M \;+\; (M-1)\,(1 + 1 + 3 + 3)
   \;+\; \underbrace{4\,(M-4)}_{\text{tic-tac-toe exhibits}},
 \]
-that is \texttt{settle}; per depth the claim, its refutation and the
+that is \texttt{settle}; per depth the claim, its rebuttal and the
 three-plus-three splits; the equivocation exhibit; per depth from $2$
-the counter with the previous depth's refutation and splits; and, for
+the counter with the previous depth's rebuttal and splits; and, for
 tic-tac-toe, per terminal depth the exhibit with its three splits. With
 $M=9$ this is $166$ transactions; for chess with $M=8$ and no exhibit
 family, $129$. The disproves and \texttt{not\_timely} are not counted:
 they are the challenger's own transactions. Building the graph is
-dominated by hashing the refutation scripts (about $70$\,KB each, one
+dominated by hashing the rebuttal scripts (about $70$\,KB each, one
 per depth per version); signing $166$ transactions is a few
 milliseconds.
 
@@ -985,7 +985,7 @@ means revealing, for every $j$, the scalar
 that is, a Schnorr signature on the statement ``chunk $j$ of move $s$
 is $v_j$'' whose value is its own verification key. Scripts never
 verify these signatures; they verify possession of them. The mover
-proving that the venue attested $h_d$ signs the refutation transaction
+proving that the venue attested $h_d$ signs the rebuttal transaction
 itself with each revealed $a_{d,j,v_j}$ as a private key, and the
 readout's \op{CHECKSIGVERIFY} under $A_{d,j,v_j}$ succeeds exactly when
 the venue revealed that scalar. Revealing two values at one $(s,j)$ is
@@ -1000,8 +1000,8 @@ $F_{i,s} = f_{i,s} G$ (``move $s$ was not published by its due time''),
 and reveals the scalar when the statement holds: $p_{i,s}$ in the seal
 it makes, $f_{i,s}$ as data. A revealed scalar is again a private key,
 so the disputing party signs its \emph{own} transaction with it. In
-\texttt{refute} the proposer fragment selects $P_{i,d}$ by a witness
-index and demands a signature under it, so every refutation names the
+\texttt{rebut} the proposer fragment selects $P_{i,d}$ by a witness
+index and demands a signature under it, so every rebuttal names the
 member that sealed the move. In \texttt{not\_timely} the claimant
 signs under any $t$ of the $F_{i,d}$ and leaves the rest of the
 witness slots empty; \op{CHECKSIGADD} counts, an empty signature adds
@@ -1013,8 +1013,8 @@ late attestation left standing costs the proposer plus $n-t+1$
 silent members, and the two balance at $t = \lceil (n+1)/2 \rceil$.
 
 \paragraph{The parked tuple.}
-The refute key is the bridge between the two halves of the script. A
-Winternitz signature under $K^{\mathrm{ref}}_d$ on the message
+The rebuttal key is the bridge between the two halves of the script. A
+Winternitz signature under $K^{\mathrm{reb}}_d$ on the message
 $h_{d-1}\|h_d$ reveals, for message digit $i$ with value $d_i$, the
 chain element $\sigma_i = \mathrm{HASH160}^{(d_i)}(\mathrm{sk}_i)$, and
 the script checks $\mathrm{HASH160}^{(15-d_i)}(\sigma_i) =
@@ -1025,7 +1025,7 @@ selectors $v_j$; the disprove predicates and the resolution check read
 all of them as the tuple. Since the key is one-time and the claim,
 exhibit and counter contexts are mutually exclusive spends of $C$, the
 mover can park at most one tuple per depth, and a disprove built from
-the confirmed refutation's witness always judges a new head the venue
+the confirmed rebuttal's witness always judges a new head the venue
 attested, after the claimant's own signed prior.
 
 \paragraph{The fee lock.}
@@ -1130,9 +1130,9 @@ commitment (two balances, one contract) & broadcaster & $\approx 240$ \\
 \texttt{absent}$_d$ & claimant & $188$ \\
 \texttt{split}$_X$ (timeout, off $A_d$) & claimant & $193$--$201$ \\
 \texttt{counter} & mover & $178$ \\
-\texttt{refute}, tic-tac-toe, $d \ge 2$ & mover & $20{,}106$ \\
-\texttt{refute}, chess, $d \ge 2$ & mover & $24{,}121$ \\
-\texttt{refute}, chess, $d = 1$ (one head) & mover & $19{,}558$ \\
+\texttt{rebut}, tic-tac-toe, $d \ge 2$ & mover & $20{,}106$ \\
+\texttt{rebut}, chess, $d \ge 2$ & mover & $24{,}121$ \\
+\texttt{rebut}, chess, $d = 1$ (one head) & mover & $19{,}558$ \\
 \texttt{disprove}, chess (one exhibit) & claimant & $\approx 4{,}950$ \\
 \texttt{not\_timely} ($3$ of $5$ flags) & claimant & $254$ \\
 \texttt{split}$_X$ (checked, off $P_d$) & mover & $\approx 4{,}900$ \\
@@ -1141,7 +1141,7 @@ fee \texttt{timeout} & payer & $147$ \\
 \bottomrule
 \end{tabular}
 \caption{Confirmed virtual sizes. A stall costs the claimant two small
-transactions at any depth; the refutation is the one large transaction
+transactions at any depth; the rebuttal is the one large transaction
 and is paid by the party that answers a claim, its cost being mostly
 the venue readout of the new head ($96$ possession proofs, $16$ points
 each, as script constants); the prior head is bound by the claimant's
@@ -1158,7 +1158,7 @@ kilobytes per disprove, and a chess rule and a tic-tac-toe rule are
 the same shape of leaf. Every per-member statement of the venue is one
 point in a script and one signature in a witness, so the number of
 members changes the graph by tens of bytes per leaf: going from $5$
-members to $50$ adds about $1\%$ to the chess refutation. The hard
+members to $50$ adds about $1\%$ to the chess rebuttal. The hard
 limit is the flag count: \texttt{not\_timely} holds a witness slot per
 member on a stack of at most $1{,}000$ elements, so a committee cannot
 exceed $999$, and in practice about a hundred is the useful ceiling.
@@ -1183,14 +1183,14 @@ Figure~\ref{fig:highlevel}:
   the claimant broadcasts the absence claim, then after $\delta$ the
   timeout split. Two small transactions, under $400$ vB, at any depth.
 \item[A false stall claim.] The mover did publish. He answers with the
-  refutation: the venue's attestation of his entry, his own signature
+  rebuttal: the venue's attestation of his entry, his own signature
   on it, the claimant's signature on the previous move, and the name of
   the sealing member. The
   claimant has nothing to disprove; after $\delta + \delta'$ the mover's
   checked split pays him.
 \item[An illegal move.] The mover published and signed an illegal move,
   and answers a claim with it. The claimant copies the mover's
-  re-commitment from the confirmed refutation's witness and spends the
+  re-commitment from the confirmed rebuttal's witness and spends the
   one disprove leaf the move violates.
 \item[A late move.] A member colluding with the mover sealed his move
   after $T_d$. The honest majority flagged move $d$ at $T_d$;
@@ -1202,21 +1202,21 @@ Figure~\ref{fig:highlevel}:
   venue data.
 \item[A claim at the wrong depth.] The claimant claims absence at a
   depth past the one where the game stopped. The mover counters, the
-  claimant cannot refute the counter, and the timeout pays the mover.
+  claimant cannot rebut the counter, and the timeout pays the mover.
 \item[A revoked state.] As in Lightning.
 \end{description}
 
 The asymmetry of cost is deliberate. The common failure, a stall, is
-cheap to prove. The expensive transaction, the refutation, is paid by
+cheap to prove. The expensive transaction, the rebuttal, is paid by
 the party answering a claim, and a party answers only when it will win.
 Winning does not, however, recover what the dispute cost: the
 pre-signed fees come out of the pot, so they fall on the winner. A
 player about to lose can therefore make a false claim for a few hundred
-virtual bytes and force the winner to pay for a refutation of some
+virtual bytes and force the winner to pay for a rebuttal of some
 24\,kvB, and some hours of delay, at no further cost to itself. The
 dispute ends the contract, so this can be done once, not every move; but
 it is a lever for extortion, and it puts a floor under the pot below
-which an honest refutation does not pay.
+which an honest rebuttal does not pay.
 
 \paragraph{Who pays for a dispute.}
 Every on-chain dispute exists because someone deviated: stalled,
@@ -1230,8 +1230,8 @@ refresh) returns each deposit to its owner; an on-chain resolution pays
 the winner the whole output, as the splits already do, so the winner
 receives the loser's deposit, and that deposit pays the dispute's fees.
 An honest claim is never penalised: a real stall has no valid
-refutation, so the claimant wins and is reimbursed; the only ways to
-drive an honest claimant into an expensive path (an invalid refutation,
+rebuttal, so the claimant wins and is reimbursed; the only ways to
+drive an honest claimant into an expensive path (an invalid rebuttal,
 a false counter) are deviations that lose to it. A false claim costs the
 honest mover nothing net, provided $D$ covers the most expensive path
 it can be forced into, about 30\,kvB for chess. The graph is unchanged;
@@ -1243,7 +1243,7 @@ and the honest mover receives both stakes and its own deposit back. The price is
 capital: pre-signed fees are fixed when the graph is signed, so they
 and $D$ must be set at a pessimistic feerate, and both players lock it for the game's
 duration, recovering it in the cooperative case. The pot floor becomes a
-capital cost rather than a loss, and shrinking the refutation (most of
+capital cost rather than a loss, and shrinking the rebuttal (most of
 it is the readout's script constants) reduces it directly. A player
 about to lose can still delay the winner's payout, at the price of its
 whole deposit.
@@ -1324,7 +1324,7 @@ its Merkle path to $R$ by the next due time. The fee for the epoch is paid in
 the channel as usual; the bond stays locked.
 
 \paragraph{Disputes are the game's disputes.} A missing response is an
-absence claim, refuted only by a venue attestation of a timely response.
+absence claim, rebutted only by a venue attestation of a timely response.
 A wrong response is a disprove leaf that checks a Merkle path (SHA-256,
 native in Script; the chunk must fit a 520-byte stack element). A false
 claim by the customer is answered by the attested response. The
@@ -1484,7 +1484,7 @@ card changed; a wrong status (a bust, the showdown, a push); the dealer
 stopping below 17 with cards left, or drawing at 17 or above; and
 malformed fields. Each is a comparison or a few additions, of the size
 of tic-tac-toe's leaves. Timeliness is the venue's, as in any game. One
-detail differs from chess. There, a refuted depth's result always
+detail differs from chess. There, a rebutted depth's result always
 favours its mover, so the mover's checked split is gated by the
 mover's outcome code. In blackjack the house can park a hand it lost,
 and could then lock the pot by never revealing its code; so blackjack's
@@ -1499,7 +1499,7 @@ loser will not settle goes on chain by a force-close, and is disputed
 off the confirmed commitment's graph. On regtest, three honest hands
 settled in six channel updates with no chain transaction; a hand with
 a wrongly computed card was force-closed (commitment 180\,vB), claimed
-(189\,vB), refuted (24,307\,vB) and disproved (4,916\,vB). Chess runs in
+(189\,vB), rebutted (24,307\,vB) and disproved (4,916\,vB). Chess runs in
 the same channel layer: a mate is settled by the winner, a resignation
 or an agreed draw by update, and an illegal move goes on chain the same
 way.
@@ -1554,9 +1554,9 @@ sees the same ones.
 
 \paragraph{The outcome is a pointer claim.} Settlement is claimed as
 ``winner $w$ at price $p$, where $p$ is bid $k$'', not computed. The
-claim is refuted by exhibiting a timely revealed bid above $w$'s, a
+claim is rebutted by exhibiting a timely revealed bid above $w$'s, a
 timely revealed bid other than $w$'s above $p$, or by showing that bid
-$k$ is not a timely reveal. Each refutation is one inclusion path and
+$k$ is not a timely reveal. Each rebuttal is one inclusion path and
 one comparison; the number of bidders never enters a leaf. Completeness
 comes from the same leaves: an omitted bid is exhibited with its
 timeliness, and the seller's contract can exhibit \emph{any} omitted
@@ -1621,8 +1621,8 @@ final equality gives a disprove leaf that is sound but not complete: an
 assertion that fails aborts the spend, and Script has no conditional
 way to succeed after one, so a read record inconsistent with its opcode
 fires no leaf. At the final step we therefore use BitVMX's orientation.
-The prover's refutation parks the disputed step's record, and the
-refuted output offers, in windows that each belong to one side, the
+The prover's rebuttal parks the disputed step's record, and the
+rebuttal output offers, in windows that each belong to one side, the
 claimant's disproves after $\delta$; the prover a \texttt{prove} leaf
 per instruction class after $\delta+\delta'$; and the claimant a
 timeout after $\delta+2\delta'$, so a proof cannot pre-empt a disprove.
@@ -1664,7 +1664,7 @@ rounds (some nine minutes off chain), which is a contract of $119$
 depths: $2{,}058$ pre-signed transactions, with $1{,}919$ disprove
 leaves and $62$ \texttt{prove} leaves at the final depth of the first
 phase. All $59$ moves of that phase were sealed by the venue, and on
-regtest the dispute was the claim ($220$\,vB), the refutation
+regtest the dispute was the claim ($220$\,vB), the rebuttal
 ($24.3$\,kvB, as re-measured on a smaller program: its size depends
 on the heads, not the program) and the proof of the halting \texttt{ecall}
 ($58.5$\,kvB). The on-chain cost does not depend on the program's
@@ -1802,11 +1802,11 @@ The assumptions fall into five classes:
 threat & defended by & assumption \\
 \midrule
 publishing a revoked channel state & revocation leaf & Lightning's \\
-an illegal move & disprove family, from the refutation's witness & cryptographic \\
-answering a claim with an entry the mover did not sign & authorship check in \texttt{refute} & cryptographic \\
+an illegal move & disprove family, from the rebuttal's witness & cryptographic \\
+answering a claim with an entry the mover did not sign & authorship check in \texttt{rebut} & cryptographic \\
 a player signing two moves at one depth & \texttt{equiv} leaf & cryptographic \\
 a stall & absence claim and timeout & Lightning's \\
-a false absence claim & refutation with the venue's attestation & 1 of $n$ (some member sealed the move) \\
+a false absence claim & rebuttal with the venue's attestation & 1 of $n$ (some member sealed the move) \\
 an absence claim at a depth the game never reached & \texttt{counter} & cryptographic \\
 censorship of a mover (no member seals) & nothing in Script; fee income, member independence & 1 of $n$ \\
 a late seal colluding with the mover & \texttt{not\_timely}: $t$ flags & majority \\
@@ -1920,7 +1920,7 @@ only a colluding group of $t$, but any group of $n-t+1$ that can be
 compelled together, such as one jurisdiction, host or operator.
 
 \paragraph{Bitcoin's liveness.} Every branch of the dispute graph is a
-race against a timelock: a refutation must confirm before the
+race against a timelock: a rebuttal must confirm before the
 claimant's timeout, a disprove before the mover's split. The contract
 therefore assumes, as Lightning does for its HTLCs and BitVMX for its
 rounds, that a transaction can be confirmed within its window. The
@@ -1937,7 +1937,7 @@ threshold, and it is there for \emph{order}, not for stake: two statements
 by two members (``move $d$ was not published'', ``here is move $d$'')
 cannot be ordered by any third fact, so canonical timing needs agreement
 among the members, or an external clock. A colluding majority can kill
-an honest mover's refutation with false flags; the flags are signatures,
+an honest mover's rebuttal with false flags; the flags are signatures,
 so the colluders are named, and the residual falls on a party who knows
 whom to pursue. Naming is not proof, however: whether a move was
 published in time cannot be shown to a third party.
@@ -1987,10 +1987,10 @@ itself stays a bare majority (Section~\ref{sec:voidzone} says why).
 
 A majority of the members can take the pot of any contract, in either
 direction. By \emph{false flags}, $t$ members declare an honest mover's
-timely move unpublished and \texttt{not\_timely} kills its refutation.
+timely move unpublished and \texttt{not\_timely} kills its rebuttal.
 By a \emph{late seal with suppressed flags}, one member seals a stalling
 mover's move after its due time while $n - t + 1$ members withhold their
-flags, so the late refutation stands. The majority threshold balances
+flags, so the late rebuttal stands. The majority threshold balances
 the two, each needing about half of the members. This resembles a
 majority attack on a proof-of-work chain, with three differences. The
 venue's attackers are identified (every flag and every seal carries a
@@ -2208,7 +2208,7 @@ proof of inclusion. Its authors observe that an inclusion proof, to be
 safe at high value, must admit counter-proofs within a bounded time, so
 it too rests on transactions not being censored for long, and the
 timelock asks for nothing more. The venue's contracts rest on the same
-assumption: every claim, refutation and timeout supposes that a
+assumption: every claim, rebuttal and timeout supposes that a
 transaction can be confirmed within its window.
 
 Both modes show that a public
@@ -2447,7 +2447,7 @@ which their statements can be judged.
 \section{The chess disprove family, in full}
 \label{app:chess}
 
-Section~\ref{sec:graph:refuted} gives the shape of a
+Section~\ref{sec:graph:rebutted} gives the shape of a
 \texttt{disprove}$_\pi$ leaf and names the predicates only by example.
 This appendix lists every predicate of the chess family, says what each
 computes and from which digits, and works through one disproof from the
@@ -2458,8 +2458,8 @@ statements, \texttt{leaf.rs} for their Script) and the PoS glue in
 
 \subsection{What a disprove leaf sees}
 
-A confirmed refutation at depth $d$ has parked, under the one-time key
-$K^{\mathrm{ref}}_d$, the pair $\mathrm{head}(d-1)\,\|\,\mathrm{head}(d)$:
+A confirmed rebuttal at depth $d$ has parked, under the one-time key
+$K^{\mathrm{reb}}_d$, the pair $\mathrm{head}(d-1)\,\|\,\mathrm{head}(d)$:
 $2 \times 48$ bytes, so $192$ hexadecimal digits (nibbles, high nibble
 of each byte first). The disprove leaf re-verifies that Winternitz
 signature (\texttt{WOTS-VERIFY}), which leaves the $192$ digits on the
@@ -2527,17 +2527,17 @@ piece of side $S$. from, to and the promotion come from the
 \emph{new} state's bytes 36--38 (the mover's own account of its move).
 
 \paragraph{The general form.} Every leaf of the family has the shape
-of \S\ref{sec:graph:refuted}:
+of \S\ref{sec:graph:rebutted}:
 \begin{lstlisting}[style=script]
 (*\push{\dl}*) OP_CSV OP_DROP  (*\push{P_{c(d)}}*) OP_CHECKSIGVERIFY      (*the claimant, after the window*)
-WOTS-VERIFY((*$K^{\mathrm{ref}}_d$*))                             (*the 192 parked digits*)
+WOTS-VERIFY((*$K^{\mathrm{reb}}_d$*))                             (*the 192 parked digits*)
 PREAMBLE  BODY((*$\pi$*))                                     (*one element: 1 iff the rule is broken*)
 CLEANUP                                                  (*drop the rest, leave that element*)
 \end{lstlisting}
 and its witness, bottom to top, is: the exhibit (zero to two script
 numbers), the $195$ (hash, digit) pairs of the Winternitz reveal
 ($192$ message digits and $3$ checksum digits), copied from the
-refutation's witness, and the claimant's signature.
+rebuttal's witness, and the claimant's signature.
 
 \subsection{The predicates}
 
@@ -2637,11 +2637,11 @@ The venue attests it (the venue checks signatures, not chess).
 position. Once the claim lock $T_2 + m$ has passed it broadcasts the
 thin absence claim \texttt{absent}$_2$ ($189$ vB), ``$\Pb$ did not move
 at depth 2''. As a statement about the venue the claim is false, and
-$\Pb$ answers with \texttt{refute} ($24{,}121$ vB): the venue's attestation
+$\Pb$ answers with \texttt{rebut} ($24{,}121$ vB): the venue's attestation
 of head 2, both movers' signatures over their heads, the proposer
-fragment, and the Winternitz signature under $K^{\mathrm{ref}}_2$ that parks
+fragment, and the Winternitz signature under $K^{\mathrm{reb}}_2$ that parks
 $\mathrm{head}(1)\,\|\,\mathrm{head}(2)$ in the output $P_2$. The
-refutation is valid: head 2 \emph{was} attested, and both heads were signed. What it has done
+rebuttal is valid: head 2 \emph{was} attested, and both heads were signed. What it has done
 is put $\Pb$'s move on chain in a form Script can read.
 
 \paragraph{Finding the predicate.} $\Pa$ runs the family off-chain on
@@ -2690,9 +2690,9 @@ cleanup drops everything else, and the spend succeeds with that $1$ as
 the only stack element. Appendix~\ref{app:chess:bytes} shows the same
 computation opcode by opcode.
 
-\paragraph{The spend.} After the refutation has $\dl$ confirmations,
+\paragraph{The spend.} After the rebuttal has $\dl$ confirmations,
 $\Pa$ builds \texttt{disprove\_chess\_ray} spending $P_2$: witness
-$[\,1,\ \text{the }195\text{ reveal pairs from the refutation's
+$[\,1,\ \text{the }195\text{ reveal pairs from the rebuttal's
 witness},\ \sigma_{\Pa}\,]$, the leaf script and its control block. It
 confirms at $4{,}947$ vB and pays the whole contract output to $\Pa$.
 The three transactions total $29{,}257$ vB. $\Pb$'s checked
@@ -2712,7 +2712,7 @@ The walk-through above is the program. What goes on chain is the
 transaction below, taken from the same regtest run; the raw transaction,
 the leaf's full disassembly and every witness element are in the
 repository under \texttt{docs/paper/data/}. The transaction has one
-input (the refuted output $P_2$, with \texttt{nSequence} $= 6$: $\dl = 6$
+input (the rebuttal output $P_2$, with \texttt{nSequence} $= 6$: $\dl = 6$
 blocks on regtest), one output ($820{,}000$ sat to $\Pa$), and a witness
 of $394$ elements. It is $19{,}537$ bytes, of which the witness is
 $19{,}441$: weight $19{,}819$, so $4{,}955$ vB.
@@ -2839,7 +2839,7 @@ tapscript spend requires:
 TOALTSTACK  2DROP (*$\times 108$*)  DROP  FROMALTSTACK
 \end{lstlisting}
 (\texttt{wrong\_slot} and \texttt{chess\_malformed} end instead as in
-the outline of \S\ref{sec:graph:refuted}, \texttt{OP\_VERIFY}, the
+the outline of \S\ref{sec:graph:rebutted}, \texttt{OP\_VERIFY}, the
 drops, \texttt{OP\_1}; the two are equivalent.)
 
 \paragraph{The witness.} It has $394$ elements; they are listed here

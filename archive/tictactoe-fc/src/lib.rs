@@ -14,9 +14,9 @@
 //!   inclusion claim that move `d` sits in slot `d`; only after slot
 //!   `d + 1` has passed (`CLTV`), so a timeout claim gives the counterparty
 //!   its slot first;
-//! - the *refutation*: the counterparty's move `d + 1` with its own
+//! - the *rebuttal*: the counterparty's move `d + 1` with its own
 //!   inclusion claim for slot `d + 1`, after which nothing continues: a
-//!   claimant whose timeout claim is refuted forfeits (`R(s_{d+1})`);
+//!   claimant whose timeout claim is rebutted forfeits (`R(s_{d+1})`);
 //! - the tic-tac-toe disprove leaves against either move, and the
 //!   bisection against either inclusion claim.
 //!

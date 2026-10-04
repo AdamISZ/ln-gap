@@ -8,7 +8,9 @@ down to the opcodes.
 
 ## Where the move comes from
 
-In a dispute the mover has already *refuted* (note the special meaning of this: it's more a rebuttal, i.e. a claim of refutation, which we are now trying to disprove, in the below; see the short paper for the outline logic) an absence claim, which put
+In a dispute the mover has already answered an absence claim with a
+*rebuttal* (which the claimant is now trying to disprove, below; see the
+short paper for the outline logic). The rebuttal put
 two consecutive venue entries on chain under its one-time Winternitz key:
 the head before its move and the head after it
 ([the pre-signed graph](presigned-graph.md) shows where this happens).
@@ -142,17 +144,17 @@ As per the script snippet above, taproot has something called "cleanstack", by c
 
 ## The spend
 
-On chain the leaf sits in the refuted output's taproot tree, behind a
+On chain the leaf sits in the rebuttal output's taproot tree, behind a
 timelock and the claimant's key:
 
 ```
 <δ> OP_CSV OP_DROP  <P_claimant> OP_CHECKSIGVERIFY     only the claimant, after the window
-WOTS-VERIFY(refute key)                                 re-parks the 192 digits
+WOTS-VERIFY(rebuttal key)                                 re-parks the 192 digits
 … the predicate above …
 ```
 
 Its witness is the claimant's signature and the mover's 195 (hash, digit)
-reveal pairs, which the claimant copies from the refutation's witness on
+reveal pairs, which the claimant copies from the rebuttal's witness on
 chain. It needs nothing from the mover, and nothing from the venue.
 
 ## What carries over to the other games

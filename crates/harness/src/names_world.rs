@@ -68,7 +68,7 @@ pub struct NamesWorld {
     pending_anchor: Option<Transaction>,
     /// Scenario fault: the hub mines its anchors on a private fork.
     pub fork: bool,
-    /// Slots anchored on the fork, with the request height (for the refutation data).
+    /// Slots anchored on the fork, with the request height (for the rebuttal data).
     forked: Vec<(String, u32, usize)>,
     reveal_sent: bool,
     pub registering: bool,
@@ -239,7 +239,7 @@ impl NamesWorld {
 
     /// Install honest bond behaviour: the user claims from `claim_from` if
     /// the entry is not anchored and folds the bond once it is, and
-    /// refutes the hub's chain if a heavier one is served; the hub answers
+    /// rebuts the hub's chain if a heavier one is served; the hub answers
     /// a claim with its inclusion proof.
     fn install_bond_policies(&mut self, who: Who, id: u32, req_id: u32, claim_from: u32) {
         let slot = Self::slot(req_id);
@@ -253,7 +253,7 @@ impl NamesWorld {
             id,
             Box::new(move |ctx: &MoveCtx| match bits_to_uint(ctx.state) {
                 0 => (ctx.height >= claim_from && !anchored.lock().unwrap().contains(&s1)).then(|| vec![true]),
-                2 => store.has(&format!("{s3}/refute")).then(|| vec![true]),
+                2 => store.has(&format!("{s3}/rebut")).then(|| vec![true]),
                 _ => None,
             }),
         );
@@ -303,7 +303,7 @@ impl NamesWorld {
         let store = self.store.clone();
         self.bob.hub.set_move_policy(ID_LEG1, Box::new(move |ctx: &MoveCtx| (bits_to_uint(ctx.state) == 0 && store.has(&format!("{s1}/incl"))).then(|| vec![true])));
         let store = self.store.clone();
-        self.bob.user.set_move_policy(ID_LEG1, Box::new(move |ctx: &MoveCtx| (bits_to_uint(ctx.state) == 1 && store.has(&format!("{s2}/refute"))).then(|| vec![true])));
+        self.bob.user.set_move_policy(ID_LEG1, Box::new(move |ctx: &MoveCtx| (bits_to_uint(ctx.state) == 1 && store.has(&format!("{s2}/rebut"))).then(|| vec![true])));
         let msgs = self.bob.user.open_contract_with_deadline(ID_LEG1, &program, [PRICE, Amount::ZERO], h_sale)?;
         self.bob.bus(msgs)?;
         // leg 2 in Alice's channel: the hub locks PRICE for Alice, gated on the same proof
@@ -352,7 +352,7 @@ impl NamesWorld {
         if !(anchor.is_some() && self.fork) {
             self.hub_sees(h, &txs)?;
         }
-        self.serve_refutations()?;
+        self.serve_rebuttals()?;
         self.application_steps()?;
         self.alice.settle_offchain()?;
         self.bob.settle_offchain()?;
@@ -405,11 +405,11 @@ impl NamesWorld {
         Ok(())
     }
 
-    /// Serve heavier-chain refutations for fork-anchored slots once the real chain is one longer.
-    fn serve_refutations(&mut self) -> Result<()> {
+    /// Serve heavier-chain rebuttals for fork-anchored slots once the real chain is one longer.
+    fn serve_rebuttals(&mut self) -> Result<()> {
         let h = self.height();
         for (slot, request_height, n) in self.forked.clone() {
-            let key = format!("{slot}/refute");
+            let key = format!("{slot}/rebut");
             if self.store.has(&key) || h < request_height + n as u32 + 1 {
                 continue;
             }
@@ -417,7 +417,7 @@ impl NamesWorld {
             let cp = self.raw_header(request_height)?;
             let shape = HeaderShape { checkpoint: cp.digest(), nbits: cp.nbits(), n_headers: n + 1 };
             self.store.put(&key, shape.data(&headers));
-            self.say(format!("the real chain is heavier than the hub's fork: refutation data served for {slot}"));
+            self.say(format!("the real chain is heavier than the hub's fork: rebuttal data served for {slot}"));
         }
         Ok(())
     }

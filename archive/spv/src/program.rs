@@ -1,5 +1,5 @@
 //! The `spv` program: the hub claims an anchored ledger entry (depth 1);
-//! the user may refute it with a heavier header chain from the same
+//! the user may rebut it with a heavier header chain from the same
 //! checkpoint (depth 2, decision 8). Both claims are verified by bisection.
 
 use anyhow::{ensure, Result};
@@ -10,14 +10,14 @@ use lngap_contract::prelude::*;
 pub enum SpvState {
     Init,
     HubClaimed,
-    UserRefuted,
+    UserRebutted,
 }
 
 #[derive(Debug)]
 pub struct Spv {
     /// The hub's claim (depth 1).
     pub hub: (ClaimSpec, ClaimData),
-    /// The user's refutation (depth 2): a header chain one longer than the hub's.
+    /// The user's rebuttal (depth 2): a header chain one longer than the hub's.
     pub user: (ClaimSpec, ClaimData),
 }
 
@@ -44,13 +44,13 @@ impl Contract for Spv {
         match s {
             SpvState::Init => Some(Role::Hub),
             SpvState::HubClaimed => Some(Role::User),
-            SpvState::UserRefuted => None,
+            SpvState::UserRebutted => None,
         }
     }
     fn transition(&self, s: &SpvState, m: &bool, mover: Role) -> Result<SpvState, Invalid> {
         match (s, mover, m) {
             (SpvState::Init, Role::Hub, true) => Ok(SpvState::HubClaimed),
-            (SpvState::HubClaimed, Role::User, true) => Ok(SpvState::UserRefuted),
+            (SpvState::HubClaimed, Role::User, true) => Ok(SpvState::UserRebutted),
             _ => Err(Invalid("not this party's move".into())),
         }
     }
@@ -59,14 +59,14 @@ impl Contract for Spv {
         match s {
             SpvState::Init => o[Self::USER_WINS as usize].clone(),
             SpvState::HubClaimed => o[Self::HUB_WINS as usize].clone(),
-            SpvState::UserRefuted => o[Self::USER_WINS as usize].clone(),
+            SpvState::UserRebutted => o[Self::USER_WINS as usize].clone(),
         }
     }
     fn max_depth_from(&self, s: &SpvState) -> u32 {
         match s {
             SpvState::Init => 2,
             SpvState::HubClaimed => 1,
-            SpvState::UserRefuted => 0,
+            SpvState::UserRebutted => 0,
         }
     }
     fn n_state_bits(&self) -> usize {
@@ -83,7 +83,7 @@ impl Contract for Spv {
         Ok(match bits_to_uint(b) {
             0 => SpvState::Init,
             1 => SpvState::HubClaimed,
-            2 => SpvState::UserRefuted,
+            2 => SpvState::UserRebutted,
             x => anyhow::bail!("bad state {x}"),
         })
     }
@@ -110,7 +110,7 @@ impl Contract for Spv {
         }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
-        // every move advances the state by one; the code is UserWins iff the new state is UserRefuted (2)
+        // every move advances the state by one; the code is UserWins iff the new state is UserRebutted (2)
         vec![
             LeafBuilder::new(ctx).prior_uint(0..2).new_uint(0..2).op(OP_SWAP).int(1).op(OP_ADD).op(OP_NUMNOTEQUAL).finish("state_mismatch", |c| bits_to_uint(&c.new) != bits_to_uint(&c.prior) + 1),
             LeafBuilder::new(ctx).new_uint(0..2).code_uint().op(OP_SWAP).int(2).op(OP_NUMEQUAL).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| u32::from(c.code) != u32::from(bits_to_uint(&c.new) == 2)),

@@ -63,7 +63,7 @@ pub struct FcWorld {
     pub miner: Miner,
     /// Scenario fault (N9): the hub's entry is mined on a private fork only
     /// the hub sees; the real chain advances past it and the world serves a
-    /// heavier-chain refutation.
+    /// heavier-chain rebuttal.
     pub fork: bool,
     /// The hub's private-fork miner (starts from genesis like the real miner).
     pub fork_miner: Miner,
@@ -250,7 +250,7 @@ impl FcWorld {
                     }
                 }
                 Change::Move { id, .. } => {
-                    // The hub answers a claim with its move (state → Refuted)
+                    // The hub answers a claim with its move (state → Rebutted)
                     // if the entry is confirmed on the fact chain.
                     let c = ctx.current.contract(*id).ok_or_else(|| anyhow!("no contract {id}"))?;
                     let inst = downcast(c);
@@ -333,7 +333,7 @@ impl FcWorld {
     }
 
     /// Install honest bond behaviour: the user claims from `claim_from` if
-    /// the entry is not confirmed, folds the bond once it is, and refutes the
+    /// the entry is not confirmed, folds the bond once it is, and rebuts the
     /// hub's chain when heavier-chain data is served (N9). The hub answers a
     /// claim (state 1 → 2) when its inclusion proof data exists — in fork
     /// mode that data covers the hub's fork, not the users' chain.
@@ -353,9 +353,9 @@ impl FcWorld {
                             .then(|| vec![true])
                     }
                     2 => {
-                        // Refuted: refute with the heavier real chain, once the
-                        // world has served the refutation data (N9).
-                        store.has(&format!("{req_id}/refute")).then(|| vec![true])
+                        // Rebutted: rebut with the heavier real chain, once the
+                        // world has served the rebuttal data (N9).
+                        store.has(&format!("{req_id}/rebut")).then(|| vec![true])
                     }
                     _ => None,
                 }
@@ -588,7 +588,7 @@ impl FcWorld {
     /// N9 fork mode: the real chain advances with an empty block every step;
     /// the hub's entry is mined on a private fork only the hub sees. Once the
     /// real chain is one header longer than the fork, the world serves the
-    /// heavier-chain refutation data.
+    /// heavier-chain rebuttal data.
     fn step_fork(&mut self) -> Result<()> {
         // The real chain advances (empty block: no entry)
         self.miner.submit(vec![]);
@@ -635,15 +635,15 @@ impl FcWorld {
             self.pending_event = None;
         }
 
-        self.serve_refutations()?;
+        self.serve_rebuttals()?;
         Ok(())
     }
 
-    /// Serve the heavier-chain refutation for fork-anchored requests once the
+    /// Serve the heavier-chain rebuttal for fork-anchored requests once the
     /// real chain is one header longer than the hub's fork.
-    fn serve_refutations(&mut self) -> Result<()> {
+    fn serve_rebuttals(&mut self) -> Result<()> {
         for (req_id, cp_height, n) in self.forked.clone() {
-            let key = format!("{req_id}/refute");
+            let key = format!("{req_id}/rebut");
             if self.store.has(&key) {
                 continue;
             }
@@ -667,7 +667,7 @@ impl FcWorld {
             let raw_headers: Vec<[u8; lngap_factchain::HEADER_BYTES]> = data.headers.iter().map(|h| h.0).collect();
             self.store.put(&key, fc_shape.data(&raw_headers));
             self.say(format!(
-                "the real chain is heavier than the hub's fork: refutation data served for request {req_id} ({} headers)",
+                "the real chain is heavier than the hub's fork: rebuttal data served for request {req_id} ({} headers)",
                 raw_headers.len()
             ));
         }

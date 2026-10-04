@@ -249,8 +249,8 @@ impl AnchorShape {
         }
         data
     }
-    /// The heavier-chain refutation of this claim: one header longer from the same checkpoint.
-    pub fn refutation(&self) -> HeaderShape {
+    /// The heavier-chain rebuttal of this claim: one header longer from the same checkpoint.
+    pub fn rebuttal(&self) -> HeaderShape {
         HeaderShape { checkpoint: self.chain.checkpoint, nbits: self.chain.nbits, n_headers: self.chain.n_headers + 1 }
     }
 }

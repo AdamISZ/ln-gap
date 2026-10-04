@@ -384,9 +384,9 @@ pub struct FactShape {
     pub n_headers: usize,
 }
 
-/// The refutation shape: one header longer from the same checkpoint.
+/// The rebuttal shape: one header longer from the same checkpoint.
 impl FactShape {
-    pub fn refutation(&self) -> FactShape {
+    pub fn rebuttal(&self) -> FactShape {
         FactShape {
             checkpoint: self.checkpoint,
             difficulty_bits: self.difficulty_bits,
@@ -517,8 +517,8 @@ mod tests {
         let data = shape.build_data(&client, &entries[2]); // entry at height 3
         assert!(shape.verify_data(&data).is_ok(), "valid claim verifies");
 
-        // Refutation: one more header
-        let ref_shape = shape.refutation();
+        // Rebuttal: one more header
+        let ref_shape = shape.rebuttal();
         assert_eq!(ref_shape.n_headers, 4);
     }
 

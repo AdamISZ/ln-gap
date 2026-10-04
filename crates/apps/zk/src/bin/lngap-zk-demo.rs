@@ -30,7 +30,7 @@ use emulator::loader::program_definition::ProgramDefinition;
 use lngap_btc::keys::Seed;
 use lngap_btc::regtest::Regtest;
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::pair_key;
+use lngap_pos::rebut::pair_key;
 use lngap_pos::ttt::Layout;
 use lngap_zk::chain::FinalOutput;
 use lngap_zk::dispute::{search, Behaviour, Searched};
@@ -201,9 +201,9 @@ fn main() -> Result<()> {
     let ins = riscv_decode::decode(f.read.opcode).map_err(|e| anyhow!("undecodable opcode: {e:?}"))?;
     let proof = prove_leaf(&Layout::at(D, GAME, mover_at(D)), &pair.public(), &ins, f.read.micro, Arc::new(|_, _| true));
     let out = FinalOutput::new(&proof, &prover, &claimant, DELTA, DELTA_PRIME)?;
-    say("   (the claim and the refutation that parks the final pair are the graph's usual first two transactions; here the refuted output is funded directly)");
+    say("   (the claim and the rebuttal that parks the final pair are the graph's usual first two transactions; here the rebuttal output is funded directly)");
     say(format!(
-        "   the refuted output has two leaves: {} ({} B, after {} blocks: the claimant's disproves come first) and timeout (the claimant's, after {} blocks)",
+        "   the rebuttal output has two leaves: {} ({} B, after {} blocks: the claimant's disproves come first) and timeout (the claimant's, after {} blocks)",
         out.prove_name,
         out.prove.len(),
         out.prove_after(),
@@ -227,7 +227,7 @@ fn main() -> Result<()> {
             say(format!("   after {} blocks the claimant takes the output: {txid} at height {h}, {} vB. The verifier wins.", out.timeout_after(), to.vsize()));
         }
     }
-    say(format!("\n   on chain: the refutation that parks the pair, then one transaction; {:.1?} in all", t0.elapsed()));
+    say(format!("\n   on chain: the rebuttal that parks the pair, then one transaction; {:.1?} in all", t0.elapsed()));
     if s.step == 0 {
         bail!("unexpected: step 0");
     }

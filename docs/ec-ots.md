@@ -1,6 +1,6 @@
 # EC-OTS: how Script reads what the venue sealed
 
-A refutation has to prove to Script that the venue **sealed** the mover's
+A rebuttal has to prove to Script that the venue **sealed** the mover's
 head. The venue's members can't sign the head with ordinary Schnorr
 signatures, because Script can't verify those over an arbitrary message.
 Instead the venue uses what we call an **elliptic-curve one-time
@@ -50,7 +50,7 @@ holding both scalars, since each checks against its published point.
 ## Reading it in Script: possession, not verification
 
 Script never verifies these signatures. It checks **possession**: the
-spender signs the refutation transaction itself, using each revealed
+spender signs the rebuttal transaction itself, using each revealed
 `a_{j,v}` as a private key, and an `OP_CHECKSIG` under `A_{j,v}` succeeds
 exactly when the venue revealed that scalar.
 
@@ -89,8 +89,8 @@ no valid signature exists, and the leaf fails. So the readout proves "the
 venue sealed exactly the head the mover committed to", one witness element
 per row.
 
-The refutation reads out the 96 digits of the **new** head this way:
-about 53 KB of script constants, most of the refutation's 24 kvB. (The
+The rebuttal reads out the 96 digits of the **new** head this way:
+about 53 KB of script constants, most of the rebuttal's 24 kvB. (The
 prior head is bound by the claimant's own signature instead, since only its
 content matters, not whether the venue published it.)
 
@@ -101,11 +101,11 @@ with no content, a single bit, costs **one point** per member:
 
 | point | the member reveals its secret when | read by |
 |---|---|---|
-| proposer point `P_{i,(c,d)}` | it seals move `d` | `refute`: names the sealer |
+| proposer point `P_{i,(c,d)}` | it seals move `d` | `rebut`: names the sealer |
 | flag point `F_{i,(c,d)}` | move `d` wasn't sealed by its due time | `not_timely`: counts flags |
 
-In the refutation, a **proposer fragment** selects one member's point by a
-witness index and requires a signature under it, so every refutation names
+In the rebuttal, a **proposer fragment** selects one member's point by a
+witness index and requires a signature under it, so every rebuttal names
 the member whose seal it relies on:
 
 ```

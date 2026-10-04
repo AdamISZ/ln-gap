@@ -1,4 +1,4 @@
-//! The final step's output on Bitcoin (D59): what the prover's refutation
+//! The final step's output on Bitcoin (D59): what the prover's rebuttal
 //! would create at the last step of a computation dispute. Two leaves:
 //! `zk_prove_<class>` (the prover's payment key after `delta + delta'`,
 //! then the proof over the parked pair) and `timeout` (the claimant's key
@@ -20,7 +20,7 @@ use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_lamport::winternitz::WotsSecret;
-use lngap_pos::refute::disprove_witness;
+use lngap_pos::rebut::disprove_witness;
 use lngap_pos::ttt::PosLeaf;
 
 /// The output and its two leaves.

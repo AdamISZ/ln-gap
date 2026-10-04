@@ -2,7 +2,7 @@
 //! (SPV_DISPUTE.md phases 3–4): no attestations or receipts; the hub
 //! promises an anchor height and a proof shape, the bond is written against
 //! them, every fact about the registry is an inclusion proof verified by
-//! bisection, and a hub proving on a private fork is refuted by the heavier
+//! bisection, and a hub proving on a private fork is rebutted by the heavier
 //! chain.
 
 use anyhow::Result;
@@ -262,8 +262,8 @@ pub const N8: Scenario = Scenario {
 
 pub const N9: Scenario = Scenario {
     id: "N9",
-    title: "Fake chain: the hub anchors on a private fork and proves inclusion there; Alice refutes with the heavier chain",
-    expected: "Alice's node does not see the anchor; she claims, the hub proves inclusion on its fork (move_2, internally valid), Alice refutes with one more real header (move_3), split_3_BondToUser",
+    title: "Fake chain: the hub anchors on a private fork and proves inclusion there; Alice rebuts with the heavier chain",
+    expected: "Alice's node does not see the anchor; she claims, the hub proves inclusion on its fork (move_2, internally valid), Alice rebuts with one more real header (move_3), split_3_BondToUser",
     run: || {
         let mut w = NamesWorld::new("N9")?;
         w.fork = true;

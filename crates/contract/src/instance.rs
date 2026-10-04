@@ -479,13 +479,13 @@ impl ContractInstance {
 
     /// The tree of `C'_d` (`d ≥ 1`): disprove leaves, the next Move, the Splits.
     /// In a star graph this is the output of a claim; the next Move is the
-    /// refutation (see [`ContractInstance::refuted_tree`]).
+    /// rebuttal (see [`ContractInstance::rebuttal_tree`]).
     pub fn depth_tree(&self, ctx: &CommitCtx, depth: u32) -> Result<TapTree> {
         self.depth_tree_with(ctx, depth, depth < self.max_depth())
     }
-    /// The tree of the output of a refutation at `depth` (star graphs): as
+    /// The tree of the output of a rebuttal at `depth` (star graphs): as
     /// [`ContractInstance::depth_tree`] but with no further Move.
-    pub fn refuted_tree(&self, ctx: &CommitCtx, depth: u32) -> Result<TapTree> {
+    pub fn rebuttal_tree(&self, ctx: &CommitCtx, depth: u32) -> Result<TapTree> {
         self.depth_tree_with(ctx, depth, false)
     }
     fn depth_tree_with(&self, ctx: &CommitCtx, depth: u32, next_move: bool) -> Result<TapTree> {
@@ -527,7 +527,7 @@ impl ContractInstance {
     }
 
     /// Star graph: `settle`; for each depth `d` the claim `move_d` off `C`
-    /// with its Splits and dispute chain, and (for `d < M`) the refutation
+    /// with its Splits and dispute chain, and (for `d < M`) the rebuttal
     /// `r{d}/move_{d+1}` off `C'_d` with `r{d}/split_{d+1}_X` and
     /// `r{d}/d{d+1}/…`.
     fn graph_star(&self, ctx: &CommitCtx, outpoint: OutPoint, prevout: &TxOut) -> Result<Vec<PresignedTx>> {
@@ -546,13 +546,13 @@ impl ContractInstance {
             out.push(PresignedTx::new(leaf.clone(), move_tx, vec![prevout.clone()], &tree0, &leaf, format!("claim at depth {d} by {}", self.prover_at(d)))?);
             self.push_splits_and_dispute(&mut out, ctx, d, &tree_d, c_d, &c_d_prevout, "")?;
             if d < self.max_depth() {
-                let tree_r = self.refuted_tree(ctx, d + 1)?;
+                let tree_r = self.rebuttal_tree(ctx, d + 1)?;
                 let leaf = format!("move_{}", d + 1);
                 let ref_tx = build_spend(c_d, &tree_d.leaf(&leaf)?.timelock, vec![TxOut { value: c_d_prevout.value - fee, script_pubkey: tree_r.script_pubkey() }]);
                 let c_r = OutPoint { txid: ref_tx.compute_txid(), vout: 0 };
                 let c_r_prevout = ref_tx.output[0].clone();
                 let prefix = format!("r{d}/");
-                out.push(PresignedTx::new(format!("{prefix}{leaf}"), ref_tx, vec![c_d_prevout.clone()], &tree_d, &leaf, format!("refutation at depth {} by {}", d + 1, self.prover_at(d + 1)))?);
+                out.push(PresignedTx::new(format!("{prefix}{leaf}"), ref_tx, vec![c_d_prevout.clone()], &tree_d, &leaf, format!("rebuttal at depth {} by {}", d + 1, self.prover_at(d + 1)))?);
                 self.push_splits_and_dispute(&mut out, ctx, d + 1, &tree_r, c_r, &c_r_prevout, &prefix)?;
             }
         }

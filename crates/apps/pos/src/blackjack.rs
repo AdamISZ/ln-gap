@@ -2,7 +2,7 @@
 //!
 //! The head layout, the honest transitions and every predicate's native
 //! mirror are `lngap-blackjack`'s; this module builds the Script leaves.
-//! After a refutation at depth `d` the parked register file is the pair
+//! After a rebuttal at depth `d` the parked register file is the pair
 //! `head(d-1) || head(d)` (192 digits, the prior at 0..96, the new at
 //! 96..192); at depth 1 it is the single head (96 digits) and the prior is
 //! the constant initial head, whose state digits are all zero, so the
@@ -856,7 +856,7 @@ pub fn resolution_fragment(mut b: Builder, l: &Layout, code: u8) -> Builder {
     b
 }
 
-/// The blackjack checked split of the refuted output: after `delta +
+/// The blackjack checked split of the rebuttal output: after `delta +
 /// delta'`, 2-of-2 (pre-signed) and R proven in-leaf. No outcome-code
 /// gate: a losing house could otherwise lock the pot by never revealing
 /// its code (D57). `_code` is unused (kept for the dispatch's shape).
@@ -874,7 +874,7 @@ pub fn checked_split_leaf(ctx: &CommitCtx, l: &Layout, o: &lngap_contract::Outco
 /// The ungated checked split's witness, wire order: the pair reveal, the
 /// hub signature, the user signature (consumed first).
 pub fn checked_split_witness(sig_user: Vec<u8>, sig_hub: Vec<u8>, pair: &lngap_lamport::winternitz::WotsSig) -> Vec<Vec<u8>> {
-    let mut w = crate::refute::wots_wire(pair);
+    let mut w = crate::rebut::wots_wire(pair);
     w.push(sig_hub);
     w.push(sig_user);
     w
@@ -892,7 +892,7 @@ pub fn entry_ok(pk: &WotsPublic, c: &Commitments, depth: u32, entry: &[u8]) -> b
     }
     let head: [u8; HEAD_BYTES] = entry[..HEAD_BYTES].try_into().expect("48 bytes");
     let sigs: Vec<[u8; 20]> = entry[HEAD_BYTES..HEAD_BYTES + n_sig].chunks(20).map(|x| x.try_into().expect("20")).collect();
-    if !crate::refute::check_entry_sig(pk, &auth_message(&head), &sigs) {
+    if !crate::rebut::check_entry_sig(pk, &auth_message(&head), &sigs) {
         return false;
     }
     let s = State::from_head(&head);

@@ -5,10 +5,10 @@
 //!   From `claim_from` the user may claim "not anchored" (depth 1). The
 //!   hub's only answer is an inclusion proof: a bisection claim that the
 //!   entry is in the ledger anchored at the promised height in the chain
-//!   from the checkpoint (depth 2). The user may refute that chain with a
+//!   from the checkpoint (depth 2). The user may rebut that chain with a
 //!   heavier one (depth 3).
 //! * `anchorpay:{params}` — a payment gated on an inclusion proof by the
-//!   prover (depth 1), refutable by a heavier chain (depth 2).
+//!   prover (depth 1), rebuttable by a heavier chain (depth 2).
 //!
 //! Proof data (headers, the anchor transaction, siblings) is served
 //! off-chain; the harness models this with a shared [`ServedData`] store
@@ -24,7 +24,7 @@ use lngap_contract::{Program, ProgramRegistry};
 use lngap_spv::AnchorShape;
 use serde::{Deserialize, Serialize};
 
-/// Proof data by slot: `"{slot}/incl"` for the inclusion proof, `"{slot}/refute"` for a heavier chain.
+/// Proof data by slot: `"{slot}/incl"` for the inclusion proof, `"{slot}/rebut"` for a heavier chain.
 #[derive(Clone, Default)]
 pub struct ServedData(Arc<Mutex<HashMap<String, ClaimData>>>);
 
@@ -77,8 +77,8 @@ pub enum NRegState {
     /// The user claimed "not anchored by the promised height".
     Claimed,
     /// The hub proved inclusion.
-    Refuted,
-    /// The user refuted the hub's chain.
+    Rebutted,
+    /// The user rebutted the hub's chain.
     Reinstated,
 }
 
@@ -112,22 +112,22 @@ impl Contract for NReg {
         match s {
             NRegState::Init => Some(Role::User),
             NRegState::Claimed => Some(Role::Hub),
-            NRegState::Refuted => Some(Role::User),
+            NRegState::Rebutted => Some(Role::User),
             NRegState::Reinstated => None,
         }
     }
     fn transition(&self, s: &NRegState, m: &bool, mover: Role) -> Result<NRegState, Invalid> {
         match (s, mover, m) {
             (NRegState::Init, Role::User, true) => Ok(NRegState::Claimed),
-            (NRegState::Claimed, Role::Hub, true) => Ok(NRegState::Refuted),
-            (NRegState::Refuted, Role::User, true) => Ok(NRegState::Reinstated),
+            (NRegState::Claimed, Role::Hub, true) => Ok(NRegState::Rebutted),
+            (NRegState::Rebutted, Role::User, true) => Ok(NRegState::Reinstated),
             _ => Err(Invalid("not this party's move".into())),
         }
     }
     fn resolution(&self, s: &NRegState) -> Outcome {
         let o = Contract::outcomes(self);
         match s {
-            NRegState::Init | NRegState::Refuted => o[Self::BOND_TO_HUB as usize].clone(),
+            NRegState::Init | NRegState::Rebutted => o[Self::BOND_TO_HUB as usize].clone(),
             NRegState::Claimed | NRegState::Reinstated => o[Self::BOND_TO_USER as usize].clone(),
         }
     }
@@ -135,7 +135,7 @@ impl Contract for NReg {
         match s {
             NRegState::Init => 3,
             NRegState::Claimed => 2,
-            NRegState::Refuted => 1,
+            NRegState::Rebutted => 1,
             NRegState::Reinstated => 0,
         }
     }
@@ -153,7 +153,7 @@ impl Contract for NReg {
         Ok(match bits_to_uint(b) {
             0 => NRegState::Init,
             1 => NRegState::Claimed,
-            2 => NRegState::Refuted,
+            2 => NRegState::Rebutted,
             _ => NRegState::Reinstated,
         })
     }
@@ -174,23 +174,23 @@ impl Contract for NReg {
         }
     }
     /// Claims are state-relative: the move *from* Claimed is the hub's proof,
-    /// the move from Refuted the user's refutation, whatever the on-chain depth.
+    /// the move from Rebutted the user's rebuttal, whatever the on-chain depth.
     fn claim(&self, from: &[bool], depth: u32) -> Option<ClaimSpec> {
         match bits_to_uint(from) + depth - 1 {
             1 => Some(self.params.shape.spec()),
-            2 => Some(self.params.shape.refutation().spec()),
+            2 => Some(self.params.shape.rebuttal().spec()),
             _ => None,
         }
     }
     fn claim_data(&self, from: &[bool], depth: u32) -> ClaimData {
         match bits_to_uint(from) + depth - 1 {
             1 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
-            2 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
+            2 => self.store.get(&format!("{}/rebut", self.params.slot)).unwrap_or_default(),
             _ => vec![],
         }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
-        // every move advances the state by one; the code is BondToHub iff the new state is Refuted (2)
+        // every move advances the state by one; the code is BondToHub iff the new state is Rebutted (2)
         vec![
             LeafBuilder::new(ctx).prior_uint(0..2).new_uint(0..2).op(OP_SWAP).int(1).op(OP_ADD).op(OP_NUMNOTEQUAL).finish("state_mismatch", |c| bits_to_uint(&c.new) != bits_to_uint(&c.prior) + 1),
             LeafBuilder::new(ctx).new_uint(0..2).code_uint().op(OP_SWAP).int(2).op(OP_NUMNOTEQUAL).op(OP_NUMNOTEQUAL).finish("code_mismatch", |c| u32::from(c.code) != u32::from(bits_to_uint(&c.new) != 2)),
@@ -200,12 +200,12 @@ impl Contract for NReg {
         match s {
             NRegState::Init => "unclaimed".into(),
             NRegState::Claimed => "claimed (not anchored by the promised height)".into(),
-            NRegState::Refuted => "hub proved inclusion".into(),
-            NRegState::Reinstated => "user refuted the hub's chain".into(),
+            NRegState::Rebutted => "hub proved inclusion".into(),
+            NRegState::Reinstated => "user rebutted the hub's chain".into(),
         }
     }
     fn describe_move(&self, _m: &bool) -> String {
-        format!("claim request {} unanchored / prove inclusion / refute the chain", self.params.req_id)
+        format!("claim request {} unanchored / prove inclusion / rebut the chain", self.params.req_id)
     }
 }
 
@@ -229,7 +229,7 @@ pub struct AnchorPay {
 pub enum PayState {
     Init,
     Paid,
-    Refuted,
+    Rebutted,
 }
 
 impl AnchorPay {
@@ -262,13 +262,13 @@ impl Contract for AnchorPay {
         match s {
             PayState::Init => Some(self.params.prover),
             PayState::Paid => Some(self.params.prover.other()),
-            PayState::Refuted => None,
+            PayState::Rebutted => None,
         }
     }
     fn transition(&self, s: &PayState, m: &bool, mover: Role) -> Result<PayState, Invalid> {
         match (s, m) {
             (PayState::Init, true) if mover == self.params.prover => Ok(PayState::Paid),
-            (PayState::Paid, true) if mover != self.params.prover => Ok(PayState::Refuted),
+            (PayState::Paid, true) if mover != self.params.prover => Ok(PayState::Rebutted),
             _ => Err(Invalid("not this party's move".into())),
         }
     }
@@ -283,7 +283,7 @@ impl Contract for AnchorPay {
         match s {
             PayState::Init => 2,
             PayState::Paid => 1,
-            PayState::Refuted => 0,
+            PayState::Rebutted => 0,
         }
     }
     fn n_state_bits(&self) -> usize {
@@ -300,7 +300,7 @@ impl Contract for AnchorPay {
         Ok(match bits_to_uint(b) {
             0 => PayState::Init,
             1 => PayState::Paid,
-            2 => PayState::Refuted,
+            2 => PayState::Rebutted,
             x => anyhow::bail!("bad state {x}"),
         })
     }
@@ -314,14 +314,14 @@ impl Contract for AnchorPay {
     fn claim(&self, from: &[bool], depth: u32) -> Option<ClaimSpec> {
         match bits_to_uint(from) + depth - 1 {
             0 => Some(self.params.shape.spec()),
-            1 => Some(self.params.shape.refutation().spec()),
+            1 => Some(self.params.shape.rebuttal().spec()),
             _ => None,
         }
     }
     fn claim_data(&self, from: &[bool], depth: u32) -> ClaimData {
         match bits_to_uint(from) + depth - 1 {
             0 => self.store.get(&format!("{}/incl", self.params.slot)).unwrap_or_default(),
-            1 => self.store.get(&format!("{}/refute", self.params.slot)).unwrap_or_default(),
+            1 => self.store.get(&format!("{}/rebut", self.params.slot)).unwrap_or_default(),
             _ => vec![],
         }
     }
@@ -336,7 +336,7 @@ impl Contract for AnchorPay {
         format!("{s:?}")
     }
     fn describe_move(&self, _m: &bool) -> String {
-        "prove the entry is anchored / refute the chain".into()
+        "prove the entry is anchored / rebut the chain".into()
     }
 }
 

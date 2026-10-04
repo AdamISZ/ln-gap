@@ -41,7 +41,7 @@ pub mod chess;
 pub mod ext;
 pub mod fee;
 pub mod graph;
-pub mod refute;
+pub mod rebut;
 pub mod instance;
 pub mod roster;
 pub mod ttt;

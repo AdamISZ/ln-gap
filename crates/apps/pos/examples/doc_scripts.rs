@@ -15,7 +15,7 @@ use bitcoin::Script;
 use lngap_channel::Role;
 use lngap_ec_wots::{readout_tied_fragment, Attester};
 use lngap_lamport::winternitz::{WotsExt, WotsParams, WotsPublic, WotsSecret};
-use lngap_pos::refute::pair_key;
+use lngap_pos::rebut::pair_key;
 use lngap_pos::ttt::Layout;
 use lngap_pos::{blackjack, chess, graph, ttt, HEADER_CHUNKS};
 
@@ -100,11 +100,11 @@ fn main() {
     let s = readout_tied_fragment(Builder::new(), &table.points[80]).into_script();
     section(&format!("EC-OTS readout, one head chunk ({} bytes)", s.len()), &asm(&s));
 
-    // the refutation's gate: the 2-of-2, then the proposer fragment over five members
+    // the rebuttal's gate: the 2-of-2, then the proposer fragment over five members
     let pk = |i: u8| Keypair::from_secret_key(SECP256K1, &SecretKey::from_slice(&[i; 32]).unwrap()).x_only_public_key().0;
     let points: Vec<_> = (1..=5).map(pk).collect();
     let s = graph::proposer_fragment(Builder::new().two_of_two_verify_keys(&pk(10), &pk(11)), &points).into_script();
-    section(&format!("refute: the 2-of-2 and the proposer fragment, five members ({} bytes)", s.len()), &asm(&s));
+    section(&format!("rebut: the 2-of-2 and the proposer fragment, five members ({} bytes)", s.len()), &asm(&s));
 }
 
 /// The channel's 2-of-2 over two explicit keys (the graph takes them from

@@ -1,12 +1,12 @@
 //! The tic-tac-toe disprove family over the parked tuple (D35's two-head
-//! refutation; plan step 4b).
+//! rebuttal; plan step 4b).
 //!
-//! After a refutation at depth `d`, the parked data is the mover's pair-key
+//! After a rebuttal at depth `d`, the parked data is the mover's pair-key
 //! re-commitment of `head(d-1) || head(d)` — the tuple (state, move, state')
 //! spans two slots, so the disprove predicates read TWO heads from the
 //! register file the pair key's `wots_verify` leaves: 192 message digits,
 //! digit `j` at stack depth `191 - j`, the prior head at digits 0..96 and
-//! the new head at 96..192. At depth 1 there is no move 0: the refutation
+//! the new head at 96..192. At depth 1 there is no move 0: the rebuttal
 //! parks the single head (96 digits) and the prior state is the constant
 //! initial board (all nibbles zero — leaves that can never fire are
 //! dropped, the old graph's constant-prior discipline).
@@ -23,14 +23,14 @@
 //!
 //! The family: `wrong_slot` (either head's word0 not this game's constants
 //! for its slot — catches an empty-slot head, a wrong-depth head, a
-//! wrong-mover head), the prior-state predicates the single-head refutation
+//! wrong-mover head), the prior-state predicates the single-head rebuttal
 //! could not express (`prior_closed`, `not_on_turn`, `cell_occupied_i`),
 //! `cell_out_of_range`, the `board_mismatch_i` set, `turn_not_flipped`, and
 //! `status_mismatch`. The old family's `code_mismatch` does not port — a
-//! PoS refutation carries no code reveal — and is replaced by the
-//! SELF-CHECKING split on the refuted output ([`checked_split_leaf`]): the
+//! PoS rebuttal carries no code reveal — and is replaced by the
+//! SELF-CHECKING split on the rebuttal output ([`checked_split_leaf`]): the
 //! mover's split proves `code == R(parked new state)` in-leaf, so a false
-//! code cannot cash a legal refutation.
+//! code cannot cash a legal rebuttal.
 //!
 //! Script discipline: each leaf gathers its inputs (digit picks, or
 //! constants for the depth-1 prior) onto the altstack, restores them in
@@ -118,7 +118,7 @@ impl std::fmt::Debug for PosLeaf {
     }
 }
 
-/// The disprove family for the refuted output at this layout. Depth 1 drops
+/// The disprove family for the rebuttal output at this layout. Depth 1 drops
 /// the prior-only leaves (they cannot fire on the initial board).
 pub fn disprove_leaves(l: &Layout, key: &WotsPublic) -> Vec<PosLeaf> {
     let mut v = vec![wrong_slot(l, key), cell_out_of_range(l, key)];
@@ -175,7 +175,7 @@ fn mover_status(r: Role) -> u32 {
     mark(r)
 }
 /// R(s): the outcome code — terminal result, else the party on turn
-/// forfeits. (The refuted output's resolution: `mover` moved at `depth`,
+/// forfeits. (The rebuttal output's resolution: `mover` moved at `depth`,
 /// so an open state pays the mover.)
 pub fn resolution(s: u32) -> u32 {
     let st = status(s);
@@ -601,11 +601,11 @@ pub fn auth_message(head: &[u8; HEAD_BYTES]) -> Vec<u8> {
     head[5..8].to_vec()
 }
 
-/// The authorship fragment (D41): the refutation/exhibit must present, per
+/// The authorship fragment (D41): the rebuttal/exhibit must present, per
 /// parked head, THAT head's mover's state-key signature over the head's
 /// claimed state — "standing behind a head" requires the mover's key over
 /// the head's state, which is playing the move. A garbage-signed attested
-/// entry supports no refutation (its author alone holds the key, and the
+/// entry supports no rebuttal (its author alone holds the key, and the
 /// venue never had it), so the absence path proceeds.
 ///
 /// D43: the per-bit Lamport fragment becomes a Winternitz verification
@@ -653,7 +653,7 @@ pub fn terminal_gate_fragment(mut b: Builder, file: usize, new_off: usize) -> Bu
         .push_opcode(OP_VERIFY)
 }
 
-// ----- the self-checking split (the refuted output's mover splits) -----
+// ----- the self-checking split (the rebuttal output's mover splits) -----
 
 /// The resolution fragment over the parked file: push R(new state) and
 /// require it to equal `code`. Deletes the old family's `code_mismatch`
@@ -693,10 +693,10 @@ pub fn resolution_fragment(mut b: Builder, file: usize, new_off: usize, code: u8
     b
 }
 
-/// The self-checking split leaf of the refuted output at this layout: after
+/// The self-checking split leaf of the rebuttal output at this layout: after
 /// `delta + delta'` the mover splits by its revealed outcome code — and the
 /// leaf itself proves `code == R(parked new state)` (the register file is
-/// public once the refutation spent). A legal refutation then resolves to
+/// public once the rebuttal spent). A legal rebuttal then resolves to
 /// the mover (an open state forfeits the claimant); a false code fails
 /// in-leaf. This is where the old family's `code_mismatch` lives on.
 ///
@@ -734,7 +734,7 @@ pub fn checked_split_witness(
     code: &lngap_lamport::Reveal,
     pair: &lngap_lamport::winternitz::WotsSig,
 ) -> Vec<Vec<u8>> {
-    let mut w = crate::refute::wots_wire(pair);
+    let mut w = crate::rebut::wots_wire(pair);
     let mut c = code.consumption_order();
     c.reverse();
     w.extend(c);

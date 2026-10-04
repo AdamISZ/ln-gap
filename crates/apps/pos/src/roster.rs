@@ -8,9 +8,9 @@
 //! `crate::key_index`, not by a venue slot):
 //!
 //! - the PROPOSER point `P_{i,s}` ("I sealed depth d of contract c"), revealed by the
-//!   member that seals and carried by its block; the refute leaf requires
+//!   member that seals and carried by its block; the rebut leaf requires
 //!   a signature under one of the n points (`graph::proposer_fragment`),
-//!   so every refutation names its proposer;
+//!   so every rebuttal names its proposer;
 //! - the FLAG point `F_{i,s}` ("no mover-signed entry for (c, d) at its
 //!   deadline", D50, D55),
 //!   revealed by every member that saw it.

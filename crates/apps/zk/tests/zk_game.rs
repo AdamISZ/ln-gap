@@ -11,7 +11,7 @@ use emulator::decision::challenge::prover_execute;
 use emulator::loader::program_definition::ProgramDefinition;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::{disprove_witness, pair_key};
+use lngap_pos::rebut::{disprove_witness, pair_key};
 use lngap_pos::ttt::Layout;
 use lngap_zk::dispute::final_step;
 use lngap_zk::game::*;

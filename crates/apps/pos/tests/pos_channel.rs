@@ -7,7 +7,7 @@
 //! - Hand 2 is added; the house deals a wrong up-card; the player
 //!   FORCE-CLOSES. The commitment confirms with the contract output on it;
 //!   the player's absence claim (with its `to_self_delay`, the claimant
-//!   being the broadcaster), the house's refutation and the player's
+//!   being the broadcaster), the house's rebuttal and the player's
 //!   `bj_card_2` disprove all spend off that commitment version's graph.
 //!   The channel's own outputs are swept by the channel's watch loop.
 
@@ -33,7 +33,7 @@ use lngap_lamport::winternitz::WotsSig;
 use lngap_pos::blackjack;
 use lngap_pos::graph::proposer_witness;
 use lngap_pos::instance::{self, Game as WhichGame, GameClock, PosInstance};
-use lngap_pos::refute::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
+use lngap_pos::rebut::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
 use lngap_pos::{Member, PosMiner, SealedBlock};
 use rand::{rngs::StdRng, SeedableRng};
 
@@ -263,38 +263,38 @@ fn blackjack_hands_in_a_channel() {
     w.rt.mine_with(&[claim.clone()]).unwrap_or_else(|e| panic!("the claim must mine: {e}"));
     println!("CHANNEL: absence claim off the commitment: {} vB", claim.vsize());
 
-    // the house refutes (it still has its seal)
-    let p = skel("absent_2/refute");
+    // the house rebuts (it still has its seal)
+    let p = skel("absent_2/rebut");
     let a_prev = p.prevouts[0].clone();
     let (prev_head, new_head) = (h2.sealed[&1].header.head(), h2.sealed[&2].header.head());
-    let pair = w.ks[1].sign_wots(&instance::refute_label(2, 1, 2), &[prev_head.as_slice(), new_head.as_slice()].concat()).unwrap();
+    let pair = w.ks[1].sign_wots(&instance::rebut_label(2, 1, 2), &[prev_head.as_slice(), new_head.as_slice()].concat()).unwrap();
     let auth = w.ks[1].sign_wots(&instance::state_label(2, 1, 2), &blackjack::auth_message(&new_head)).unwrap();
     let chunk_sigs = |b: &SealedBlock| -> Vec<Vec<u8>> { (0..HEAD_CHUNKS).map(|j| sign_with(&b.attestation.secrets[HEAD_CHUNK_START + j], &p.tx, &a_prev, &p.leaf.script)).collect() };
     // the prior is bound by the player's signature, from its sealed entry
     let prev_key = w.ks[0].wots_public(&instance::state_label(2, 1, 1)).unwrap();
-    let prev_auth = refute::entry_auth_sig(&prev_key, &blackjack::auth_message(&prev_head), &h2.sealed[&1].entry).expect("the player's entry is signed");
-    let mut wit = refute::refute_witness_pair_signed(&chunk_sigs(&h2.sealed[&2]), &pair, [&auth, &prev_auth]);
+    let prev_auth = rebut::entry_auth_sig(&prev_key, &blackjack::auth_message(&prev_head), &h2.sealed[&1].entry).expect("the player's entry is signed");
+    let mut wit = rebut::rebut_witness_pair_signed(&chunk_sigs(&h2.sealed[&2]), &pair, [&auth, &prev_auth]);
     let blk = &h2.sealed[&2];
     wit.extend(proposer_witness(sign_with(&blk.proposer_secret, &p.tx, &a_prev, &p.leaf.script), blk.proposer));
-    // the refutation is 2-of-2: the hub's signature, then the user's
+    // the rebuttal is 2-of-2: the hub's signature, then the user's
     wit.push(sign_tx(&w.hub.keys.payment, &p.tx, &a_prev, &p.leaf.script));
     wit.push(sign_tx(&w.user.keys.payment, &p.tx, &a_prev, &p.leaf.script));
     let mut rtx = p.tx.clone();
     rtx.input[0].witness = tapscript_witness(&wit, &p.leaf.script, &p.control_block);
-    w.rt.mine_with(&[rtx.clone()]).unwrap_or_else(|e| panic!("the refutation must mine: {e}"));
+    w.rt.mine_with(&[rtx.clone()]).unwrap_or_else(|e| panic!("the rebuttal must mine: {e}"));
     h2.pair_sig = Some(pair);
     let r_op = OutPoint { txid: rtx.compute_txid(), vout: 0 };
     let r_prev = rtx.output[0].clone();
-    println!("CHANNEL: refutation off the commitment: {} vB", rtx.vsize());
+    println!("CHANNEL: rebuttal off the commitment: {} vB", rtx.vsize());
 
-    // the player's disprove, built at run time against this version's refuted tree
+    // the player's disprove, built at run time against this version's rebuttal tree
     w.advance(u32::from(w.user.params.delta) + 1);
-    let tree = h2.inst.refuted_tree(&w.user.commit_ctx(seq, Role::User).unwrap(), 2).unwrap();
+    let tree = h2.inst.rebuttal_tree(&w.user.commit_ctx(seq, Role::User).unwrap(), 2).unwrap();
     let l = tree.leaf("disprove_bj_card_2").unwrap();
     let mut dtx = lngap_btc::tx::build_spend(r_op, &l.timelock, vec![TxOut { value: r_prev.value - w.user.params.presign_fee, script_pubkey: w.user.my_payout_spk() }]);
     let dsig = sign_tx(&w.user.keys.payment, &dtx, &r_prev, &l.script);
     let mut dw = blackjack::leaf_wits(&[&h2.deck.a[2].string, &h2.deck.b[2].string]);
-    dw.extend(refute::wots_wire(h2.pair_sig.as_ref().unwrap()));
+    dw.extend(rebut::wots_wire(h2.pair_sig.as_ref().unwrap()));
     dw.push(dsig);
     dtx.input[0].witness = tapscript_witness(&dw, &l.script, &tree.control_block("disprove_bj_card_2").unwrap());
     w.rt.mine_with(&[dtx.clone()]).unwrap_or_else(|e| panic!("the disprove must mine: {e}"));

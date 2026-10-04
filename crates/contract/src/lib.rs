@@ -91,7 +91,7 @@ pub enum GraphShape {
     Chain,
     /// `C → move_d → C'_d` for every depth `d` (a claim from the doubly
     /// signed initial state, revealing the counterparty's prior state), and
-    /// off each `C'_d` one `move_{d+1}` (the refutation) after which no
+    /// off each `C'_d` one `move_{d+1}` (the rebuttal) after which no
     /// further move exists. Moves are played elsewhere (a venue); Bitcoin
     /// sees one claim and at most one answer.
     Star,

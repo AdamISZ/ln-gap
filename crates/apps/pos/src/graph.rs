@@ -1,5 +1,5 @@
 //! The wired PoS absence-claim graph (POS_FACTCHAIN_PLAN.md step 4b; D34's
-//! leaf family, wired per depth, with D35's two-head refutation).
+//! leaf family, wired per depth, with D35's two-head rebuttal).
 //!
 //! Per depth `d` (the mover's move `d`, D55: attested under the contract's
 //! depth-`d` table), with the claimant the non-mover:
@@ -8,33 +8,33 @@
 //!   spendable once `claim_from` (D55: a unix time, the move's due time
 //!   plus the margin, against median-time-past) has passed (CLTV) — 2-of-2, so the claim transaction is
 //!   pre-signed at setup and its output is pinned to the claim tree;
-//! - the claim output's tree: the mover's refutation (the D33 leaf at
+//! - the claim output's tree: the mover's rebuttal (the D33 leaf at
 //!   depth 1, the D35 two-head leaf from depth 2 — the depths' content tables
 //!   as script constants) racing the claimant's timeout splits (CSV =
 //!   `delta`, gated by the claimant's code reveal);
-//! - the refutation output's tree: the claimant's disprove family over the
+//! - the rebuttal output's tree: the claimant's disprove family over the
 //!   parked tuple (CSV = `delta`), then the mover's self-checking splits by
 //!   the revealed outcome code (CSV = `delta + delta'` — "by the code the
 //!   victim revealed", the D28 discipline, with `code == R(parked state)`
 //!   proven in-leaf).
 //!
-//! Two wirings the bare leaf family did not have: the refutation leaf is
-//! gated by the mover's payment key and pre-signed, so the refutation's
-//! output is pinned to the refuted tree (ungated, the mover could skip the
+//! Two wirings the bare leaf family did not have: the rebuttal leaf is
+//! gated by the mover's payment key and pre-signed, so the rebuttal's
+//! output is pinned to the rebuttal tree (ungated, the mover could skip the
 //! disprove stage by spending the claim output elsewhere — safe for a legal
-//! move, theft for an illegal one); and the splits on the refuted output
-//! check the code against the parked state, because a PoS refutation
+//! move, theft for an illegal one); and the splits on the rebuttal output
+//! check the code against the parked state, because a PoS rebuttal
 //! carries no code reveal for a `code_mismatch` leaf to judge.
 //!
-//! The timeliness flag (D50, NON_INCLUSION_THRESHOLD.md). A refutation
+//! The timeliness flag (D50, NON_INCLUSION_THRESHOLD.md). A rebuttal
 //! proves the venue attested depth `d`'s head, never WHEN: a proposer
 //! colluding with the mover can attest his signed move after the deadline
-//! and refute an honest claim. So the refuted tree carries one more
+//! and rebut an honest claim. So the rebuttal tree carries one more
 //! claimant leaf, `not_timely`: `k` validator flag points for depth `d` as
 //! script constants, counted by CHECKSIGADD against a threshold `t`. A
 //! validator that held no signed entry for the depth at its deadline published its flag
 //! secret; the claimant signs its own spend under any `t` of them and the
-//! refutation dies. Rule (D50): the refutation dies on `t` flags — the
+//! rebuttal dies. Rule (D50): the rebuttal dies on `t` flags — the
 //! rogue-`t` residual (false emptiness against a timely move) falls on the
 //! honest mover, who has a venue to pursue by name (the `t` points in the
 //! witness), rather than the late-attestation residual on the claimant,
@@ -44,16 +44,16 @@
 //! in it says the claim was DUE — that the claimant itself moved at
 //! `d - 1`. Without that, the staller at `d - 1` can claim `absent_d`
 //! ("you did not move at `d`" — vacuously true, the victim's turn never
-//! came) and the victim cannot refute; only CLTV order separated the two
+//! came) and the victim cannot rebut; only CLTV order separated the two
 //! claims, and the broadcaster's `to_self_delay` on the honest one inverts
 //! it. So from depth 2 the claim output carries one more leaf, `counter`:
 //! the mover's thin claim one depth BACK, "you did not move at `d - 1`" —
 //! exactly the negation of dueness. Its output tree is the depth-`d - 1`
-//! claim tree verbatim (the claimant's refutation by the `(d - 2, d - 1)`
+//! claim tree verbatim (the claimant's rebuttal by the `(d - 2, d - 1)`
 //! pair readout, racing the counter-claimant's timeout splits), and that
-//! refutation's output is the depth-`d - 1` refuted tree. One level closes
+//! rebuttal's output is the depth-`d - 1` rebuttal tree. One level closes
 //! it: a counter is answered by a positive readout or not at all — a false
-//! counter is refuted by the claimant's own attested, signed head at
+//! counter is rebutted by the claimant's own attested, signed head at
 //! `d - 1` (and then judged by the ordinary disprove family / paid by the
 //! checked split), and a true counter means the claim was never due, which
 //! should lose regardless of what happened earlier (the claimant always had
@@ -80,7 +80,7 @@ use lngap_lamport::winternitz::{WotsExt, WotsPublic};
 
 use crate::chess;
 use crate::instance::{Game, PosDepthKeys};
-use crate::refute;
+use crate::rebut;
 use crate::ttt::{self, Layout};
 
 /// The authorship fragment of the instance's game (D41; the chess mapping
@@ -112,8 +112,8 @@ pub fn absent_leaf(ctx: &CommitCtx, name: &str, claimant: Role, claim_from: u32)
 /// member proposer points for the slot, selected by a witness index —
 /// the readout's PICK gadget over member points. Witness enters as
 /// `[.., sig_p, i]` (the index on top); after the fragment both are
-/// consumed. The mover signs the refutation with the proposer scalar the
-/// block revealed, so every refutation names its proposer; an attestation
+/// consumed. The mover signs the rebuttal with the proposer scalar the
+/// block revealed, so every rebuttal names its proposer; an attestation
 /// with no proposer reveal is inert on-chain, and no member can attach
 /// another's.
 ///
@@ -157,30 +157,30 @@ pub fn proposer_witness(sig_p: Vec<u8>, i: usize) -> Vec<Vec<u8>> {
     vec![sig_p, lngap_ec_wots::snum(i as u8)]
 }
 
-/// The mover's refutation leaf on the claim output: 2-of-2 first, so the
-/// refutation is the skeleton both parties pre-signed and its output is
-/// pinned to the refuted tree (a gate under the mover's key alone pinned
+/// The mover's rebuttal leaf on the claim output: 2-of-2 first, so the
+/// rebuttal is the skeleton both parties pre-signed and its output is
+/// pinned to the rebuttal tree (a gate under the mover's key alone pinned
 /// nothing: every other key in the witness is the mover's too, so a mover
-/// could refute an illegal move and pay the claim output to itself,
+/// could rebut an illegal move and pay the claim output to itself,
 /// skipping the disprove stage), then the proposer fragment over slot
 /// `d`'s member points (D53),
 /// then the readout-and-park. The D41 authorship fragment rides the
 /// gate slot: per parked head, the witness must carry THAT head's mover's
 /// state-key signature over the head's signed region (the D43 tied-WOTS
 /// verify against the parked digits) — a garbage-signed attested entry
-/// admits no refutation.
+/// admits no rebuttal.
 #[allow(clippy::too_many_arguments)]
-pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>, proposers: &[XOnlyPublicKey]) -> Leaf {
+pub fn rebut_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&EpochTable>, table: &EpochTable, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>, proposers: &[XOnlyPublicKey]) -> Leaf {
     let body = match table_prev {
         // the prior is bound by the claimant's signature, not read out
-        // (refute_leaf_pair_signed): the gate checks BOTH parked heads'
+        // (rebut_leaf_pair_signed): the gate checks BOTH parked heads'
         // authorship, the new head under the mover's key and the prior
         // under the claimant's one-time key for depth d-1, for every game
-        Some(_) => refute::refute_leaf_pair_signed(table, &keys.refute, |b| {
+        Some(_) => rebut::rebut_leaf_pair_signed(table, &keys.rebut, |b| {
             let b = authorship(b, game, l.file, l.new, &keys.state);
             authorship(b, game, l.file, 0, &keys_prev.expect("a pair has a prior").state)
         }),
-        None => refute::refute_leaf(table, &keys.refute, |b| authorship(b, game, l.file, 0, &keys.state)),
+        None => rebut::rebut_leaf(table, &keys.rebut, |b| authorship(b, game, l.file, 0, &keys.state)),
     };
     let mut b = proposer_fragment(ctx.two_of_two_verify(Builder::new()), proposers);
     for ins in body.instructions() {
@@ -189,7 +189,7 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
             bitcoin::script::Instruction::PushBytes(pb) => b.push_slice(pb),
         };
     }
-    Leaf::new("refute", b.into_script(), Timelock::NONE)
+    Leaf::new("rebut", b.into_script(), Timelock::NONE)
 }
 
 /// The terminal-exhibit leaf for one depth on the CONTRACT output (D37,
@@ -197,7 +197,7 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
 /// the last mover of a draw — exhibits the attested pair
 /// `head(d-1) || head(d)` with the status gate on top: the leaf fires only
 /// when the parked new state is TERMINAL, and the exhibit output's tree
-/// (the refuted tree verbatim) pays R(parked terminal). Without the gate
+/// (the rebuttal tree verbatim) pays R(parked terminal). Without the gate
 /// the exhibit would fire on any attested open state, and R(open) pays the
 /// mover who just moved — a mid-game self-claim button the disprove family
 /// cannot see (the exhibited move is legal).
@@ -206,7 +206,7 @@ pub fn refute_leaf(ctx: &CommitCtx, game: Game, l: &Layout, table_prev: Option<&
 /// attestation must exist) plus 2-of-2, then the proposer fragment over
 /// slot `d`'s member points (D53), so the exhibit transaction is
 /// pre-signed and the exhibit output is pinned to its tree. The key is the
-/// depth-`d` refute key — both leaves bind the same two epoch tables, so
+/// depth-`d` rebuttal key — both leaves bind the same two epoch tables, so
 /// the signed message is provably the same 96 bytes, and the contexts are
 /// mutually exclusive (the contract output is spent once): the WOTS
 /// one-time-ness is preserved by construction. The exhibit exists from
@@ -230,7 +230,7 @@ pub fn exhibit_leaf(
         tl.csv = Some(ctx.params.to_self_delay);
     }
     b = proposer_fragment(ctx.two_of_two_verify(b), proposers);
-    let body = refute::refute_leaf_pair_gated(table_prev, table, &keys.refute, |b| {
+    let body = rebut::rebut_leaf_pair_gated(table_prev, table, &keys.rebut, |b| {
         let b = ttt::authorship_fragment(b, l.file, l.new, &keys.state);
         let b = ttt::authorship_fragment(b, l.file, 0, &keys_prev.state);
         ttt::terminal_gate_fragment(b, l.file, l.new)
@@ -305,7 +305,7 @@ pub fn equiv_leaf(ctx: &CommitCtx, name: &str, key: &WotsPublic, exhibitor: Role
 /// one depth back — "the claimant did not move at `d - 1`", the negation
 /// of the claim's dueness. 2-of-2 and pre-signed (the counter output is
 /// pinned to the depth-`d - 1` claim tree), no timelock: it must land
-/// inside the claimant's timeout window (`delta`), like a refutation. No
+/// inside the claimant's timeout window (`delta`), like a rebuttal. No
 /// `to_self_delay`: that delay guards the CONTRACT output against a
 /// revoked commitment, and this spends a claim output.
 pub fn counter_leaf(ctx: &CommitCtx, name: &str) -> Leaf {
@@ -313,7 +313,7 @@ pub fn counter_leaf(ctx: &CommitCtx, name: &str) -> Leaf {
     Leaf::new(name.to_string(), b.push_int(1).into_script(), Timelock::NONE)
 }
 
-/// The tree of the claim output A_d: the mover's refutation plus the
+/// The tree of the claim output A_d: the mover's rebuttal plus the
 /// claimant's timeout splits after the dispute window (`delta`), gated by
 /// the claimant's code reveal — and, with `counter`, the mover's counter
 /// claim one depth back (D44; `counter` is set on the contract output's
@@ -331,7 +331,7 @@ pub fn claim_tree(
     counter: bool,
     proposers: &[XOnlyPublicKey],
 ) -> Result<TapTree> {
-    let mut leaves = vec![refute_leaf(ctx, game, l, table_prev, table, keys, keys_prev, proposers)];
+    let mut leaves = vec![rebut_leaf(ctx, game, l, table_prev, table, keys, keys_prev, proposers)];
     if counter {
         leaves.push(counter_leaf(ctx, "counter"));
     }
@@ -341,7 +341,7 @@ pub fn claim_tree(
     TapTree::new(leaves)
 }
 
-/// The `not_timely` leaf on the refutation output P_d (D50): the
+/// The `not_timely` leaf on the rebuttal output P_d (D50): the
 /// claimant's timeliness disprove. Same gate as the disprove family (CSV
 /// `delta`, the challenger's payment key), then the slot's `k` validator
 /// flag points counted by CHECKSIGADD against the threshold `t`:
@@ -388,23 +388,23 @@ pub fn not_timely_witness(tx: &Transaction, input: usize, prevouts: &[TxOut], le
     w
 }
 
-/// The tree of the refutation output P_d: the claimant's disprove family
+/// The tree of the rebuttal output P_d: the claimant's disprove family
 /// over the parked tuple (after `delta`) — the game's own predicate set —
 /// and its `not_timely` leaf over slot `d`'s `flags` with threshold `t`
 /// (D50), then the mover's self-checking splits after `delta + delta'`.
 #[allow(clippy::too_many_arguments)]
-pub fn refuted_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome], flags: &[XOnlyPublicKey], t: u32, bj: Option<&lngap_blackjack::Commitments>) -> Result<TapTree> {
-    refuted_tree_ext(ctx, game, l, keys, outcomes, flags, t, bj, None)
+pub fn rebuttal_tree(ctx: &CommitCtx, game: Game, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome], flags: &[XOnlyPublicKey], t: u32, bj: Option<&lngap_blackjack::Commitments>) -> Result<TapTree> {
+    rebuttal_tree_ext(ctx, game, l, keys, outcomes, flags, t, bj, None)
 }
 
-/// [`refuted_tree`] with an outside family (`Game::Zk`). Its splits: the
-/// mover wins a refuted depth after `delta + delta'` (R is "the refutation
+/// [`rebuttal_tree`] with an outside family (`Game::Zk`). Its splits: the
+/// mover wins a rebutted depth after `delta + delta'` (R is "the rebuttal
 /// stands"); at the family's final depth the mover must instead PROVE
 /// (D59): its proofs after `delta + delta'`, the claimant's split after
 /// `delta + 2·delta'`. The other outcomes' splits are unspendable, so the
 /// graph's pre-signed skeletons for them never apply.
 #[allow(clippy::too_many_arguments)]
-pub fn refuted_tree_ext(
+pub fn rebuttal_tree_ext(
     ctx: &CommitCtx,
     game: Game,
     l: &Layout,
@@ -417,10 +417,10 @@ pub fn refuted_tree_ext(
 ) -> Result<TapTree> {
     let challenger = ctx.key(l.mover.other()).payment;
     let family = match game {
-        Game::Ttt => ttt::disprove_leaves(l, &keys.refute),
-        Game::Chess => chess::disprove_leaves(l, &keys.refute),
-        Game::Blackjack => crate::blackjack::disprove_leaves(l, &keys.refute, bj.ok_or_else(|| anyhow::anyhow!("a blackjack instance needs its share commitments"))?),
-        Game::Zk => ext.ok_or_else(|| anyhow::anyhow!("a Game::Zk instance needs its family"))?.disprove_leaves(l, &keys.refute),
+        Game::Ttt => ttt::disprove_leaves(l, &keys.rebut),
+        Game::Chess => chess::disprove_leaves(l, &keys.rebut),
+        Game::Blackjack => crate::blackjack::disprove_leaves(l, &keys.rebut, bj.ok_or_else(|| anyhow::anyhow!("a blackjack instance needs its share commitments"))?),
+        Game::Zk => ext.ok_or_else(|| anyhow::anyhow!("a Game::Zk instance needs its family"))?.disprove_leaves(l, &keys.rebut),
     };
     let mut leaves = vec![];
     for pl in family {
@@ -441,7 +441,7 @@ pub fn refuted_tree_ext(
         let code = |r: Role| if r == Role::User { 0 } else { 1 };
         if last {
             let mover = ctx.key(l.mover).payment;
-            for (name, script) in ext.prove_leaves(l, &keys.refute) {
+            for (name, script) in ext.prove_leaves(l, &keys.rebut) {
                 let mut b = Builder::new().csv(w).checksigverify(&mover);
                 for ins in script.instructions() {
                     b = match ins.expect("valid script") {
@@ -469,9 +469,9 @@ pub fn refuted_tree_ext(
     }
     for o in outcomes {
         let leaf = match game {
-            Game::Ttt => ttt::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
-            Game::Chess => chess::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
-            Game::Blackjack => crate::blackjack::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.refute),
+            Game::Ttt => ttt::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.rebut),
+            Game::Chess => chess::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.rebut),
+            Game::Blackjack => crate::blackjack::checked_split_leaf(ctx, l, o, w, &keys.mover_code, &keys.rebut),
             Game::Zk => unreachable!("handled above"),
         };
         leaves.push(leaf);

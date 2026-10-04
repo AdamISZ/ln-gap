@@ -10,7 +10,7 @@ use lngap_blackjack::{Commitments, Share, State, K};
 use lngap_channel::Role;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_pos::blackjack;
-use lngap_pos::refute::{self, pair_key, refute_key};
+use lngap_pos::rebut::{self, pair_key, rebut_key};
 use lngap_pos::ttt::Layout;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
@@ -49,11 +49,11 @@ fn head(s: &State, d: u32) -> [u8; 48] {
 /// at `d`), asserting script == mirror for each.
 fn fired(d: u32, p: &State, n_head: &[u8; 48], deck: &Deck) -> Vec<String> {
     let l = Layout::at(d, GAME, mover_of(d));
-    let sk: WotsSecret = if d >= 2 { pair_key([d as u8; 32]) } else { refute_key([1; 32]) };
+    let sk: WotsSecret = if d >= 2 { pair_key([d as u8; 32]) } else { rebut_key([1; 32]) };
     let fam = blackjack::disprove_leaves(&l, &sk.public(), &deck.c);
     let p_head = if d >= 2 { head(p, d - 1) } else { blackjack::initial_head(GAME) };
     let msg = if d >= 2 { [p_head.as_slice(), n_head.as_slice()].concat() } else { n_head.to_vec() };
-    let reveal = refute::disprove_witness(&sk.sign(&msg).unwrap());
+    let reveal = rebut::disprove_witness(&sk.sign(&msg).unwrap());
     let n = State::from_head(n_head);
     let pl = mover_of(d) == Role::User;
     let mut out = vec![];

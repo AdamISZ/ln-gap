@@ -7,7 +7,7 @@
 
 use lngap_lamport::winternitz::{WotsSecret, WotsSig};
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::{disprove_witness, pair_key};
+use lngap_pos::rebut::{disprove_witness, pair_key};
 use lngap_pos::ttt::Layout;
 use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::dispute::final_step;

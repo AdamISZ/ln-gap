@@ -143,7 +143,7 @@ To see a dispute, misbehave:
   block at once.
 
 A game with no agreed result goes on chain by force-close. The pages then
-offer each dispute step (claim, counter, refute, disprove, timely, split)
+offer each dispute step (claim, counter, rebut, disprove, timely, split)
 as a button, and the log narrates who wins and why.
 
 ![White's page after a dispute over an illegal move](docs/images/chess-dispute.png)
@@ -151,7 +151,7 @@ as a button, and the log narrates who wins and why.
 *White's page after a dispute. Black's move 8 (the queen from d8 to h4,
 through its own knight on f6) was signed and sealed, but is illegal. White
 force-closed the channel and claimed that no valid move 8 was made; Black
-refuted with the sealed move, putting it on chain; White disproved it with
+rebutted with the sealed move, putting it on chain; White disproved it with
 the one leaf it breaks (`chess_ray`) and took the pot. Three transactions
 after the commitment, whatever the length of the game.*
 

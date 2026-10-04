@@ -21,7 +21,7 @@ use emulator::executor::utils::{FailConfiguration, FailReads, FailWrite};
 use emulator::loader::program_definition::ProgramDefinition;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::{disprove_witness, pair_key};
+use lngap_pos::rebut::{disprove_witness, pair_key};
 use lngap_zk::dispute::{search_with_read, Behaviour, ReadSearched, Searched};
 use lngap_zk::game::*;
 use lngap_zk::{nibble_witness, Step};

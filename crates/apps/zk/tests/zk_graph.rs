@@ -8,7 +8,7 @@
 //!
 //! - P1, the proof wins: an honest execution, the verifier challenging
 //!   anyway (BitVMX's forced challenge). The verifier claims absence at the
-//!   last depth to force the final step out; the prover's refutation parks
+//!   last depth to force the final step out; the prover's rebuttal parks
 //!   the pair; the verifier's disproves don't fire; the prover's
 //!   `zk_prove_<class>` spends after delta + delta', not before.
 //! - P2, the timeout wins: the prover faked a write at step 40. The search
@@ -16,10 +16,10 @@
 //!   after delta + 2 delta', not before.
 //! - P3, a malformed round: the verifier's choice at depth 4 doesn't copy
 //!   the endpoints. The prover claims absence at 4, the verifier's
-//!   refutation parks its own malformed move, and the prover's
+//!   rebuttal parks its own malformed move, and the prover's
 //!   `zk_choice` disprove pays.
 //! - P4, a stall: the verifier never answers at depth 6; the prover's
-//!   claim stands unrefuted and its timeout split pays after delta.
+//!   claim stands unrebutted and its timeout split pays after delta.
 //! - P5, the window order (D59 amended): the prover's final record says a
 //!   step other than the state's base. The step still executes, so the
 //!   proof would pass, but it isn't spendable inside the verifier's
@@ -41,7 +41,7 @@ use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsSecret, WotsSig};
 use lngap_pos::graph::proposer_witness;
 use lngap_pos::instance::{self, mover_at, Game, GameClock, PosInstance};
-use lngap_pos::refute::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
+use lngap_pos::rebut::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
 use lngap_pos::{Member, PosMiner, SealedBlock};
 use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::dispute::{search, Behaviour, Searched};
@@ -202,11 +202,11 @@ impl World {
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the claim at {d} must mine: {e}"));
         println!("  claim absent_{d}: {} vB", tx.vsize());
     }
-    /// The mover's refutation at `d`: the readout of head d, the pair
+    /// The mover's rebuttal at `d`: the readout of head d, the pair
     /// reveal, both heads' authorship, the proposer, the mover.
-    fn refute(&mut self, rt: &Regtest, d: u32) -> (OutPoint, TxOut) {
+    fn rebut(&mut self, rt: &Regtest, d: u32) -> (OutPoint, TxOut) {
         let id = self.inst.id;
-        let p = self.skel(&format!("absent_{d}/refute")).clone();
+        let p = self.skel(&format!("absent_{d}/rebut")).clone();
         let mut tx = p.tx.clone();
         let a_prev = p.prevouts[0].clone();
         let mover = mover_at(d);
@@ -216,38 +216,38 @@ impl World {
         let sigs_new: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|j| sign_with(&new_block.attestation.secrets[HEAD_CHUNK_START + j], &tx, &a_prev, &p.leaf.script)).collect();
         let mut w = if d >= 2 {
             let prev_head = self.head(d - 1);
-            let pair = self.ks[mover.idx()].sign_wots(&instance::refute_label(id, 1, d), &[prev_head.as_slice(), new_head.as_slice()].concat()).unwrap();
+            let pair = self.ks[mover.idx()].sign_wots(&instance::rebut_label(id, 1, d), &[prev_head.as_slice(), new_head.as_slice()].concat()).unwrap();
             let prev_block = &self.sealed[&(d - 1)];
             self.pair_sig = Some(pair.clone());
             // the prior is bound by the claimant's signature, from its entry
             let prev_key = self.ks[mover.other().idx()].wots_public(&instance::state_label(id, 1, d - 1)).unwrap();
-            let prev_auth = refute::entry_auth_sig(&prev_key, &prev_head[4..], &prev_block.entry).expect("the prior entry carries its mover's signature");
-            refute::refute_witness_pair_signed(&sigs_new, &pair, [&auth, &prev_auth])
+            let prev_auth = rebut::entry_auth_sig(&prev_key, &prev_head[4..], &prev_block.entry).expect("the prior entry carries its mover's signature");
+            rebut::rebut_witness_pair_signed(&sigs_new, &pair, [&auth, &prev_auth])
         } else {
-            let pair = self.ks[mover.idx()].sign_wots(&instance::refute_label(id, 1, d), &new_head).unwrap();
+            let pair = self.ks[mover.idx()].sign_wots(&instance::rebut_label(id, 1, d), &new_head).unwrap();
             self.pair_sig = Some(pair.clone());
-            refute::refute_witness(&sigs_new, &pair, &auth)
+            rebut::rebut_witness(&sigs_new, &pair, &auth)
         };
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, &tx, &a_prev, &p.leaf.script), new_block.proposer));
-        // the refutation is 2-of-2: the hub's signature, then the user's
+        // the rebuttal is 2-of-2: the hub's signature, then the user's
         w.push(sign_tx(self.payment(Role::Hub), &tx, &a_prev, &p.leaf.script));
         w.push(sign_tx(self.payment(Role::User), &tx, &a_prev, &p.leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
-        rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the refutation at {d} must mine: {e}"));
-        println!("  refutation at {d}: {} vB", tx.vsize());
+        rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the rebuttal at {d} must mine: {e}"));
+        println!("  rebuttal at {d}: {} vB", tx.vsize());
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
     }
-    /// A runtime spend of the refuted output at `d` through `leaf`: the
+    /// A runtime spend of the rebuttal output at `d` through `leaf`: the
     /// witness `below` the pair reveal, `above` it, then `who`'s
     /// signature; paid to `who`.
     fn spend(&self, d: u32, p_op: OutPoint, p_prev: &TxOut, leaf: &str, below: Vec<Vec<u8>>, above: Vec<Vec<u8>>, who: Role) -> Transaction {
         let ctx = self.ctx();
-        let tree = self.inst.refuted_tree(&ctx, d).unwrap();
+        let tree = self.inst.rebuttal_tree(&ctx, d).unwrap();
         let l = tree.leaf(leaf).unwrap_or_else(|_| panic!("no leaf {leaf}"));
         let mut tx = lngap_btc::tx::build_spend(p_op, &l.timelock, vec![TxOut { value: p_prev.value - self.params.presign_fee, script_pubkey: self.payout(who) }]);
         let sig = sign_tx(self.payment(who), &tx, p_prev, &l.script);
         let mut w = below;
-        w.extend(refute::wots_wire(self.pair_sig.as_ref().expect("the refutation went first")));
+        w.extend(rebut::wots_wire(self.pair_sig.as_ref().expect("the rebuttal went first")));
         w.extend(above);
         w.push(sig);
         tx.input[0].witness = tapscript_witness(&w, &l.script, &tree.control_block(leaf).unwrap());
@@ -279,7 +279,7 @@ fn final_dispute(rt: &Regtest, w: &mut World, entries: &[Entry]) -> (OutPoint, T
     // the verifier (claimant at the prover's depths) claims the last move
     // absent; the prover answers by parking it
     w.claim(rt, m);
-    w.refute(rt, m)
+    w.rebut(rt, m)
 }
 
 #[test]
@@ -333,7 +333,7 @@ fn zk_game_on_regtest() {
         let proof = w.spend(m, p_op, &p_prev, &prove_name(&record), final_witness(&state, &record), vec![], Role::User);
         let err = rt.test_accept(&proof).expect_err("a faked write doesn't prove");
         println!("  the proof: rejected ({err})");
-        let split = w.two_of_two(&format!("absent_{m}/refuted/split_HubWins"), vec![]);
+        let split = w.two_of_two(&format!("absent_{m}/rebuttal/split_HubWins"), vec![]);
         assert!(rt.test_accept(&split).is_err(), "the verifier's split waits out the prover's window");
         rt.mine(u64::from(delta_p)).unwrap();
         rt.mine_with(&[split.clone()]).unwrap_or_else(|e| panic!("the verifier's split must mine: {e}"));
@@ -352,7 +352,7 @@ fn zk_game_on_regtest() {
         }
         rt.mine(u64::from(w.params.to_self_delay) + 2).unwrap();
         w.claim(&rt, 4);
-        let (p_op, p_prev) = w.refute(&rt, 4);
+        let (p_op, p_prev) = w.rebut(&rt, 4);
         let below = [nibble_witness(&entries[2].state.to_bytes()), nibble_witness(&bad.to_bytes())].concat();
         let tx = w.spend(4, p_op, &p_prev, "disprove_zk_choice", below, vec![], Role::User);
         assert!(rt.test_accept(&tx).is_err(), "not before delta");
@@ -447,7 +447,7 @@ fn read_challenge_on_regtest() {
         // the verifier claims the prover's terminal move absent; the prover
         // parks it
         w.claim(&rt, m);
-        let (p_op, p_prev) = w.refute(&rt, m);
+        let (p_op, p_prev) = w.rebut(&rt, m);
         rt.mine(u64::from(delta) + 1).unwrap();
         let rec1 = p1.last().unwrap().record.unwrap();
         let s2 = p2[p2.len() - 2].state;
@@ -486,7 +486,7 @@ fn read_challenge_on_regtest() {
                     assert!(rt.test_accept(&read_value(&w, sel, &write_of(trace))).is_err(), "{name}: read_value_{sel} must not fire on an honest prover");
                 }
                 rt.mine(u64::from(delta_p)).unwrap();
-                let split = w.two_of_two(&format!("absent_{m}/refuted/split_UserWins"), vec![]);
+                let split = w.two_of_two(&format!("absent_{m}/rebuttal/split_UserWins"), vec![]);
                 rt.mine_with(&[split.clone()]).unwrap_or_else(|e| panic!("{name}: the prover's split must mine: {e}"));
                 println!("  no read leaf fires; the prover's split: {} vB. The prover wins.", split.vsize());
             }
@@ -521,7 +521,7 @@ fn groth16_on_regtest() {
     let mut w = World::open_with(&rt, 77, &gpdf, &input);
     let m = w.search.depths();
     let ctx = w.ctx();
-    let fin = w.inst.refuted_tree(&ctx, m).unwrap();
+    let fin = w.inst.rebuttal_tree(&ctx, m).unwrap();
     let n_prove = fin.leaves().iter().filter(|l| l.name.starts_with("zk_prove_")).count();
     let n_dis = fin.leaves().iter().filter(|l| l.name.starts_with("disprove_")).count();
     println!(
@@ -538,7 +538,7 @@ fn groth16_on_regtest() {
     println!("  the venue sealed all {} moves of phase 1 in {:.1?}", entries.len(), t.elapsed());
     rt.mine(u64::from(w.params.to_self_delay) + 2).unwrap();
     w.claim(&rt, m);
-    let (p_op, p_prev) = w.refute(&rt, m);
+    let (p_op, p_prev) = w.rebut(&rt, m);
     let last = entries.last().unwrap();
     let (state, record) = (last.state, last.record.unwrap());
     let (delta, delta_p) = (ChannelParams::regtest(Amount::ONE_BTC).delta, ChannelParams::regtest(Amount::ONE_BTC).delta_prime);

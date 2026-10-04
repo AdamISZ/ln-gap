@@ -183,8 +183,8 @@ impl FcHub {
         Ok((shape, data))
     }
 
-    /// Build heavier-chain refutation data: one more header from the same checkpoint.
-    pub fn refutation_data(
+    /// Build heavier-chain rebuttal data: one more header from the same checkpoint.
+    pub fn rebuttal_data(
         &self,
         req_id: u32,
         client: &ChainClient,
@@ -202,7 +202,7 @@ impl FcHub {
             difficulty_bits: lngap_factchain::DIFFICULTY_BITS,
             n_headers,
         };
-        // For the refutation, we need the real chain (one header longer).
+        // For the rebuttal, we need the real chain (one header longer).
         // The entry might be different (or absent) on the real chain.
         // For the PoC, the world provides the real chain.
         let data = shape.build_data(client, &p.entry);

@@ -191,7 +191,7 @@ struct Live {
     last_state_reveal: Option<Reveal>,
     resolved: bool,
     dispute: Option<DisputeLive>,
-    /// Graph label prefix of this output's spends (`r{d}/` after a refutation).
+    /// Graph label prefix of this output's spends (`r{d}/` after a rebuttal).
     prefix: String,
     /// Stall graphs, my own lie exhibit: the claim and reveals to disprove
     /// with once the liar's dispute window has passed.
@@ -842,7 +842,7 @@ impl Party {
         let (tree, prefix) = if stall {
             (inst.stall_graph_tree(&ctx, d)?, ContractInstance::stall_graph_prefix(d))
         } else if star && !from_root {
-            (inst.refuted_tree(&ctx, d)?, format!("r{}/", self.live[idx].depth))
+            (inst.rebuttal_tree(&ctx, d)?, format!("r{}/", self.live[idx].depth))
         } else {
             (inst.depth_tree(&ctx, d)?, String::new())
         };
@@ -964,7 +964,7 @@ impl Party {
 
     /// Use the first disprove leaf whose native check fires and whose needs
     /// I can satisfy. With `expect_one` a consistent claim may still be
-    /// refutable by a statement I hold (e.g. an attestation).
+    /// rebuttable by a statement I hold (e.g. an attestation).
     fn disprove(&mut self, idx: usize, d: u32, claim: &Claim, reveals: &MoveReveals, expect_one: bool) -> Result<bool> {
         let inst = self.instance(&self.live[idx]);
         let specs = inst.disprove_specs(d);
@@ -1181,7 +1181,7 @@ impl Party {
         Ok(())
     }
 
-    /// A move from this output's state (on a star graph: the refutation,
+    /// A move from this output's state (on a star graph: the rebuttal,
     /// re-committing the claimant's state as its prior).
     fn broadcast_move(&mut self, idx: usize, d: u32, mv: Vec<bool>) -> Result<()> {
         let l = self.live[idx].clone();
@@ -1227,7 +1227,7 @@ impl Party {
             }
             None => None,
         };
-        // a star graph's refutation off `C'_depth` is labelled `r{depth}/move_{d}`
+        // a star graph's rebuttal off `C'_depth` is labelled `r{depth}/move_{d}`
         let label = if inst.graph_shape() == GraphShape::Star && l.depth >= 1 { format!("r{}/move_{d}", l.depth) } else { format!("move_{d}") };
         let key = GraphKey { version: l.version, contract_id: l.id, label };
         let rec = self.channel.record(l.seq).ok_or_else(|| anyhow!("no record"))?;

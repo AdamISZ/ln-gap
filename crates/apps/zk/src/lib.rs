@@ -11,7 +11,7 @@
 //! `h_i` (BitVMX's BLAKE3, with an equality). If no proof appears in its
 //! window, the claimant takes the output by timeout.
 //!
-//! The values come from the pair the prover's refutation parked: the
+//! The values come from the pair the prover's rebuttal parked: the
 //! `zk_prove_<class>` leaf re-verifies the prover's Winternitz signature
 //! over the pair (leaving the 192 digits on the stack), gathers the digits
 //! BitVMX's scripts read, in their order, drops the rest, and runs them

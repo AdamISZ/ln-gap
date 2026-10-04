@@ -44,9 +44,9 @@ pub struct ZkFamily {
     pub input_keys: Vec<WotsPublic>,
     /// One (opcode, micro-step) sample per instruction class in the code.
     pub classes: BTreeMap<String, (u32, u8)>,
-    /// Built leaf scripts, per (depth, refute key): they depend on nothing
+    /// Built leaf scripts, per (depth, rebuttal key): they depend on nothing
     /// else, while a graph is rebuilt per commitment version and per side
-    /// (and builds most depths' refuted trees twice, under the claim and
+    /// (and builds most depths' rebuttal trees twice, under the claim and
     /// the counter). The context-dependent prefixes are added around them
     /// by the graph, outside the cache.
     cache: Mutex<Cache>,
@@ -124,55 +124,55 @@ pub fn encode_inputs(words: &[u32], sigs: &[WotsSig]) -> Vec<u8> {
 }
 
 impl ZkFamily {
-    fn build_disproves(&self, l: &Layout, refute: &WotsPublic) -> Vec<PosLeaf> {
+    fn build_disproves(&self, l: &Layout, rebut: &WotsPublic) -> Vec<PosLeaf> {
         let d = l.depth;
         let s = &self.search;
         if d == 1 {
-            vec![pos_leaf("zk_claim".into(), s.claim_leaf(refute))]
+            vec![pos_leaf("zk_claim".into(), s.claim_leaf(rebut))]
         } else if d == s.depths() {
             // phase 1's record (D59/D60/D61)
-            let mut v: Vec<PosLeaf> = final_leaves(l, refute, &self.info).into_iter().map(|f| pos_leaf(f.name, f.script)).collect();
-            v.extend(input_leaves(l, refute, &self.input_keys, &self.info).into_iter().map(|f| pos_leaf(f.name, f.script)));
+            let mut v: Vec<PosLeaf> = final_leaves(l, rebut, &self.info).into_iter().map(|f| pos_leaf(f.name, f.script)).collect();
+            v.extend(input_leaves(l, rebut, &self.input_keys, &self.info).into_iter().map(|f| pos_leaf(f.name, f.script)));
             v
         } else if d == s.open_depth() {
             // the read challenge's opening (D62)
-            vec![pos_leaf("zk_open".into(), s.open_leaf(refute))]
+            vec![pos_leaf("zk_open".into(), s.open_leaf(rebut))]
         } else if d == s.total() {
             // the read challenge's terminal move: the copy, and BitVMX's
             // read-value and correct-hash challenges (D62)
             vec![
-                pos_leaf("zk_copied".into(), s.copied_leaf(refute, d)),
-                pos_leaf("zk_read_value_1".into(), s.read_value_leaf(refute, 1)),
-                pos_leaf("zk_read_value_2".into(), s.read_value_leaf(refute, 2)),
-                pos_leaf("zk_correct_hash".into(), s.correct_hash_leaf(refute)),
+                pos_leaf("zk_copied".into(), s.copied_leaf(rebut, d)),
+                pos_leaf("zk_read_value_1".into(), s.read_value_leaf(rebut, 1)),
+                pos_leaf("zk_read_value_2".into(), s.read_value_leaf(rebut, 2)),
+                pos_leaf("zk_correct_hash".into(), s.correct_hash_leaf(rebut)),
             ]
         } else if d % 2 == 0 {
-            vec![pos_leaf("zk_choice".into(), s.choice_leaf(refute, d))]
+            vec![pos_leaf("zk_choice".into(), s.choice_leaf(rebut, d))]
         } else {
-            vec![pos_leaf("zk_copied".into(), s.copied_leaf(refute, d))]
+            vec![pos_leaf("zk_copied".into(), s.copied_leaf(rebut, d))]
         }
     }
 
-    fn build_proofs(&self, l: &Layout, refute: &WotsPublic) -> Vec<(String, ScriptBuf)> {
+    fn build_proofs(&self, l: &Layout, rebut: &WotsPublic) -> Vec<(String, ScriptBuf)> {
         self.classes
             .iter()
             .map(|(key, &(op, micro))| {
                 let ins = riscv_decode::decode(op).expect("a class sample decodes");
                 let exec = generate_verification_script(&ins, micro, BASE_REGISTER_ADDRESS, requires_witness(&ins));
-                (format!("zk_prove_{key}"), prove_script_d60(l, refute, key, &ScriptBuf::from_bytes(exec.into_bytes()), requires_witness(&ins)))
+                (format!("zk_prove_{key}"), prove_script_d60(l, rebut, key, &ScriptBuf::from_bytes(exec.into_bytes()), requires_witness(&ins)))
             })
             .collect()
     }
 }
 
 impl lngap_pos::ext::Family for ZkFamily {
-    fn disprove_leaves(&self, l: &Layout, refute: &WotsPublic) -> Vec<PosLeaf> {
-        let key = (l.depth, fingerprint(refute));
+    fn disprove_leaves(&self, l: &Layout, rebut: &WotsPublic) -> Vec<PosLeaf> {
+        let key = (l.depth, fingerprint(rebut));
         let hit = self.cache.lock().unwrap().disproves.get(&key).cloned();
         let leaves = match hit {
             Some(v) => v,
             None => {
-                let v: Arc<Vec<(String, ScriptBuf)>> = Arc::new(self.build_disproves(l, refute).into_iter().map(|p| (p.name, p.script)).collect());
+                let v: Arc<Vec<(String, ScriptBuf)>> = Arc::new(self.build_disproves(l, rebut).into_iter().map(|p| (p.name, p.script)).collect());
                 self.cache.lock().unwrap().disproves.insert(key, v.clone());
                 v
             }
@@ -184,13 +184,13 @@ impl lngap_pos::ext::Family for ZkFamily {
         Some(self.search.depths())
     }
 
-    fn prove_leaves(&self, l: &Layout, refute: &WotsPublic) -> Vec<(String, ScriptBuf)> {
-        let key = (l.depth, fingerprint(refute));
+    fn prove_leaves(&self, l: &Layout, rebut: &WotsPublic) -> Vec<(String, ScriptBuf)> {
+        let key = (l.depth, fingerprint(rebut));
         let hit = self.cache.lock().unwrap().proofs.get(&key).cloned();
         match hit {
             Some(v) => v.as_ref().clone(),
             None => {
-                let v = self.build_proofs(l, refute);
+                let v = self.build_proofs(l, rebut);
                 self.cache.lock().unwrap().proofs.insert(key, Arc::new(v.clone()));
                 v
             }
@@ -204,7 +204,7 @@ impl lngap_pos::ext::Family for ZkFamily {
         }
         let head: [u8; HEAD_BYTES] = entry[..HEAD_BYTES].try_into().expect("48 bytes");
         let sigs: Vec<[u8; 20]> = entry[HEAD_BYTES..HEAD_BYTES + n_sig].chunks(20).map(|x| x.try_into().expect("20")).collect();
-        if !lngap_pos::refute::check_entry_sig(state_key, &head[lngap_blackjack::SIGNED_FROM..], &sigs) {
+        if !lngap_pos::rebut::check_entry_sig(state_key, &head[lngap_blackjack::SIGNED_FROM..], &sigs) {
             return false;
         }
         let body = &entry[HEAD_BYTES + n_sig..];

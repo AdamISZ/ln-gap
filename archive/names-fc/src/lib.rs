@@ -3,7 +3,7 @@
 //! Same state machines as `lngap_names::programs` (nreg, anchorpay) but the
 //! facts come from the fact chain, not Bitcoin SPV. Stage 2: the claims are
 //! ClaimSpecs (n4bit header chains) with on-chain bisection disputes. The
-//! heavier-chain refutation (N9) works because it is protocol-level
+//! heavier-chain rebuttal (N9) works because it is protocol-level
 //! (present one more header), not Script-level.
 
 pub mod hub;

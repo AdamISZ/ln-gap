@@ -89,7 +89,7 @@ the last digit on top. Nothing consumes them, so they become the input of
 whatever follows in the same script:
 
 ```
- witness: (σ₀,d₀) (σ₁,d₁) … (σ₁₉₄,d₁₉₄)        WOTS-VERIFY(K_ref)
+ witness: (σ₀,d₀) (σ₁,d₁) … (σ₁₉₄,d₁₉₄)        WOTS-VERIFY(K_reb)
                     │                                  │
                     ▼                                  ▼
  stack:   d₀ d₁ d₂ … d₁₉₁   ← 192 digits: the two heads, one nibble per element
@@ -103,16 +103,16 @@ whatever follows in the same script:
 
 This is the trick that moves data across the pre-signed graph. A
 pre-signed transaction can't carry new data to the next output (Bitcoin
-has no covenants), but a **one-time key** can: the refutation signs the
-two heads under the mover's refute key, and every later leaf that
+has no covenants), but a **one-time key** can: the rebuttal signs the
+two heads under the mover's rebuttal key, and every later leaf that
 re-verifies a signature under the *same key* gets the *same digits*,
 because a one-time key can only sign one message. That's why the code calls
-it *parking*: the refutation parks the tuple, and the disproves pick it up.
+it *parking*: the rebuttal parks the tuple, and the disproves pick it up.
 
 ## The tied variant: checking a signature against digits already there
 
 The authorship check asks: did the mover's **state key** sign this head?
-The head's digits are already on the stack (parked by the refute key), so
+The head's digits are already on the stack (parked by the rebuttal key), so
 the witness carries only the reveal hashes, and each digit's value is
 copied from the register file with `OP_PICK` instead of coming from the
 witness (`wots_verify_tied` in `crates/lamport`). The signature is then
@@ -126,8 +126,8 @@ bound to exactly what's parked, by construction:
           → the parked head is the one the mover signed
 ```
 
-A refutation runs this twice: the mover's key over the new head, and the
-claimant's key over the prior head. That second check is what lets the refutation skip reading the prior
+A rebuttal runs this twice: the mover's key over the new head, and the
+claimant's key over the prior head. That second check is what lets the rebuttal skip reading the prior
 head out of the venue (see [EC-OTS](ec-ots.md)).
 
 ## One-time, and why it matters
@@ -136,7 +136,7 @@ Two signatures under one key reveal two chain elements per digit. For
 the *state* keys, that's a provable offence: the `equiv_d` leaf pays the
 whole pot to the counterparty of a mover who signed two different heads at
 the same depth, with no venue data needed. Each depth has its own state
-key and refute key, generated and exchanged when the contract is added to
+key and rebuttal key, generated and exchanged when the contract is added to
 the channel.
 
 ## Sizes

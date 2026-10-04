@@ -18,7 +18,7 @@ use lngap_chess_fc::ChessState;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_pos::chess;
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::{self, pair_key, refute_key};
+use lngap_pos::rebut::{self, pair_key, rebut_key};
 use lngap_pos::ttt::{Layout, PosLeaf};
 
 const GAME: u16 = 1;
@@ -116,7 +116,7 @@ impl Family {
             let mut ran = false;
             for exhibit in candidates {
                 let mut w: Vec<Vec<u8>> = exhibit.iter().map(|&v| lngap_script32::sim::encode(v)).collect();
-                w.extend(refute::disprove_witness(&sig));
+                w.extend(rebut::disprove_witness(&sig));
                 ran = if verify_form(&leaf.name) {
                     // wrong_slot / chess_malformed are ttt-shaped leaves:
                     // OP_VERIFY the predicate, so a non-firing tuple ERRORS
@@ -169,7 +169,7 @@ fn heads(prior: &ChessState, new: &ChessState) -> ([u8; 48], [u8; 48]) {
 fn legal_moves_are_not_disprovable() {
     let sk = pair_key([9u8; 32]);
     // depth 1: every legal opening is safe (the constant-prior pad)
-    let (sk1, fam1) = (refute_key([9u8; 32]), family_at(&refute_key([9u8; 32]), 1));
+    let (sk1, fam1) = (rebut_key([9u8; 32]), family_at(&rebut_key([9u8; 32]), 1));
     for uci in ["e2e4", "g1f3", "b1c3", "a2a4", "h2h3"] {
         let new = play(&ChessState::initial(), uci).unwrap();
         let f = fam1.fired(&sk1, &[0; 48], &chess::head(GAME, 1, Role::User, &new));
@@ -201,7 +201,7 @@ fn legal_moves_are_not_disprovable() {
 #[test]
 fn each_illegal_line_fires_some_leaf() {
     let sk = pair_key([9u8; 32]);
-    let (sk1, fam1) = (refute_key([9u8; 32]), family_at(&refute_key([9u8; 32]), 1));
+    let (sk1, fam1) = (rebut_key([9u8; 32]), family_at(&rebut_key([9u8; 32]), 1));
     let s0 = ChessState::initial();
     let d1 = |new: &ChessState| fam1.fired(&sk1, &[0; 48], &chess::head(GAME, 1, Role::User, new));
     // the pawn's triple push
@@ -304,7 +304,7 @@ fn malformed_heads_are_disprovable() {
         assert_eq!(f.contains(&chess::MALFORMED.to_string()), malformed, "{label}: chess_malformed fired = {f:?}");
     }
     // depth 1 too (the single-head layout): from = 255 on an opening
-    let (sk1, fam1) = (refute_key([9u8; 32]), family_at(&refute_key([9u8; 32]), 1));
+    let (sk1, fam1) = (rebut_key([9u8; 32]), family_at(&rebut_key([9u8; 32]), 1));
     let s1 = play(&ChessState::initial(), "e2e4").unwrap();
     let mut h1 = chess::head(GAME, 1, Role::User, &s1);
     assert!(fam1.fired(&sk1, &[0; 48], &h1).is_empty());
@@ -368,21 +368,21 @@ fn resolution_fragment_checks_the_code() {
             for _ in 0..l.file / 2 {
                 bd = bd.push_opcode(bitcoin::opcodes::all::OP_2DROP);
             }
-            let res = lngap_script32::sim::run(bd.push_int(1).into_script().as_script(), refute::disprove_witness(&sig));
+            let res = lngap_script32::sim::run(bd.push_int(1).into_script().as_script(), rebut::disprove_witness(&sig));
             assert_eq!(res.is_ok(), c == want, "R = {want}, code {c}");
         }
     }
 }
 
 /// Dummy 64-byte sigs for the readout's possession proofs: the simulator's
-/// CHECKSIG stub pops both elements and continues (sim_refute.rs's
+/// CHECKSIG stub pops both elements and continues (sim_rebut.rs's
 /// discipline); the WOTS re-commitment and the authorship checks run for
 /// real.
 const DUMMY_SIG: [u8; 64] = [0x30; 64];
 
 #[test]
-fn refute_leaf_runs_only_with_true_authorship() {
-    // the FULL pair refute leaf: the D41 authorship fragments (per parked
+fn rebut_leaf_runs_only_with_true_authorship() {
+    // the FULL pair rebut leaf: the D41 authorship fragments (per parked
     // head, the mover's 336-bit state-key preimages checked against the
     // claimed state||move) plus the two-head readout over the two slots'
     // epoch tables (the tables' points embedded; the possession sigs
@@ -397,21 +397,21 @@ fn refute_leaf_runs_only_with_true_authorship() {
     let p_head = chess::head(GAME, 1, Role::User, &prior);
     let n_head = chess::head(GAME, 2, Role::Hub, &new);
     let sk_new = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(42), [0x51; 32]);
-    let sigs: Vec<Vec<u8>> = (0..refute::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
-    let leaf = refute::refute_leaf_pair_gated(&t1, &t2, &key.public(), |bd| {
+    let sigs: Vec<Vec<u8>> = (0..rebut::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
+    let leaf = rebut::rebut_leaf_pair_gated(&t1, &t2, &key.public(), |bd| {
         chess::authorship_fragment(bd, l.file, l.new, &sk_new.public())
     });
     let mut msg = p_head.to_vec();
     msg.extend_from_slice(&n_head);
     let sig = key.sign(&msg).unwrap();
     let sig_new = sk_new.sign(&chess::auth_message(&n_head)).unwrap();
-    let good = refute::refute_witness_pair(&sigs, &sigs, &sig, &[&sig_new]);
+    let good = rebut::rebut_witness_pair(&sigs, &sigs, &sig, &[&sig_new]);
     assert!(lngap_script32::sim::run(leaf.as_script(), good).is_ok(), "true authorship must pass");
     // a garbage-signed entry: a signature over a DIFFERENT successor's
     // region must fail the fragment (the tie forces the file's digits)
     let wrong = play(&prior, "c7c5").unwrap();
     let bad_sig = sk_new.sign(&chess::auth_message(&chess::head(GAME, 2, Role::Hub, &wrong))).unwrap();
-    let bad = refute::refute_witness_pair(&sigs, &sigs, &sig, &[&bad_sig]);
+    let bad = rebut::rebut_witness_pair(&sigs, &sigs, &sig, &[&bad_sig]);
     assert!(lngap_script32::sim::run(leaf.as_script(), bad).is_err(), "garbage authorship must be rejected");
 }
 
@@ -425,7 +425,7 @@ fn print_family_sizes() {
     for l in &fam.leaves {
         println!("  {:<24} {} B", l.name, l.script.len());
     }
-    let sk1 = refute_key([9u8; 32]);
+    let sk1 = rebut_key([9u8; 32]);
     let fam1 = family_at(&sk1, 1);
     let total1: usize = fam1.leaves.iter().map(|l| l.script.len()).sum();
     println!("POS-CHESS depth 1 disprove family: {} leaves, {total1} B of script", fam1.leaves.len());

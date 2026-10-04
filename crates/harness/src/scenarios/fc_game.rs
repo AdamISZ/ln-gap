@@ -107,7 +107,7 @@ pub const G3: Scenario = Scenario {
 
 pub const G4: Scenario = Scenario {
     id: "G4",
-    title: "A spurious timeout claim is refuted by an inclusion proof",
+    title: "A spurious timeout claim is rebutted by an inclusion proof",
     expected: "the hub claims the user missed move 3; the user answers with move_3 and its slot-3 inclusion claim; r2/split_3_UserWins: the claimant forfeits",
     run: || {
         let mut b = honest();
@@ -117,9 +117,9 @@ pub const G4: Scenario = Scenario {
         w.steps(2)?;
         let (c, m, s, d, o) = summary(&w);
         ensure!(c == 1);
-        ensure!(m == vec!["move_2".to_string(), "move_3".to_string()], "the claim and the refutation: {m:?}");
+        ensure!(m == vec!["move_2".to_string(), "move_3".to_string()], "the claim and the rebuttal: {m:?}");
         ensure!(s == vec!["r2/split_3_UserWins".to_string()], "{s:?}");
-        ensure!(d.is_empty() && o.is_empty(), "no dispute: the refutation's inclusion claim is honest");
+        ensure!(d.is_empty() && o.is_empty(), "no dispute: the rebuttal's inclusion claim is honest");
         ensure!(w.h.balance(Role::User) > sat(100_000) + STAKE);
         Ok(report(&w, &G4))
     },
@@ -188,18 +188,18 @@ pub const G7: Scenario = Scenario {
 
 pub const G7B: Scenario = Scenario {
     id: "G7B",
-    title: "A garbage-signed move cannot refute a timeout claim",
+    title: "A garbage-signed move cannot rebut a timeout claim",
     expected: "the hub answers the user's timeout claim with its garbage-signed move 4; the user disputes the inclusion claim and the bisection isolates the signature predicate (cpred)",
     run: || {
         let mut b = honest();
         b[Role::Hub.idx()].garbage_at = Some(4);
-        b[Role::Hub.idx()].refute_with_garbage = true;
+        b[Role::Hub.idx()].rebut_with_garbage = true;
         let mut w = GameWorld::new("G7B", b)?;
         w.step_until(120, |w| w.contract_txs().iter().any(|r| r.starts_with("cpred_") || r.starts_with("simple_") || r.starts_with("ccopy_") || r.starts_with("flat_") || r.starts_with("re_") || r.starts_with("block_") || r.starts_with("ckeep_")))?;
         w.steps(2)?;
         let (_, m, s, _, o) = summary(&w);
-        ensure!(m == vec!["move_3".to_string(), "move_4".to_string()], "the claim and the garbage refutation: {m:?}");
-        ensure!(o.iter().any(|r| r == "r3/d4/dispute"), "the user disputes the refutation's claim: {o:?}");
+        ensure!(m == vec!["move_3".to_string(), "move_4".to_string()], "the claim and the garbage rebuttal: {m:?}");
+        ensure!(o.iter().any(|r| r == "r3/d4/dispute"), "the user disputes the rebuttal's claim: {o:?}");
         ensure!(o.iter().any(|r| r.starts_with("cpred_")), "the signature predicate fails: {o:?}");
         ensure!(s.is_empty());
         ensure!(w.h.balance(Role::User) > sat(100_000) + STAKE - sat(25_000));

@@ -65,7 +65,7 @@ pub struct Brain {
     /// signature (the preimages).
     pub garbage_at: Option<u32>,
     /// Answer a timeout claim with a garbage-signed move of mine.
-    pub refute_with_garbage: bool,
+    pub rebut_with_garbage: bool,
     /// Stall graphs: exhibit the opponent's soundly signed entry at this
     /// depth as garbage-signed (a baseless signature exhibit).
     pub fabricate_sig_at: Option<u32>,
@@ -284,7 +284,7 @@ impl GameWorld {
     /// Off `C'_d` a party answers a claim with its own next move: the move
     /// it published on the venue from that very state.
     fn install_move_policy(&mut self, r: Role) {
-        let with_garbage = self.brains[r.idx()].refute_with_garbage;
+        let with_garbage = self.brains[r.idx()].rebut_with_garbage;
         let mine: Vec<(Vec<bool>, Vec<bool>)> = self
             .published
             .iter()

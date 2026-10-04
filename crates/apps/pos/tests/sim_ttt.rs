@@ -1,4 +1,4 @@
-//! Stack-choreography checks of the two-head refutation's tic-tac-toe
+//! Stack-choreography checks of the two-head rebuttal's tic-tac-toe
 //! disprove family through the script32 simulator (the D29 discipline:
 //! script passes must match native passes; regtest remains the source of
 //! truth for the crypto).
@@ -12,7 +12,7 @@ use lngap_channel::Role;
 use lngap_contract::Contract;
 use lngap_lamport::winternitz::WotsSecret;
 use lngap_lamport::bits_to_uint;
-use lngap_pos::refute::{self, pair_key, refute_key};
+use lngap_pos::rebut::{self, pair_key, rebut_key};
 use lngap_pos::ttt::{self, Layout};
 use lngap_tictactoe::{Board, TicTacToe};
 
@@ -63,7 +63,7 @@ fn family_at(sk: &WotsSecret, depth: u32, mover: Role) -> Family {
 
 /// The family for depth 1 (single head, constant prior, mover = user).
 fn single_family() -> (Family, WotsSecret) {
-    let sk = refute_key([9u8; 32]);
+    let sk = rebut_key([9u8; 32]);
     let layout = Layout::at(1, 1, Role::User);
     let leaves = ttt::disprove_leaves(&layout, &sk.public());
     (Family { layout, leaves }, sk)
@@ -80,7 +80,7 @@ impl Family {
         } else {
             sk.sign(new).unwrap()
         };
-        let w = refute::disprove_witness(&sig);
+        let w = rebut::disprove_witness(&sig);
         let mut out = Vec::new();
         for leaf in &self.leaves {
             let ran = lngap_script32::sim::run(leaf.script.as_script(), w.clone()).is_ok();
@@ -291,7 +291,7 @@ fn resolution_fragment_checks_the_code() {
                 }
                 bd.push_int(1).into_script()
             };
-            let res = lngap_script32::sim::run(script.as_script(), refute::disprove_witness(&sig));
+            let res = lngap_script32::sim::run(script.as_script(), rebut::disprove_witness(&sig));
             assert_eq!(res.is_ok(), c == code, "R = {code}, code {c}, state {s:#x}");
         }
     }
@@ -300,7 +300,7 @@ fn resolution_fragment_checks_the_code() {
 // ----- the terminal exhibit's status gate (D37) -----
 
 /// Dummy 64-byte sigs for the readout's possession proofs: the simulator's
-/// CHECKSIG stub pops both elements and continues (sim_refute.rs's
+/// CHECKSIG stub pops both elements and continues (sim_rebut.rs's
 /// discipline); the WOTS re-commitment work runs for real.
 const DUMMY_SIG: [u8; 64] = [0x30; 64];
 
@@ -329,7 +329,7 @@ fn terminal_gate_admits_only_terminal_states() {
         for _ in 0..l.file / 2 {
             bd = bd.push_opcode(bitcoin::opcodes::all::OP_2DROP);
         }
-        let res = lngap_script32::sim::run(bd.push_int(1).into_script().as_script(), refute::disprove_witness(&sig));
+        let res = lngap_script32::sim::run(bd.push_int(1).into_script().as_script(), rebut::disprove_witness(&sig));
         assert_eq!(res.is_ok(), terminal, "the gate must admit exactly the terminal states: {b:?}");
     }
 }
@@ -354,19 +354,19 @@ fn exhibit_leaf_runs_only_when_terminal() {
     let sk_prev = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [0x52; 32]);
     let sk_new = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [0x51; 32]);
     let sig_prev = sk_prev.sign(&ttt::auth_message(&p_head)).unwrap();
-    let sigs: Vec<Vec<u8>> = (0..refute::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
+    let sigs: Vec<Vec<u8>> = (0..rebut::HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     for (b, terminal) in [(play(&prior, 2).unwrap(), true), (play(&prior, 8).unwrap(), false)] {
         let n_head = head(1, 5, 0, 2, state_u32(&b));
         let mut msg = p_head.to_vec();
         msg.extend_from_slice(&n_head);
         let sig = key.sign(&msg).unwrap();
         let sig_new = sk_new.sign(&ttt::auth_message(&n_head)).unwrap();
-        let leaf = refute::refute_leaf_pair_gated(&t4, &t5, &key.public(), |bd| {
+        let leaf = rebut::rebut_leaf_pair_gated(&t4, &t5, &key.public(), |bd| {
             let bd = ttt::authorship_fragment(bd, l.file, l.new, &sk_new.public());
             let bd = ttt::authorship_fragment(bd, l.file, 0, &sk_prev.public());
             ttt::terminal_gate_fragment(bd, l.file, l.new)
         });
-        let res = lngap_script32::sim::run(leaf.as_script(), refute::refute_witness_pair(&sigs, &sigs, &sig, &[&sig_new, &sig_prev]));
+        let res = lngap_script32::sim::run(leaf.as_script(), rebut::rebut_witness_pair(&sigs, &sigs, &sig, &[&sig_new, &sig_prev]));
         assert_eq!(res.is_ok(), terminal, "the exhibit leaf must admit exactly the terminal state");
     }
 }

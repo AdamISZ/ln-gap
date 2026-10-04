@@ -1,9 +1,9 @@
 //! Contract programs for the fact-chain names registry.
 //!
 //! `nreg-fc:{params}` — bonded registration. Same state machine as `nreg`
-//! (Init → Claimed → Refuted → Reinstated) but the facts come from the fact
+//! (Init → Claimed → Rebutted → Reinstated) but the facts come from the fact
 //! chain. Stage 2: moves at depths 2 and 3 carry ClaimSpecs (the inclusion
-//! header chain, and the one-header-longer refutation chain); disputes run
+//! header chain, and the one-header-longer rebuttal chain); disputes run
 //! the on-chain bisection.
 //!
 //! `anchorpay-fc:{params}` — payment gated on fact-chain inclusion. Same as
@@ -43,7 +43,7 @@ pub struct NRegFc {
 pub enum NRegFcState {
     Init,
     Claimed,
-    Refuted,
+    Rebutted,
     Reinstated,
 }
 
@@ -84,22 +84,22 @@ impl Contract for NRegFc {
         match s {
             NRegFcState::Init => Some(Role::User),
             NRegFcState::Claimed => Some(Role::Hub),
-            NRegFcState::Refuted => Some(Role::User),
+            NRegFcState::Rebutted => Some(Role::User),
             NRegFcState::Reinstated => None,
         }
     }
     fn transition(&self, s: &NRegFcState, m: &bool, mover: Role) -> Result<NRegFcState, Invalid> {
         match (s, mover, m) {
             (NRegFcState::Init, Role::User, true) => Ok(NRegFcState::Claimed),
-            (NRegFcState::Claimed, Role::Hub, true) => Ok(NRegFcState::Refuted),
-            (NRegFcState::Refuted, Role::User, true) => Ok(NRegFcState::Reinstated),
+            (NRegFcState::Claimed, Role::Hub, true) => Ok(NRegFcState::Rebutted),
+            (NRegFcState::Rebutted, Role::User, true) => Ok(NRegFcState::Reinstated),
             _ => Err(Invalid("not this party's move".into())),
         }
     }
     fn resolution(&self, s: &NRegFcState) -> Outcome {
         let o = Contract::outcomes(self);
         match s {
-            NRegFcState::Init | NRegFcState::Refuted => o[Self::BOND_TO_HUB as usize].clone(),
+            NRegFcState::Init | NRegFcState::Rebutted => o[Self::BOND_TO_HUB as usize].clone(),
             NRegFcState::Claimed | NRegFcState::Reinstated => o[Self::BOND_TO_USER as usize].clone(),
         }
     }
@@ -107,7 +107,7 @@ impl Contract for NRegFc {
         match s {
             NRegFcState::Init => 3,
             NRegFcState::Claimed => 2,
-            NRegFcState::Refuted => 1,
+            NRegFcState::Rebutted => 1,
             NRegFcState::Reinstated => 0,
         }
     }
@@ -125,7 +125,7 @@ impl Contract for NRegFc {
         Ok(match bits_to_uint(b) {
             0 => NRegFcState::Init,
             1 => NRegFcState::Claimed,
-            2 => NRegFcState::Refuted,
+            2 => NRegFcState::Rebutted,
             _ => NRegFcState::Reinstated,
         })
     }
@@ -153,7 +153,7 @@ impl Contract for NRegFc {
     }
     /// Stage 2: return the ClaimSpec for the fact-chain header verification.
     /// State Claimed (1): hub proves inclusion via header chain.
-    /// State Refuted (2): user refutes with a heavier chain (n_headers + 1).
+    /// State Rebutted (2): user rebuts with a heavier chain (n_headers + 1).
     ///
     /// PoC: n_headers is fixed at 1 (the typical case: one block from
     /// checkpoint to confirmation). The full design would adapt the
@@ -168,19 +168,19 @@ impl Contract for NRegFc {
         };
         match bits_to_uint(from) + depth - 1 {
             1 => Some(shape.spec()),
-            2 => Some(shape.refutation().spec()),
+            2 => Some(shape.rebuttal().spec()),
             _ => None,
         }
     }
     fn claim_data(&self, from: &[bool], depth: u32) -> lngap_contract::claim::ClaimData {
         match bits_to_uint(from) + depth - 1 {
             1 => self.store.get(&format!("{}/incl", self.params.req_id)).unwrap_or_default(),
-            2 => self.store.get(&format!("{}/refute", self.params.req_id)).unwrap_or_default(),
+            2 => self.store.get(&format!("{}/rebut", self.params.req_id)).unwrap_or_default(),
             _ => vec![],
         }
     }
     fn disprove_leaves(&self, ctx: &LeafCtx) -> Vec<DisproveSpec> {
-        // Same as nreg: every move advances state by 1; code is BondToHub iff new state is Refuted (2)
+        // Same as nreg: every move advances state by 1; code is BondToHub iff new state is Rebutted (2)
         vec![
             LeafBuilder::new(ctx)
                 .prior_uint(0..2)
@@ -208,12 +208,12 @@ impl Contract for NRegFc {
         match s {
             NRegFcState::Init => "unclaimed".into(),
             NRegFcState::Claimed => "claimed (not included by h_max)".into(),
-            NRegFcState::Refuted => "hub proved inclusion".into(),
-            NRegFcState::Reinstated => "user refuted with heavier chain".into(),
+            NRegFcState::Rebutted => "hub proved inclusion".into(),
+            NRegFcState::Reinstated => "user rebutted with heavier chain".into(),
         }
     }
     fn describe_move(&self, _m: &bool) -> String {
-        format!("claim request {} / prove inclusion / refute chain", self.params.req_id)
+        format!("claim request {} / prove inclusion / rebut chain", self.params.req_id)
     }
 }
 
@@ -237,7 +237,7 @@ pub struct AnchorPayFc {
 pub enum PayFcState {
     Init,
     Paid,
-    Refuted,
+    Rebutted,
 }
 
 impl AnchorPayFc {
@@ -284,13 +284,13 @@ impl Contract for AnchorPayFc {
         match s {
             PayFcState::Init => Some(self.params.prover),
             PayFcState::Paid => Some(self.params.prover.other()),
-            PayFcState::Refuted => None,
+            PayFcState::Rebutted => None,
         }
     }
     fn transition(&self, s: &PayFcState, m: &bool, mover: Role) -> Result<PayFcState, Invalid> {
         match (s, m) {
             (PayFcState::Init, true) if mover == self.params.prover => Ok(PayFcState::Paid),
-            (PayFcState::Paid, true) if mover != self.params.prover => Ok(PayFcState::Refuted),
+            (PayFcState::Paid, true) if mover != self.params.prover => Ok(PayFcState::Rebutted),
             _ => Err(Invalid("not this party's move".into())),
         }
     }
@@ -305,7 +305,7 @@ impl Contract for AnchorPayFc {
         match s {
             PayFcState::Init => 2,
             PayFcState::Paid => 1,
-            PayFcState::Refuted => 0,
+            PayFcState::Rebutted => 0,
         }
     }
     fn n_state_bits(&self) -> usize {
@@ -322,7 +322,7 @@ impl Contract for AnchorPayFc {
         Ok(match bits_to_uint(b) {
             0 => PayFcState::Init,
             1 => PayFcState::Paid,
-            2 => PayFcState::Refuted,
+            2 => PayFcState::Rebutted,
             x => anyhow::bail!("bad state {x}"),
         })
     }
@@ -367,7 +367,7 @@ impl Contract for AnchorPayFc {
         format!("{s:?}")
     }
     fn describe_move(&self, _m: &bool) -> String {
-        "prove inclusion on fact chain / refute chain".into()
+        "prove inclusion on fact chain / rebut chain".into()
     }
 }
 

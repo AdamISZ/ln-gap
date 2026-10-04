@@ -38,7 +38,7 @@ use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::{WotsParams, WotsPublic, WotsSig};
 use lngap_pos::graph::{not_timely_witness, proposer_witness};
 use lngap_pos::instance::{self, GameClock, PosInstance};
-use lngap_pos::refute::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
+use lngap_pos::rebut::{self, HEAD_CHUNK_START, HEAD_CHUNKS};
 use lngap_pos::ttt;
 use lngap_pos::{Member, PosClient, PosMiner, Registry, SealedBlock};
 use lngap_tictactoe::{Board, TicTacToe, OPEN};
@@ -54,9 +54,9 @@ const MAX_DEPTH: u32 = 9;
 const ELL: u32 = 60;
 const MARGIN: u32 = 60;
 const POT: u64 = 200_000;
-/// The skeleton count at open: settle + 9x(claim, refute, 3+3 splits) +
+/// The skeleton count at open: settle + 9x(claim, rebut, 3+3 splits) +
 /// 5x(exhibit, 3 splits) + 9 per-depth equiv leaves (D43) + 8x(counter,
-/// refute, 3+3 splits) (D44).
+/// rebut, 3+3 splits) (D44).
 const GRAPH_LEN: usize = 166;
 /// The state key's reveal length (the tied-WOTS authorship: 6 message + 2
 /// checksum digits over the 3 state bytes).
@@ -127,7 +127,7 @@ struct PosGame {
     registry: Registry,
     miner: PosMiner,
     client: PosClient,
-    /// The seal the refutations read, by depth.
+    /// The seal the rebuttals read, by depth.
     sealed: HashMap<u32, SealedBlock>,
     /// Anyone's native check of a depth-`d` entry's signature: the mover's
     /// state key (in a deployment these ride the draft's public offers).
@@ -213,7 +213,7 @@ impl PosGame {
         let (c_op, c_prev) = g.rt.fund(&tree.script_pubkey(), g.inst.value)?;
         ensure!(g.rt.height()? == btc_open, "the funding mined exactly one block");
         g.graph = g.inst.graph(&ctx, c_op, &c_prev)?;
-        ensure!(g.graph.len() == GRAPH_LEN, "the wired graph: settle + 9x(claim, refute, 3+3 splits) + 5x(exhibit, 3 splits) + 9 per-depth equiv (D43) + 8x(counter, refute, 3+3 splits) (D44)");
+        ensure!(g.graph.len() == GRAPH_LEN, "the wired graph: settle + 9x(claim, rebut, 3+3 splits) + 5x(exhibit, 3 splits) + 9 per-depth equiv (D43) + 8x(counter, rebut, 3+3 splits) (D44)");
         if g.inst.deposit > Amount::ZERO {
             g.say(format!("each side's dispute deposit: {} sat inside the contract (D56): returned by cooperative settlement, paid to the winner of an on-chain dispute", g.inst.deposit.to_sat()));
         }
@@ -289,7 +289,7 @@ impl PosGame {
         }
         let block = self.miner.seal_entry(CONTRACT_ID, d, sealer, &entry.encode()).map_err(|e| anyhow::anyhow!(e))?;
         self.client.verify_and_append(&block, &self.registry).map_err(|e| anyhow::anyhow!(e))?;
-        ensure!(refute::check_entry_sig(&self.venue_commits[&d], &entry_msg(entry.state), &entry.sigs), "depth {d}: the entry does not open the mover's state key");
+        ensure!(rebut::check_entry_sig(&self.venue_commits[&d], &entry_msg(entry.state), &entry.sigs), "depth {d}: the entry does not open the mover's state key");
         self.sealed.insert(d, block);
         if valid {
             self.board = new;
@@ -408,7 +408,7 @@ impl PosGame {
     /// (D50's late-attestation fixture under D55): the entry is validly
     /// signed, so the seal itself is unremarkable — there is no on-time
     /// block to contradict — and the flags are what the contract counts.
-    /// The mover's refutation reads it and names member 1 in its witness.
+    /// The mover's rebuttal reads it and names member 1 in its witness.
     fn play_late(&mut self, d: u32, mv: u8) -> Result<(Board, WotsSig)> {
         ensure!(d == self.depth + 1 && self.now > self.inst.due(d) && self.flags.contains_key(&d), "move {d}'s due time has passed and it was flagged");
         let mover = instance::mover_at(d);
@@ -508,7 +508,7 @@ impl PosGame {
         self.run(&format!("absent_{d}"), vec![sig_h, sig_u], claimant)
     }
 
-    /// The pair-readout witness of a refute/exhibit at depth `d`, with the
+    /// The pair-readout witness of a rebut/exhibit at depth `d`, with the
     /// pair reveal (needed again by the disprove/split witnesses). With
     /// `junk` set, the authorship blocks carry the entry's own garbage
     /// preimages instead of the movers' reveals (the PS9 negative).
@@ -521,20 +521,20 @@ impl PosGame {
         let mut msg = prev_head.to_vec();
         msg.extend_from_slice(&new_head);
         let mover = instance::mover_at(d);
-        let pair_sig = self.ks(mover).sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let pair_sig = self.ks(mover).sign_wots(&instance::rebut_label(CONTRACT_ID, 1, d), &msg).map_err(|e| anyhow::anyhow!("{e}"))?;
         let mk_junk = |head: &[u8; 48]| WotsSig::from_hashes(WotsParams::for_bytes(3), &ttt::auth_message(head), vec![[0x11; 20]; STATE_DIGITS]).unwrap();
         let (prev_r, new_r) = if junk { (mk_junk(&prev_head), mk_junk(&new_head)) } else { (self.auth_sig(d - 1, &prev_head), self.auth_sig(d, &new_head)) };
         let sign_at = |block: &SealedBlock| -> Vec<Vec<u8>> {
             (0..HEAD_CHUNKS).map(|j| sign_tx(&Keypair::from_secret_key(SECP256K1, &block.attestation.secrets[HEAD_CHUNK_START + j]), &tx, &prev, &leaf)).collect()
         };
         let sigs_new = sign_at(&self.sealed[&d]);
-        // the exhibit still reads both heads out; a refutation reads the new
+        // the exhibit still reads both heads out; a rebuttal reads the new
         // head alone, the prior bound by the claimant's signature
         let mut w = if label.starts_with("exhibit") {
             let sigs_prev = sign_at(&self.sealed[&(d - 1)]);
-            refute::refute_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r, &prev_r])
+            rebut::rebut_witness_pair(&sigs_prev, &sigs_new, &pair_sig, &[&new_r, &prev_r])
         } else {
-            refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&new_r, &prev_r])
+            rebut::rebut_witness_pair_signed(&sigs_new, &pair_sig, [&new_r, &prev_r])
         };
         // the proposer fragment (D53): the block's proposer scalar signs too, naming the member
         let blk = &self.sealed[&d];
@@ -542,12 +542,12 @@ impl PosGame {
         Ok((w, pair_sig))
     }
 
-    /// The depth-`d` refutation carrying the entry's own junk preimages —
+    /// The depth-`d` rebuttal carrying the entry's own junk preimages —
     /// the PS9 negative, assembled but never broadcast.
-    fn refute_junk(&mut self, d: u32) -> Result<Transaction> {
-        let label = format!("absent_{d}/refute");
+    fn rebut_junk(&mut self, d: u32) -> Result<Transaction> {
+        let label = format!("absent_{d}/rebut");
         let (mut w, _psig) = self.readout_witness(&label, d, true)?;
-        // the refutation is 2-of-2: the pre-signed skeleton, both signatures
+        // the rebuttal is 2-of-2: the pre-signed skeleton, both signatures
         let [sig_h, sig_u] = self.sigs22(&label);
         w.push(sig_h);
         w.push(sig_u);
@@ -566,23 +566,23 @@ impl PosGame {
         self.run(&label, vec![sig_h, sig_u], by)
     }
 
-    /// The mover's refutation at depth `d`: the readout parks the attested
-    /// pair. Returns the pair reveal and the refuted output.
-    fn refute(&mut self, d: u32) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
-        self.refute_under(d, &format!("absent_{d}"))
+    /// The mover's rebuttal at depth `d`: the readout parks the attested
+    /// pair. Returns the pair reveal and the rebuttal output.
+    fn rebut(&mut self, d: u32) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
+        self.rebut_under(d, &format!("absent_{d}"))
     }
 
-    /// As [`PosGame::refute`] under the claim-shaped output `base`
+    /// As [`PosGame::rebut`] under the claim-shaped output `base`
     /// (`absent_{d}`, or `absent_{d+1}/counter` — D44).
-    fn refute_under(&mut self, d: u32, base: &str) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
+    fn rebut_under(&mut self, d: u32, base: &str) -> Result<(WotsSig, u32, OutPoint, TxOut)> {
         let mover = instance::mover_at(d);
-        let label = format!("{base}/refute");
+        let label = format!("{base}/rebut");
         let (mut w, pair_sig) = self.readout_witness(&label, d, false)?;
-        // the refutation is 2-of-2: the pre-signed skeleton, both signatures
+        // the rebuttal is 2-of-2: the pre-signed skeleton, both signatures
         let [sig_h, sig_u] = self.sigs22(&label);
         w.push(sig_h);
         w.push(sig_u);
-        self.say(format!("{mover} refutes: the venue attested moves {} and {d}", d - 1));
+        self.say(format!("{mover} rebuts: the venue attested moves {} and {d}", d - 1));
         let (h, op, prev) = self.run(&label, w, mover)?;
         Ok((pair_sig, h, op, prev))
     }
@@ -607,28 +607,28 @@ impl PosGame {
         let l = self.inst.layout(d);
         let prior = self.head(d - 1);
         let new = self.head(d);
-        ttt::disprove_leaves(&l, &self.inst.depth_keys(d).refute)
+        ttt::disprove_leaves(&l, &self.inst.depth_keys(d).rebut)
             .into_iter()
             .filter(|pl| (pl.fires)(&prior, &new))
             .map(|pl| pl.name)
             .collect()
     }
 
-    /// The claimant's disprove off the refuted/exhibit output (a runtime
-    /// transaction: the witness copies the pair reveal from the refutation's
+    /// The claimant's disprove off the rebuttal/exhibit output (a runtime
+    /// transaction: the witness copies the pair reveal from the rebuttal's
     /// published witness).
     fn disprove(&mut self, d: u32, pair_sig: &WotsSig, p_op: OutPoint, p_prev: &TxOut, prefer: &str) -> Result<()> {
         let firing = self.disproves_firing(d);
         ensure!(!firing.is_empty(), "some disprove must fire");
         let name = if firing.iter().any(|n| n == prefer) { prefer.to_string() } else { firing[0].clone() };
         let ctx = self.ctx();
-        let p_tree = self.inst.refuted_tree(&ctx, d)?;
+        let p_tree = self.inst.rebuttal_tree(&ctx, d)?;
         let l = p_tree.leaf(&format!("disprove_{name}"))?;
         let challenger = instance::mover_at(d).other();
         let payout = self.pubs[challenger.idx()].payout_spk.clone();
         let mut tx = lngap_btc::tx::build_spend(p_op, &l.timelock, vec![TxOut { value: p_prev.value - self.params.presign_fee, script_pubkey: payout }]);
         let dsig = sign_tx(self.payment(challenger), &tx, p_prev, &l.script);
-        let mut w = refute::wots_wire(pair_sig);
+        let mut w = rebut::wots_wire(pair_sig);
         w.push(dsig);
         tx.input[0].witness = tapscript_witness(&w, &l.script, &p_tree.control_block(&format!("disprove_{name}"))?);
         self.say(format!("{challenger} disproves the parked tuple: {name} fires"));
@@ -636,14 +636,14 @@ impl PosGame {
         Ok(())
     }
 
-    /// The claimant's `not_timely` spend off the refuted output (D50): its
+    /// The claimant's `not_timely` spend off the rebuttal output (D50): its
     /// own transaction, signed under every flag point whose scalar the
     /// members published for depth `d` (the first `held` of them, if given);
     /// the leaf counts them against the threshold. With `broadcast` false
     /// the transaction is only assembled (negatives).
     fn not_timely(&mut self, d: u32, p_op: OutPoint, p_prev: &TxOut, held: Option<usize>, broadcast: bool) -> Result<Option<Transaction>> {
         let ctx = self.ctx();
-        let p_tree = self.inst.refuted_tree(&ctx, d)?;
+        let p_tree = self.inst.rebuttal_tree(&ctx, d)?;
         let l = p_tree.leaf("not_timely")?;
         let claimant = instance::mover_at(d).other();
         let payout = self.pubs[claimant.idx()].payout_spk.clone();
@@ -667,13 +667,13 @@ impl PosGame {
         if !broadcast {
             return Ok(Some(tx));
         }
-        self.say(format!("{claimant} disproves the refutation as NOT TIMELY: {held} of {K} members flagged move {d} as not attested by its due time (threshold {T})"));
+        self.say(format!("{claimant} disproves the rebuttal as NOT TIMELY: {held} of {K} members flagged move {d} as not attested by its due time (threshold {T})"));
         self.run_tx("not_timely", tx, claimant)?;
         Ok(None)
     }
 
     /// A code-gated split spend. `base` is `absent_{d}` (the claimant's
-    /// timeout split) or `absent_{d}/refuted` / `exhibit_{d}` (the mover's
+    /// timeout split) or `absent_{d}/rebuttal` / `exhibit_{d}` (the mover's
     /// self-checking split).
     fn split(&mut self, d: u32, base: &str, code: u8, pair_sig: Option<&WotsSig>) -> Result<()> {
         let name = match code {
@@ -683,7 +683,7 @@ impl PosGame {
         };
         let label = format!("{base}/split_{name}");
         match pair_sig {
-            // the mover's self-checking split off the refuted/exhibit output
+            // the mover's self-checking split off the rebuttal/exhibit output
             Some(psig) => {
                 let mover = instance::mover_at(d);
                 let reveal = self.ks(mover).reveal_uint(&instance::code_label(CONTRACT_ID, 1, d), u32::from(code))?;
@@ -716,8 +716,8 @@ impl PosGame {
         let [sig_h, sig_u] = self.sigs22(&label);
         let exhibitor = instance::mover_at(d).other();
         self.say(format!("{exhibitor} exhibits the two conflicting state signatures at depth {d}"));
-        let mut w = refute::wots_wire(sig_a);
-        w.extend(refute::wots_wire(sig_b));
+        let mut w = rebut::wots_wire(sig_a);
+        w.extend(rebut::wots_wire(sig_b));
         w.push(sig_h);
         w.push(sig_u);
         self.run(&label, w, exhibitor)?;
@@ -821,18 +821,18 @@ pub const PS4: Scenario = Scenario {
 pub const PS5: Scenario = Scenario {
     id: "PS5",
     title: "PoS graph: a spurious absence claim forfeits the claimant",
-    expected: "the hub's move 2 is on the venue; the user claims absence anyway; the hub's refutation parks the legal pair, no disprove fires, and the mover's self-checking split pays HubWins (R of an open state forfeits the claimant): three transactions",
+    expected: "the hub's move 2 is on the venue; the user claims absence anyway; the hub's rebuttal parks the legal pair, no disprove fires, and the mover's self-checking split pays HubWins (R of an open state forfeits the claimant): three transactions",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?; // X@4
         g.play(1)?; // O@1 — the hub DID publish move 2
         g.wait_claim(2)?;
         g.claim_absent(2)?; // the user's spurious claim
-        let (psig, h, _, _) = g.refute(2)?;
+        let (psig, h, _, _) = g.rebut(2)?;
         ensure!(g.disproves_firing(2).is_empty(), "the parked move is legal");
         g.wait_to(h + u32::from(g.params.delta) + u32::from(g.params.delta_prime) + 1)?;
-        g.split(2, "absent_2/refuted", 1, Some(&psig))?; // R(open) = the claimant forfeits
-        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "absent_2/refuted/split_HubWins".to_string()], "{:?}", roles(&g));
+        g.split(2, "absent_2/rebuttal", 1, Some(&psig))?; // R(open) = the claimant forfeits
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/rebut".to_string(), "absent_2/rebuttal/split_HubWins".to_string()], "{:?}", roles(&g));
         ensure!(g.balances() == [sat(0), sat(POT - 3_000)], "{:?}", g.balances());
         Ok(report(&g, &PS5))
     },
@@ -840,20 +840,20 @@ pub const PS5: Scenario = Scenario {
 
 pub const PS6A: Scenario = Scenario {
     id: "PS6A",
-    title: "PoS graph: an illegal move is disproved off the refutation",
-    expected: "the hub plays an occupied cell at move 2 (attested, not legal); the user's absence claim is refuted, and the disprove of the parked pair fires cell_occupied_4: three transactions",
+    title: "PoS graph: an illegal move is disproved off the rebuttal",
+    expected: "the hub plays an occupied cell at move 2 (attested, not legal); the user's absence claim is rebutted, and the disprove of the parked pair fires cell_occupied_4: three transactions",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?; // X@4
         g.play_invalid(4)?; // the hub claims O onto X's cell
         g.wait_claim(2)?;
         g.claim_absent(2)?;
-        let (psig, h, p_op, p_prev) = g.refute(2)?;
+        let (psig, h, p_op, p_prev) = g.rebut(2)?;
         let firing = g.disproves_firing(2);
         ensure!(firing.iter().any(|n| n == "cell_occupied_4"), "{firing:?}");
         g.wait_to(h + u32::from(g.params.delta) + 1)?;
         g.disprove(2, &psig, p_op, &p_prev, "cell_occupied_4")?;
-        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "disprove_cell_occupied_4".to_string()], "{:?}", roles(&g));
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/rebut".to_string(), "disprove_cell_occupied_4".to_string()], "{:?}", roles(&g));
         ensure!(g.balances() == [sat(POT - 3_000), sat(0)], "{:?}", g.balances());
         Ok(report(&g, &PS6A))
     },
@@ -934,16 +934,16 @@ pub const PS8: Scenario = Scenario {
 pub const PS9: Scenario = Scenario {
     id: "PS9",
     title: "PoS graph: a garbage-signed attested entry is not a move (D41)",
-    expected: "a legal-looking depth-2 entry whose preimages open no key is refused by the honest members (D55) and sealed by a rogue member (provable misbehaviour); the hub declines to adopt it (its state key never signed that state); a refutation carrying the entry's own junk preimages fails the authorship fragment; the absence claim and the timeout split pay the user",
+    expected: "a legal-looking depth-2 entry whose preimages open no key is refused by the honest members (D55) and sealed by a rogue member (provable misbehaviour); the hub declines to adopt it (its state key never signed that state); a rebuttal carrying the entry's own junk preimages fails the authorship fragment; the absence claim and the timeout split pay the user",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?; // X@4, really signed
         g.play_garbage_signed(0)?; // depth 2: O@0 claimed, junk signature, a rogue seal
         g.wait_claim(2)?;
         let (h, _, _) = g.claim_absent(2)?;
-        let bad = g.refute_junk(2)?;
+        let bad = g.rebut_junk(2)?;
         ensure!(g.rt.test_accept(&bad).is_err(), "junk preimages must fail the authorship fragment");
-        g.say("the hub declines to adopt the junk entry (adopting would be its move); no refutation exists — the absence claim resolves".to_string());
+        g.say("the hub declines to adopt the junk entry (adopting would be its move); no rebuttal exists — the absence claim resolves".to_string());
         g.wait_to(h + u32::from(g.params.delta) + 1)?;
         g.split(2, "absent_2", 0, None)?;
         ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/split_UserWins".to_string()], "{:?}", roles(&g));
@@ -955,7 +955,7 @@ pub const PS9: Scenario = Scenario {
 pub const PS10: Scenario = Scenario {
     id: "PS10",
     title: "PoS graph: the staller claims one depth AHEAD — countered (D44)",
-    expected: "the hub stalls at move 2, then claims absence at 3 ('the user did not move at 3' — vacuously true, the user's turn never came); the user's counter ('you did not move at 2') has no defence — nothing is attested at depth 2, so no refutation exists — and the user's timeout split off the counter output pays: three transactions",
+    expected: "the hub stalls at move 2, then claims absence at 3 ('the user did not move at 3' — vacuously true, the user's turn never came); the user's counter ('you did not move at 2') has no defence — nothing is attested at depth 2, so no rebuttal exists — and the user's timeout split off the counter output pays: three transactions",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?;
@@ -974,8 +974,8 @@ pub const PS10: Scenario = Scenario {
 
 pub const PS11: Scenario = Scenario {
     id: "PS11",
-    title: "PoS graph: a false counter to a due claim is refuted (D44)",
-    expected: "the hub's move 2 is on the venue; the user stalls at 3; the hub's absence claim at 3 is due; the user counters anyway ('you did not move at 2' — false); the hub refutes on the counter output with the (1, 2) pair readout, no disprove fires, and the hub's self-checking split pays R(parked) = HubWins: four transactions",
+    title: "PoS graph: a false counter to a due claim is rebutted (D44)",
+    expected: "the hub's move 2 is on the venue; the user stalls at 3; the hub's absence claim at 3 is due; the user counters anyway ('you did not move at 2' — false); the hub rebuts on the counter output with the (1, 2) pair readout, no disprove fires, and the hub's self-checking split pays R(parked) = HubWins: four transactions",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?;
@@ -984,11 +984,11 @@ pub const PS11: Scenario = Scenario {
         g.wait_claim(3)?;
         g.claim_absent(3)?; // due
         g.counter(3)?; // the user's false counter
-        let (psig, h, _, _) = g.refute_under(2, "absent_3/counter")?;
+        let (psig, h, _, _) = g.rebut_under(2, "absent_3/counter")?;
         ensure!(g.disproves_firing(2).is_empty(), "the parked move is legal");
         g.wait_to(h + u32::from(g.params.delta) + u32::from(g.params.delta_prime) + 1)?;
-        g.split(2, "absent_3/counter/refuted", 1, Some(&psig))?; // R: the user on turn forfeits -> HubWins
-        ensure!(roles(&g) == vec!["absent_3".to_string(), "absent_3/counter".to_string(), "absent_3/counter/refute".to_string(), "absent_3/counter/refuted/split_HubWins".to_string()], "{:?}", roles(&g));
+        g.split(2, "absent_3/counter/rebuttal", 1, Some(&psig))?; // R: the user on turn forfeits -> HubWins
+        ensure!(roles(&g) == vec!["absent_3".to_string(), "absent_3/counter".to_string(), "absent_3/counter/rebut".to_string(), "absent_3/counter/rebuttal/split_HubWins".to_string()], "{:?}", roles(&g));
         ensure!(g.balances() == [sat(0), sat(POT - 4_000)], "{:?}", g.balances());
         Ok(report(&g, &PS11))
     },
@@ -997,7 +997,7 @@ pub const PS11: Scenario = Scenario {
 pub const PS12: Scenario = Scenario {
     id: "PS12",
     title: "PoS graph: a LATE attestation is killed by the timeliness flags (D50)",
-    expected: "the hub does not move 2 (nothing sealed on time); at the due time the members publish their flag scalars; the hub's member, colluding, then seals the hub's signed O@1 late (nothing contradicts it on the venue); the user claims absence, the hub refutes with the late block (the readout passes, the move is legal, no tuple disprove fires), and the user's not_timely spend — its own transaction signed under 3 of the 5 members' flag points (the majority) — takes the pot; with 2 flags the leaf rejects it: three transactions",
+    expected: "the hub does not move 2 (nothing sealed on time); at the due time the members publish their flag scalars; the hub's member, colluding, then seals the hub's signed O@1 late (nothing contradicts it on the venue); the user claims absence, the hub rebuts with the late block (the readout passes, the move is legal, no tuple disprove fires), and the user's not_timely spend — its own transaction signed under 3 of the 5 members' flag points (the majority) — takes the pot; with 2 flags the leaf rejects it: three transactions",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?; // X@4
@@ -1005,16 +1005,16 @@ pub const PS12: Scenario = Scenario {
         g.play_late(2, 1)?; // ...the proposer seals the hub's O@1 late anyway
         g.wait_claim(2)?;
         g.claim_absent(2)?;
-        let (_psig, h, p_op, p_prev) = g.refute(2)?;
+        let (_psig, h, p_op, p_prev) = g.rebut(2)?;
         ensure!(g.disproves_firing(2).is_empty(), "the late move is legal: no tuple disprove fires");
         g.wait_to(h + u32::from(g.params.delta) + 1)?;
         // two flags do not reach the threshold
         let short = g.not_timely(2, p_op, &p_prev, Some(2), false)?.expect("assembled");
         ensure!(g.rt.test_accept(&short).is_err(), "not_timely must not fire under the threshold");
         g.say("the user's not_timely with 2 of 5 flags: rejected in-leaf (threshold 3), never confirmed".to_string());
-        // a third member's flag: the refutation dies
+        // a third member's flag: the rebuttal dies
         g.not_timely(2, p_op, &p_prev, Some(3), true)?;
-        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "not_timely".to_string()], "{:?}", roles(&g));
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/rebut".to_string(), "not_timely".to_string()], "{:?}", roles(&g));
         ensure!(g.balances() == [sat(POT - 3_000), sat(0)], "{:?}", g.balances());
         Ok(report(&g, &PS12))
     },
@@ -1023,7 +1023,7 @@ pub const PS12: Scenario = Scenario {
 pub const PS13: Scenario = Scenario {
     id: "PS13",
     title: "PoS graph: a silent designated sealer does not stall the mover — the next member in the rotation seals (D53, D55)",
-    expected: "the designated sealer for depth 2 (the rotation) is silent; after the backoff the hub resubmits its O@1 to the next member in the rotation, which seals it; the user's spurious absence claim is refuted with that seal — the refutation's witness names its member through the proposer fragment — no disprove fires, and the hub's self-checking split pays HubWins: three transactions; the silent member cost nothing",
+    expected: "the designated sealer for depth 2 (the rotation) is silent; after the backoff the hub resubmits its O@1 to the next member in the rotation, which seals it; the user's spurious absence claim is rebutted with that seal — the rebuttal's witness names its member through the proposer fragment — no disprove fires, and the hub's self-checking split pays HubWins: three transactions; the silent member cost nothing",
     run: || {
         let mut g = PosGame::open(sat(POT))?;
         g.play(4)?; // X@4
@@ -1033,11 +1033,11 @@ pub const PS13: Scenario = Scenario {
         ensure!(g.sealed[&2].proposer == (designated + 1) % K, "the mover fell back to the next member in the rotation");
         g.wait_claim(2)?;
         g.claim_absent(2)?; // the user's spurious claim
-        let (psig, h, _, _) = g.refute(2)?;
+        let (psig, h, _, _) = g.rebut(2)?;
         ensure!(g.disproves_firing(2).is_empty(), "the parked move is legal");
         g.wait_to(h + u32::from(g.params.delta) + u32::from(g.params.delta_prime) + 1)?;
-        g.split(2, "absent_2/refuted", 1, Some(&psig))?;
-        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "absent_2/refuted/split_HubWins".to_string()], "{:?}", roles(&g));
+        g.split(2, "absent_2/rebuttal", 1, Some(&psig))?;
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/rebut".to_string(), "absent_2/rebuttal/split_HubWins".to_string()], "{:?}", roles(&g));
         ensure!(g.balances() == [sat(0), sat(POT - 3_000)], "{:?}", g.balances());
         Ok(report(&g, &PS13))
     },
@@ -1045,13 +1045,13 @@ pub const PS13: Scenario = Scenario {
 
 /// Each side's dispute deposit in PS14/PS15: it covers the most expensive
 /// path an honest party can be forced into at the scenarios' fixed fee
-/// (claim or counter, refutation, split: 3,000 sat), with room to spare.
+/// (claim or counter, rebuttal, split: 3,000 sat), with room to spare.
 const DEPOSIT: u64 = 10_000;
 
 pub const PS14: Scenario = Scenario {
     id: "PS14",
     title: "PoS graph: a spurious claim with dispute deposits — the loser pays (D56)",
-    expected: "each side has a 10,000 sat dispute deposit inside the contract; the hub's move 2 is on the venue; the user claims absence anyway; the hub refutes and its self-checking split pays it the whole output: both stakes, both deposits, less the three hops' fees — the user's deposit covers the fees, so the honest mover nets its stake, the user's stake and its own deposit back with 7,000 sat to spare; settle, the no-dispute fallback, would have returned each deposit: three transactions",
+    expected: "each side has a 10,000 sat dispute deposit inside the contract; the hub's move 2 is on the venue; the user claims absence anyway; the hub rebuts and its self-checking split pays it the whole output: both stakes, both deposits, less the three hops' fees — the user's deposit covers the fees, so the honest mover nets its stake, the user's stake and its own deposit back with 7,000 sat to spare; settle, the no-dispute fallback, would have returned each deposit: three transactions",
     run: || {
         let mut g = PosGame::open_with_deposit(sat(POT), sat(DEPOSIT))?;
         // settle returns each deposit to its owner (nobody disputed)
@@ -1061,11 +1061,11 @@ pub const PS14: Scenario = Scenario {
         g.play(1)?; // O@1 — the hub DID publish move 2
         g.wait_claim(2)?;
         g.claim_absent(2)?; // the user's spurious claim
-        let (psig, h, _, _) = g.refute(2)?;
+        let (psig, h, _, _) = g.rebut(2)?;
         ensure!(g.disproves_firing(2).is_empty(), "the parked move is legal");
         g.wait_to(h + u32::from(g.params.delta) + u32::from(g.params.delta_prime) + 1)?;
-        g.split(2, "absent_2/refuted", 1, Some(&psig))?;
-        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/refute".to_string(), "absent_2/refuted/split_HubWins".to_string()], "{:?}", roles(&g));
+        g.split(2, "absent_2/rebuttal", 1, Some(&psig))?;
+        ensure!(roles(&g) == vec!["absent_2".to_string(), "absent_2/rebut".to_string(), "absent_2/rebuttal/split_HubWins".to_string()], "{:?}", roles(&g));
         let fees = 3_000;
         ensure!(g.balances() == [sat(0), sat(POT + 2 * DEPOSIT - fees)], "{:?}", g.balances());
         ensure!(POT + 2 * DEPOSIT - fees >= POT + DEPOSIT, "the honest mover is made whole: stakes and its own deposit, the fees paid from the user's");

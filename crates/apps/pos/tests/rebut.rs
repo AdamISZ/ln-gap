@@ -1,6 +1,6 @@
-//! The refutation flow as real tapscript spends on regtest (plan step 3):
+//! The rebuttal flow as real tapscript spends on regtest (plan step 3):
 //! a venue block carrying a move is sealed under the PoS attestation; the
-//! refutation spend reads the move's head out of the attestation and ties it
+//! rebuttal spend reads the move's head out of the attestation and ties it
 //! to the mover's WOTS re-commitment; the follow-on disprove spend consumes
 //! the parked tuple. Prints script/witness/vsize measurements.
 
@@ -14,8 +14,8 @@ use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_ec_wots::EpochTable;
 use lngap_factchain::slot::SlotEntry;
-use lngap_pos::refute::{
-    disprove_witness, refute_key, refute_leaf, refute_witness, HEAD_CHUNK_START, HEAD_CHUNKS,
+use lngap_pos::rebut::{
+    disprove_witness, rebut_key, rebut_leaf, rebut_witness, HEAD_CHUNK_START, HEAD_CHUNKS,
 };
 use lngap_pos::{PosMiner, SealedBlock};
 
@@ -30,7 +30,7 @@ fn state_key() -> lngap_lamport::winternitz::WotsSecret {
 }
 
 /// The state-key signature over the head's signed region (the authorship
-/// block for a refute of `head`).
+/// block for a rebut of `head`).
 fn state_sig(head: &[u8; 48]) -> lngap_lamport::winternitz::WotsSig {
     state_key().sign(&lngap_pos::ttt::auth_message(head)).unwrap()
 }
@@ -84,16 +84,16 @@ fn sign_chunk(secret: &SecretKey, tx: &Transaction, prev: &TxOut, leaf: &ScriptB
 }
 
 #[test]
-fn refute_and_disprove_on_regtest() {
+fn rebut_and_disprove_on_regtest() {
     let rt = Regtest::start().unwrap();
     let (block, table) = sealed_move(9); // the venue attests an ILLEGAL move
     let head = block.header.head();
 
-    let key = refute_key([9u8; 32]);
+    let key = rebut_key([9u8; 32]);
     let commit_sig = key.sign(&head).unwrap();
     assert_eq!(key.public().verify(&commit_sig).unwrap(), head.to_vec());
 
-    // the trees: the refutation spends into the disprove output (the park);
+    // the trees: the rebuttal spends into the disprove output (the park);
     // the disprove leaf is the ttt family's out-of-range check (depth 1)
     let dis_leaf = {
         let l = lngap_pos::ttt::Layout::at(1, 1, lngap_channel::Role::User);
@@ -104,10 +104,10 @@ fn refute_and_disprove_on_regtest() {
             .script
     };
     let dis_tree = TapTree::new(vec![Leaf::new("d", dis_leaf.clone(), Timelock::NONE)]).unwrap();
-    let ref_leaf = refute_leaf(&table, &key.public(), |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key().public()));
+    let ref_leaf = rebut_leaf(&table, &key.public(), |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key().public()));
     let funded = fund(&rt, ref_leaf.clone(), "r");
 
-    // ---- the refutation spend ----
+    // ---- the rebuttal spend ----
     let mut rtx = build_spend(
         funded.op,
         &Timelock::NONE,
@@ -119,14 +119,14 @@ fn refute_and_disprove_on_regtest() {
     let head_sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS)
         .map(|j| sign_chunk(&block.attestation.secrets[HEAD_CHUNK_START + j], &rtx, &funded.prev, &ref_leaf))
         .collect();
-    let args = refute_witness(&head_sigs, &commit_sig, &state_sig(&head));
+    let args = rebut_witness(&head_sigs, &commit_sig, &state_sig(&head));
     let arg_bytes: usize = args.iter().map(|a| a.len()).sum();
     rtx.input[0].witness = tapscript_witness(&args, &ref_leaf, &funded.tree.control_block("r").unwrap());
     let h = rt
         .mine_with(&[rtx.clone()])
-        .unwrap_or_else(|e| panic!("the honest refutation must mine: {e}"));
+        .unwrap_or_else(|e| panic!("the honest rebuttal must mine: {e}"));
     println!(
-        "REGTEST refutation: leaf {} B, witness args {arg_bytes} B, spend {} vB (mined at {h})",
+        "REGTEST rebuttal: leaf {} B, witness args {arg_bytes} B, spend {} vB (mined at {h})",
         ref_leaf.len(),
         rtx.vsize()
     );
@@ -135,10 +135,10 @@ fn refute_and_disprove_on_regtest() {
     let budget = 50 + witness_bytes;
     let spent = 50 * HEAD_CHUNKS as u64;
     assert!(budget >= spent, "sigops budget must cover the chunk CHECKSIGs");
-    println!("REGTEST refutation sigops: budget {budget}, spent {spent}");
+    println!("REGTEST rebuttal sigops: budget {budget}, spent {spent}");
 
     // ---- negative: a legal move cannot be disproved (checked first,
-    // while the refutation output is still unspent) ----
+    // while the rebuttal output is still unspent) ----
     let ref_op = OutPoint {
         txid: rtx.compute_txid(),
         vout: 0,
@@ -184,13 +184,13 @@ fn refute_and_disprove_on_regtest() {
         dtx.vsize()
     );
 
-    // ---- negative (D41): a refutation carrying a signature that does not
+    // ---- negative (D41): a rebuttal carrying a signature that does not
     // open the mover's state key (the garbage-signed entry's own sigs
     // region) fails the authorship fragment, whatever the re-commitment ----
     let (block_j, table_j) = sealed_move(5);
     let head_j = block_j.header.head();
     let sig_j = key.sign(&head_j).unwrap();
-    let ref_leaf_j = refute_leaf(&table_j, &key.public(), |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key().public()));
+    let ref_leaf_j = rebut_leaf(&table_j, &key.public(), |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key().public()));
     let funded_j = fund(&rt, ref_leaf_j.clone(), "r");
     let mut rtx_j = build_spend(
         funded_j.op,
@@ -206,7 +206,7 @@ fn refute_and_disprove_on_regtest() {
     let junk = lngap_lamport::winternitz::WotsSecret::from_entropy(lngap_lamport::winternitz::WotsParams::for_bytes(3), [0x99; 32])
         .sign(&lngap_pos::ttt::auth_message(&head_j))
         .unwrap();
-    let args_j = refute_witness(&head_sigs_j, &sig_j, &junk);
+    let args_j = rebut_witness(&head_sigs_j, &sig_j, &junk);
     rtx_j.input[0].witness = tapscript_witness(&args_j, &ref_leaf_j, &funded_j.tree.control_block("r").unwrap());
     assert!(
         rt.test_accept(&rtx_j).is_err(),
@@ -216,7 +216,7 @@ fn refute_and_disprove_on_regtest() {
     // ---- negative: a re-commitment to a different tuple fails the tie ----
     let (block2, table2) = sealed_move(5); // a LEGAL move attested
     let bad_sig = key.sign(&head_with_legal_mismatch()).unwrap(); // signs neither
-    let ref_leaf2 = refute_leaf(&table2, &key.public(), |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key().public()));
+    let ref_leaf2 = rebut_leaf(&table2, &key.public(), |b| lngap_pos::ttt::authorship_fragment(b, 96, 0, &state_key().public()));
     let funded2 = fund(&rt, ref_leaf2.clone(), "r");
     let rtx2 = build_spend(
         funded2.op,
@@ -231,7 +231,7 @@ fn refute_and_disprove_on_regtest() {
         .collect();
     // the fragment reads the FILE's claimed state (the mismatched head's:
     // zero); the tie then fails the re-commitment against the attestation
-    let args2 = refute_witness(&head_sigs2, &bad_sig, &state_key().sign(&[0u8; 3]).unwrap());
+    let args2 = rebut_witness(&head_sigs2, &bad_sig, &state_key().sign(&[0u8; 3]).unwrap());
     let mut rtx2 = rtx2;
     rtx2.input[0].witness = tapscript_witness(&args2, &ref_leaf2, &funded2.tree.control_block("r").unwrap());
     assert!(

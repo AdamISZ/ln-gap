@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use bitcoin_script_riscv::riscv::instruction_mapping::generate_sample_instructions;
 use lngap_pos::instance::mover_at;
-use lngap_pos::refute::pair_key;
+use lngap_pos::rebut::pair_key;
 use lngap_pos::ttt::Layout;
 use lngap_zk::challenges::*;
 use lngap_zk::prove_leaf;

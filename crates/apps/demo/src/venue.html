@@ -21,7 +21,7 @@ input,select{font:inherit;padding:4px 6px}
  <div class="panel"><h3>Misbehave</h3>
   <div>member <input id="mem" size="2" value="2"> <button onclick="cmd('silence '+v('mem'))">silence</button> <button onclick="cmd('wake '+v('mem'))">wake</button></div>
   <div style="margin-top:6px">move <input id="slot" size="3" value="any"> by member <input id="by" size="2" value="1"> <button onclick="cmd('late '+v('slot')+' '+v('by'))">seal a LATE submission</button> <button onclick="cmd('rogue '+v('slot')+' '+v('by'))">seal a REFUSED one (rogue)</button></div>
-  <div class="hint">late: a signed move that arrived after its due time (honest members hold it) — the mover may refute with it, the flags kill the refutation (D50). rogue: an entry honest members refused (unsigned, or a declared share that does not open) — attested, inert in the contract, provable misbehaviour (D55)</div>
+  <div class="hint">late: a signed move that arrived after its due time (honest members hold it) — the mover may rebut with it, the flags kill the rebuttal (D50). rogue: an entry honest members refused (unsigned, or a declared share that does not open) — attested, inert in the contract, provable misbehaviour (D55)</div>
   <div style="margin-top:6px"><button onclick="cmd('mine')">mine a block now</button></div>
   <div id="out"></div>
  </div>

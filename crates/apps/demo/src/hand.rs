@@ -1,7 +1,7 @@
 //! One game in the session: its negotiation (per-game keys, the venue's
 //! registry, the terms, the channel update that adds it), its view of the
 //! venue (seals, flags, the mover's fallback), its settlement, and its
-//! disputes after a force-close (claims, counters, refutations, disproves,
+//! disputes after a force-close (claims, counters, rebuttals, disproves,
 //! timeliness, splits) off the confirmed commitment version's graph. What
 //! is game-specific comes from [`Rules`].
 
@@ -21,7 +21,7 @@ use lngap_contract::Payout;
 use lngap_lamport::winternitz::{WotsPublic, WotsSig};
 use lngap_pos::graph::{not_timely_witness, proposer_witness};
 use lngap_pos::instance::{self, Game, GameClock, PosInstance};
-use lngap_pos::refute::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
+use lngap_pos::rebut::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
 use lngap_pos::{Registry, SealedBlock};
 use serde::Serialize;
 
@@ -33,7 +33,7 @@ pub trait Rules {
     /// The game's variant (the per-depth state key's size).
     fn game(&self) -> Game;
     /// The mover's state-key message for a head (what an entry's signature
-    /// signs and the refutation's authorship fragment checks).
+    /// signs and the rebuttal's authorship fragment checks).
     fn auth_message(&self, head: &[u8; 48]) -> Vec<u8>;
     /// Start game `id`: my private material, and the public part of my
     /// offer (a JSON value both parties' instances are built from).
@@ -381,7 +381,7 @@ impl Hand {
         let signed = key.as_ref().is_some_and(|k| {
             entry.len() >= 48 + n_sig && {
                 let sigs: Vec<[u8; 20]> = entry[48..48 + n_sig].chunks(20).map(|x| x.try_into().unwrap()).collect();
-                refute::check_entry_sig(k, &rules.auth_message(&head), &sigs)
+                rebut::check_entry_sig(k, &rules.auth_message(&head), &sigs)
             }
         });
         if !signed {
@@ -468,8 +468,8 @@ impl Hand {
         if let Some(p) = self.graph.iter().find(|p| p.txid() == txid) {
             let label = p.label.clone();
             s.say(format!("chain: height {height}: `{label}` confirmed ({} vB)", tx.vsize()));
-            if label.ends_with("/refute") {
-                let base = label.trim_end_matches("/refute").to_string();
+            if label.ends_with("/rebut") {
+                let base = label.trim_end_matches("/rebut").to_string();
                 match self.parse_reveal(&base, tx) {
                     Ok(sig) => {
                         self.reveals.insert(base.clone(), sig);
@@ -497,7 +497,7 @@ impl Hand {
 
     fn parse_reveal(&self, base: &str, tx: &Transaction) -> Result<WotsSig> {
         let d = base_depth(base)?;
-        let params = if d >= 2 { refute::pair_params() } else { refute::refute_params() };
+        let params = if d >= 2 { rebut::pair_params() } else { rebut::rebut_params() };
         let total = params.total_digits() as usize;
         let w = &tx.input[0].witness;
         let n = w.len();
@@ -544,20 +544,20 @@ impl Hand {
         v
     }
 
-    fn live_refuted(&self) -> Vec<(String, u32)> {
+    fn live_rebutted(&self) -> Vec<(String, u32)> {
         self.live
             .iter()
-            .filter(|(label, l)| label.ends_with("/refute") && !self.spent.contains_key(&l.op))
+            .filter(|(label, l)| label.ends_with("/rebut") && !self.spent.contains_key(&l.op))
             .filter_map(|(label, _)| {
-                let base = label.trim_end_matches("/refute").to_string();
+                let base = label.trim_end_matches("/rebut").to_string();
                 base_depth(&base).ok().map(|d| (base, d))
             })
             .collect()
     }
 
-    /// The depth of a live refutation against me (the disprove target).
+    /// The depth of a live rebuttal against me (the disprove target).
     pub fn disprove_depth(&self, s: &Session) -> Option<u32> {
-        self.live_refuted().into_iter().find(|(_, dd)| instance::mover_at(*dd) != s.me).map(|(_, d)| d)
+        self.live_rebutted().into_iter().find(|(_, dd)| instance::mover_at(*dd) != s.me).map(|(_, d)| d)
     }
 
     pub fn mempool_labels(&self, s: &Session) -> Vec<String> {
@@ -644,38 +644,38 @@ impl Hand {
                 let can_counter = !base.contains("counter") && *dd >= 2;
                 v.push(if can_counter { ActionView::ok("counter", &format!("`{base}`: say the claimant did not move at {}", dd - 1)) } else { ActionView::no("counter", "no counter on a counter, nor at depth 1") });
                 v.push(match (self.blocks.contains_key(dd), self.bad_slots.get(dd)) {
-                    (true, None) => ActionView::ok("refute", &format!("`{base}`: the venue attested your move {dd}")),
-                    (true, Some(why)) => ActionView::ok("refute", &format!("`{base}`: the venue attested your move {dd}, which is NOT valid ({why})")),
-                    (false, _) => ActionView::no("refute", &format!("`{base}`: nothing of yours is sealed for move {dd}")),
+                    (true, None) => ActionView::ok("rebut", &format!("`{base}`: the venue attested your move {dd}")),
+                    (true, Some(why)) => ActionView::ok("rebut", &format!("`{base}`: the venue attested your move {dd}, which is NOT valid ({why})")),
+                    (false, _) => ActionView::no("rebut", &format!("`{base}`: nothing of yours is sealed for move {dd}")),
                 });
             }
             None => {
                 v.push(ActionView::no("counter", "no live claim against you"));
-                v.push(ActionView::no("refute", "no live claim against you"));
+                v.push(ActionView::no("rebut", "no live claim against you"));
             }
         }
-        match self.live_refuted().into_iter().find(|(_, dd)| instance::mover_at(*dd) != s.me) {
+        match self.live_rebutted().into_iter().find(|(_, dd)| instance::mover_at(*dd) != s.me) {
             Some((base, dd)) => {
-                let open = self.window_open(&format!("{base}/refute"), delta).unwrap_or(0);
+                let open = self.window_open(&format!("{base}/rebut"), delta).unwrap_or(0);
                 let firing: Vec<String> = rules.firing(self, dd).into_iter().map(|(n, _)| n).collect();
                 let flags = self.flags.get(&dd).map(|f| f.iter().filter(|x| x.is_some()).count()).unwrap_or(0);
                 if h < open {
                     v.push(ActionView::no("disprove", &format!("`{base}`: the window opens at height {open}; fires: {}", if firing.is_empty() { "nothing".into() } else { firing.join(", ") })));
                     v.push(ActionView::no("timely", &format!("the window opens at height {open}; {flags} of {K} flags known")));
                 } else {
-                    let closes = self.window_open(&format!("{base}/refute"), delta2).unwrap_or(0);
+                    let closes = self.window_open(&format!("{base}/rebut"), delta2).unwrap_or(0);
                     v.push(if firing.is_empty() { ActionView::no("disprove", &format!("`{base}` (move {dd}): nothing fires")) } else { ActionView::ok("disprove", &format!("`{base}` (move {dd}): {} — before height {closes}", firing.join(", "))) });
                     v.push(if flags >= s.vparams.threshold as usize { ActionView::ok("timely", &format!("{flags} of {K} members flagged move {dd}")) } else { ActionView::no("timely", &format!("{flags} of {K} flags known for move {dd}")) });
                 }
             }
             None => {
-                v.push(ActionView::no("disprove", "no live refutation against you"));
-                v.push(ActionView::no("timely", "no live refutation against you"));
+                v.push(ActionView::no("disprove", "no live rebuttal against you"));
+                v.push(ActionView::no("timely", "no live rebuttal against you"));
             }
         }
         let mut split = ActionView::no("split", "nothing of yours to split");
-        if let Some((base, dd, code)) = self.live_refuted().into_iter().filter_map(|(b, dd)| self.r_of(rules, dd).map(|c| (b, dd, c))).find(|(_, _, c)| Self::wins(s, *c)) {
-            let open = self.window_open(&format!("{base}/refute"), delta2).unwrap_or(0);
+        if let Some((base, dd, code)) = self.live_rebutted().into_iter().filter_map(|(b, dd)| self.r_of(rules, dd).map(|c| (b, dd, c))).find(|(_, _, c)| Self::wins(s, *c)) {
+            let open = self.window_open(&format!("{base}/rebut"), delta2).unwrap_or(0);
             let r = (s.ui)(outcome_name(code));
             split = if h >= open { ActionView::ok("split", &format!("`{base}` (move {dd}): R = {r}")) } else { ActionView::no("split", &format!("`{base}`: R = {r}; opens at height {open} ({} blocks)", open - h)) };
         } else if let Some((base, _)) = self.live_claims().into_iter().find(|(_, dd)| instance::mover_at(*dd) != s.me) {
@@ -733,10 +733,10 @@ impl Hand {
         Self::broadcast(s, &tx, &format!("`{label}`"))
     }
 
-    pub fn refute(&mut self, s: &mut Session, rules: &dyn Rules) -> Result<()> {
+    pub fn rebut(&mut self, s: &mut Session, rules: &dyn Rules) -> Result<()> {
         let live = self.live_claims();
         let (base, d) = live.iter().find(|(_, d)| instance::mover_at(*d) == s.me).cloned().ok_or_else(|| anyhow!("no live claim against you on the chain"))?;
-        let label = format!("{base}/refute");
+        let label = format!("{base}/rebut");
         let (tx, prev, leaf, control) = {
             let p = self.skel(&label)?;
             (p.tx.clone(), p.prevouts[0].clone(), p.leaf.script.clone(), p.control_block.clone())
@@ -744,7 +744,7 @@ impl Hand {
         let new = self.blocks.get(&d).ok_or_else(|| anyhow!("nothing is sealed for move {d}"))?.clone();
         let new_head = new.header.head();
         let msg = self.parked_message(d)?;
-        let pair_sig = s.ks.sign_wots(&instance::refute_label(self.id, 1, d), &msg).map_err(|e| anyhow!("{e}"))?;
+        let pair_sig = s.ks.sign_wots(&instance::rebut_label(self.id, 1, d), &msg).map_err(|e| anyhow!("{e}"))?;
         let auth = s.ks.sign_wots(&instance::state_label(self.id, 1, d), &rules.auth_message(&new_head)).map_err(|e| anyhow!("{e}"))?;
         let sign_at = |b: &SealedBlock| -> Vec<Vec<u8>> { (0..HEAD_CHUNKS).map(|j| sig_bytes(&Keypair::from_secret_key(SECP256K1, &b.attestation.secrets[HEAD_CHUNK_START + j]), &tx, &prev, &leaf)).collect() };
         let sigs_new = sign_at(&new);
@@ -753,44 +753,44 @@ impl Hand {
             // its sealed entry; only the new head is read out
             let prior = self.blocks.get(&(d - 1)).ok_or_else(|| anyhow!("no seal for move {}", d - 1))?;
             let key = self.their_state_keys.get(&(d - 1)).ok_or_else(|| anyhow!("no state key for move {}", d - 1))?;
-            let prior_auth = refute::entry_auth_sig(key, &rules.auth_message(&prior.header.head()), &prior.entry).ok_or_else(|| anyhow!("move {} is not signed by its mover", d - 1))?;
-            refute::refute_witness_pair_signed(&sigs_new, &pair_sig, [&auth, &prior_auth])
+            let prior_auth = rebut::entry_auth_sig(key, &rules.auth_message(&prior.header.head()), &prior.entry).ok_or_else(|| anyhow!("move {} is not signed by its mover", d - 1))?;
+            rebut::rebut_witness_pair_signed(&sigs_new, &pair_sig, [&auth, &prior_auth])
         } else {
-            refute::refute_witness(&sigs_new, &pair_sig, &auth)
+            rebut::rebut_witness(&sigs_new, &pair_sig, &auth)
         };
         w.extend(proposer_witness(sig_bytes(&Keypair::from_secret_key(SECP256K1, &new.proposer_secret), &tx, &prev, &leaf), new.proposer));
-        // the refutation is 2-of-2: both parties' pre-signatures of the skeleton
+        // the rebuttal is 2-of-2: both parties' pre-signatures of the skeleton
         w.extend(self.sigs22(&label)?);
         let mut tx = tx;
         tx.input[0].witness = tapscript_witness(&w, &leaf, &control);
         self.reveals.insert(base.clone(), pair_sig);
-        s.say(format!("refuting `{base}`: the venue attested my move {d}"));
+        s.say(format!("rebutting `{base}`: the venue attested my move {d}"));
         Self::broadcast(s, &tx, &format!("`{label}`"))
     }
 
     fn payout_tx(&self, s: &Session, base: &str, d: u32, leaf_name: &str) -> Result<(Transaction, TxOut, ScriptBuf, bitcoin::taproot::ControlBlock)> {
-        let l = self.live.get(&format!("{base}/refute")).ok_or_else(|| anyhow!("no live refutation on `{base}`"))?.clone();
+        let l = self.live.get(&format!("{base}/rebut")).ok_or_else(|| anyhow!("no live rebuttal on `{base}`"))?.clone();
         let (seq, version, _) = s.closed.ok_or_else(|| anyhow!("the channel is open"))?;
         let ctx = s.chan.commit_ctx(seq, version)?;
-        let tree = self.inst()?.refuted_tree(&ctx, d)?;
+        let tree = self.inst()?.rebuttal_tree(&ctx, d)?;
         let leaf = tree.leaf(leaf_name)?.clone();
         let tx = build_spend(l.op, &leaf.timelock, vec![TxOut { value: l.prev.value - s.params.presign_fee, script_pubkey: s.chan.my_payout_spk() }]);
         Ok((tx, l.prev, leaf.script, tree.control_block(leaf_name)?))
     }
 
     pub fn disprove(&mut self, s: &mut Session, rules: &dyn Rules, which: Option<String>) -> Result<()> {
-        let (base, d) = self.live_refuted().into_iter().find(|(_, d)| instance::mover_at(*d) != s.me).ok_or_else(|| anyhow!("no live refutation against you"))?;
+        let (base, d) = self.live_rebutted().into_iter().find(|(_, d)| instance::mover_at(*d) != s.me).ok_or_else(|| anyhow!("no live rebuttal against you"))?;
         let firing = rules.firing(self, d);
         let (name, wits) = match which {
             Some(w) => firing.into_iter().find(|(n, _)| n.ends_with(&w)).ok_or_else(|| anyhow!("`{w}` does not fire on the parked tuple"))?,
             None => firing.into_iter().next().ok_or_else(|| anyhow!("no disprove leaf fires: the move is valid"))?,
         };
         let leaf_name = format!("disprove_{name}");
-        Self::need_height(s, self.window_open(&format!("{base}/refute"), s.params.delta)?, &leaf_name)?;
+        Self::need_height(s, self.window_open(&format!("{base}/rebut"), s.params.delta)?, &leaf_name)?;
         let (mut tx, prev, leaf, control) = self.payout_tx(s, &base, d, &leaf_name)?;
         let reveal = self.reveals.get(&base).ok_or_else(|| anyhow!("the mover's reveal is not known yet"))?.clone();
         let mut w = wits;
-        w.extend(refute::wots_wire(&reveal));
+        w.extend(rebut::wots_wire(&reveal));
         w.push(sig_bytes(&s.chan.keys.payment, &tx, &prev, &leaf));
         tx.input[0].witness = tapscript_witness(&w, &leaf, &control);
         s.say(format!("disproving the parked move {d} of `{base}`: {name}"));
@@ -798,24 +798,24 @@ impl Hand {
     }
 
     pub fn timely(&mut self, s: &mut Session) -> Result<()> {
-        let (base, d) = self.live_refuted().into_iter().find(|(_, d)| instance::mover_at(*d) != s.me).ok_or_else(|| anyhow!("no live refutation against you"))?;
+        let (base, d) = self.live_rebutted().into_iter().find(|(_, d)| instance::mover_at(*d) != s.me).ok_or_else(|| anyhow!("no live rebuttal against you"))?;
         let scalars = self.flags.get(&d).cloned().ok_or_else(|| anyhow!("no flags known for move {d}"))?;
-        Self::need_height(s, self.window_open(&format!("{base}/refute"), s.params.delta)?, "not_timely")?;
+        Self::need_height(s, self.window_open(&format!("{base}/rebut"), s.params.delta)?, "not_timely")?;
         let (mut tx, prev, leaf, control) = self.payout_tx(s, &base, d, "not_timely")?;
         let w = not_timely_witness(&tx, 0, std::slice::from_ref(&prev), &leaf, &s.chan.keys.payment, &scalars);
         tx.input[0].witness = tapscript_witness(&w, &leaf, &control);
-        s.say(format!("killing the refutation on `{base}` as NOT TIMELY"));
+        s.say(format!("killing the rebuttal on `{base}` as NOT TIMELY"));
         Self::broadcast(s, &tx, "not_timely")
     }
 
-    /// The checked split (a refuted output whose R favours me; either party
+    /// The checked split (a rebuttal output whose R favours me; either party
     /// may broadcast it) or my timeout split. `checked_witness` builds the
     /// game's checked-split witness from (sig_user, sig_hub, pair reveal,
     /// the mover's code reveal if the game's split is gated).
     pub fn split(&mut self, s: &mut Session, rules: &dyn Rules, checked_witness: &dyn Fn(&mut Session, u32, u8, Vec<u8>, Vec<u8>, &WotsSig) -> Result<Vec<Vec<u8>>>) -> Result<()> {
-        if let Some((base, d, code)) = self.live_refuted().into_iter().filter_map(|(b, dd)| self.r_of(rules, dd).map(|c| (b, dd, c))).find(|(_, _, c)| Self::wins(s, *c)) {
-            let label = format!("{base}/refuted/split_{}", outcome_name(code));
-            Self::need_height(s, self.window_open(&format!("{base}/refute"), s.params.delta + s.params.delta_prime)?, &label)?;
+        if let Some((base, d, code)) = self.live_rebutted().into_iter().filter_map(|(b, dd)| self.r_of(rules, dd).map(|c| (b, dd, c))).find(|(_, _, c)| Self::wins(s, *c)) {
+            let label = format!("{base}/rebuttal/split_{}", outcome_name(code));
+            Self::need_height(s, self.window_open(&format!("{base}/rebut"), s.params.delta + s.params.delta_prime)?, &label)?;
             let pair = self.reveals.get(&base).ok_or_else(|| anyhow!("no reveal for {base}"))?.clone();
             let [sh, su] = self.sigs22(&label)?;
             let w = checked_witness(s, d, code, su, sh, &pair)?;

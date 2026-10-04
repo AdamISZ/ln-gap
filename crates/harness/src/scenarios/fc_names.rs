@@ -306,7 +306,7 @@ pub const FC_N8: Scenario = Scenario {
 
 pub const FC_N9: Scenario = Scenario {
     id: "FCN9",
-    title: "Hub proves inclusion on a private fork; Alice refutes with the heavier chain",
+    title: "Hub proves inclusion on a private fork; Alice rebuts with the heavier chain",
     expected: "both claims are internally valid, so no dispute runs; the longer chain wins: split BondToUser; the commit is not on the real chain",
     run: || {
         let mut w = FcWorld::new("FCN9")?;
@@ -324,7 +324,7 @@ pub const FC_N9: Scenario = Scenario {
 
         let roles = party_txs(&w.alice);
         let moves = roles.iter().filter(|r| r.starts_with("move_")).count();
-        assert!(moves >= 2, "hub's fork proof + Alice's refutation: {roles:?}");
+        assert!(moves >= 2, "hub's fork proof + Alice's rebuttal: {roles:?}");
         let split = roles
             .iter()
             .find(|r| r.starts_with("split_"))

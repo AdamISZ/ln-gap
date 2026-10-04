@@ -37,7 +37,7 @@ use crate::EpochTable;
 /// on the stack: witness enters as `[.. sig_j, v_j]` (v_j on top), and after
 /// the fragment the stack holds `[.., v_j]`. Unlike [`readout_leaf`] there is
 /// no claimed value to equal — the values ARE the data (this is the form a
-/// refutation composes: the venue-attested message accumulates on the stack).
+/// rebuttal composes: the venue-attested message accumulates on the stack).
 pub fn readout_value_fragment(mut b: Builder, points: &[XOnlyPublicKey; 16]) -> Builder {
     for pt in points {
         b = b.push_slice(pt.serialize());

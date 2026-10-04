@@ -1,10 +1,10 @@
-//! Stack-choreography checks of the refutation and disprove leaves through
+//! Stack-choreography checks of the rebuttal and disprove leaves through
 //! the script32 simulator (its CHECKSIG stub pops both elements and
 //! continues; the WOTS gadget's HASH160 work runs for real). Regtest remains
 //! the source of truth for the crypto; this catches stack bugs.
 
 use lngap_ec_wots::Attester;
-use lngap_pos::refute::{pair_key, refute_key, refute_leaf, refute_leaf_pair_gated, refute_leaf_pair_signed, refute_witness, refute_witness_pair, refute_witness_pair_signed, HEAD_CHUNKS};
+use lngap_pos::rebut::{pair_key, rebut_key, rebut_leaf, rebut_leaf_pair_gated, rebut_leaf_pair_signed, rebut_witness, rebut_witness_pair, rebut_witness_pair_signed, HEAD_CHUNKS};
 use lngap_pos::HEADER_CHUNKS;
 
 const DUMMY_SIG: [u8; 64] = [0x30; 64];
@@ -62,35 +62,35 @@ fn setup(mv: u8) -> (lngap_ec_wots::EpochTable, [u8; 48], Vec<Vec<u8>>) {
 }
 
 #[test]
-fn refute_runs() {
+fn rebut_runs() {
     let (table, head, sigs) = setup(5);
-    let key = refute_key([9u8; 32]);
+    let key = rebut_key([9u8; 32]);
     let sig = key.sign(&head).unwrap();
     assert_eq!(key.public().verify(&sig).unwrap(), head.to_vec());
-    let leaf = refute_leaf(&table, &key.public(), auth1(1));
-    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness(&sigs, &sig, &zero_state_sig(1)))
-        .expect("a correct refutation must run");
+    let leaf = rebut_leaf(&table, &key.public(), auth1(1));
+    let end = lngap_script32::sim::run(leaf.as_script(), rebut_witness(&sigs, &sig, &zero_state_sig(1)))
+        .expect("a correct rebuttal must run");
     assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1");
 }
 
 #[test]
-fn refute_rejects_junk_preimages() {
+fn rebut_rejects_junk_preimages() {
     // D41: the authorship fragment — the presented signature must chain to
     // the mover's state key against the claimed (parked) state
     let (table, head, sigs) = setup(5);
-    let key = refute_key([9u8; 32]);
+    let key = rebut_key([9u8; 32]);
     let sig = key.sign(&head).unwrap();
-    let leaf = refute_leaf(&table, &key.public(), auth1(1));
+    let leaf = rebut_leaf(&table, &key.public(), auth1(1));
     // a signature under a DIFFERENT key
     let junk = state_key(99).sign(&[0u8; 3]).unwrap();
-    assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness(&sigs, &sig, &junk)).is_err());
+    assert!(lngap_script32::sim::run(leaf.as_script(), rebut_witness(&sigs, &sig, &junk)).is_err());
     // and one corrupted reveal among seven good ones
     let mut r = zero_state_sig(1);
     r.hashes[3] = [0x12; 20];
-    assert!(lngap_script32::sim::run(leaf.as_script(), refute_witness(&sigs, &sig, &r)).is_err());
+    assert!(lngap_script32::sim::run(leaf.as_script(), rebut_witness(&sigs, &sig, &r)).is_err());
 }
 
-// ----- the two-head refutation (D35) -----
+// ----- the two-head rebuttal (D35) -----
 
 /// Two slots' tables and their attested heads (mv 4 at slot 1, mv 0 at 2).
 fn pair_setup() -> (
@@ -119,22 +119,22 @@ fn pair_msg(h1: &[u8; 48], h2: &[u8; 48]) -> Vec<u8> {
 }
 
 #[test]
-fn refute_pair_runs() {
+fn rebut_pair_runs() {
     let (t1, t2, h1, h2) = pair_setup();
     let key = pair_key([9u8; 32]);
     let sig = key.sign(&pair_msg(&h1, &h2)).unwrap();
-    let leaf = refute_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
+    let leaf = rebut_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     let end = lngap_script32::sim::run(
         leaf.as_script(),
-        refute_witness_pair(&sigs, &sigs, &sig, &[&zero_state_sig(2), &zero_state_sig(1)]),
+        rebut_witness_pair(&sigs, &sigs, &sig, &[&zero_state_sig(2), &zero_state_sig(1)]),
     )
-        .expect("a correct two-head refutation must run");
+        .expect("a correct two-head rebuttal must run");
     assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1");
 }
 
 #[test]
-fn refute_pair_rejects_a_mismatched_recommitment() {
+fn rebut_pair_rejects_a_mismatched_recommitment() {
     // the pair reveal signs a DIFFERENT prior head than the one read out.
     // With the TIED readout (D42) the failure is inside the point selection
     // — a wrong digit selects an anticipation point whose secret nobody
@@ -144,32 +144,32 @@ fn refute_pair_rejects_a_mismatched_recommitment() {
     let (t1, t2, _h1, h2) = pair_setup();
     let key = pair_key([9u8; 32]);
     let sig = key.sign(&pair_msg(&head_with(5), &h2)).unwrap();
-    let leaf = refute_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
+    let leaf = rebut_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     let _ = lngap_script32::sim::run(
         leaf.as_script(),
-        refute_witness_pair(&sigs, &sigs, &sig, &[&zero_state_sig(2), &zero_state_sig(1)]),
+        rebut_witness_pair(&sigs, &sigs, &sig, &[&zero_state_sig(2), &zero_state_sig(1)]),
     );
 }
 
-// ----- the prior bound by the claimant's signature (refute_leaf_pair_signed) -----
+// ----- the prior bound by the claimant's signature (rebut_leaf_pair_signed) -----
 
 #[test]
-fn refute_pair_signed_runs() {
+fn rebut_pair_signed_runs() {
     // only the new head is read out; the prior's 96 parked digits are judged
     // by the claimant's authorship block and dropped
     let (_t1, t2, h1, h2) = pair_setup();
     let key = pair_key([9u8; 32]);
     let sig = key.sign(&pair_msg(&h1, &h2)).unwrap();
-    let leaf = refute_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
+    let leaf = rebut_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
-    let end = lngap_script32::sim::run(leaf.as_script(), refute_witness_pair_signed(&sigs, &sig, [&zero_state_sig(2), &zero_state_sig(1)]))
-        .expect("a correct signed-prior refutation must run");
+    let end = lngap_script32::sim::run(leaf.as_script(), rebut_witness_pair_signed(&sigs, &sig, [&zero_state_sig(2), &zero_state_sig(1)]))
+        .expect("a correct signed-prior rebuttal must run");
     assert_eq!(end, vec![vec![1]], "the leaf ends with OP_1 and a clean stack");
 }
 
 #[test]
-fn refute_pair_signed_rejects_a_prior_the_claimant_did_not_sign() {
+fn rebut_pair_signed_rejects_a_prior_the_claimant_did_not_sign() {
     // the mover parks a prior whose claimed state (byte 7) the claimant
     // never signed: the claimant's authorship block (over state 0) no
     // longer matches the parked digits, and the leaf fails. This is the
@@ -180,20 +180,20 @@ fn refute_pair_signed_rejects_a_prior_the_claimant_did_not_sign() {
     forged[7] = 0x01;
     let key = pair_key([9u8; 32]);
     let sig = key.sign(&pair_msg(&forged, &h2)).unwrap();
-    let leaf = refute_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
+    let leaf = rebut_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
     let sigs: Vec<Vec<u8>> = (0..HEAD_CHUNKS).map(|_| DUMMY_SIG.to_vec()).collect();
     assert!(
-        lngap_script32::sim::run(leaf.as_script(), refute_witness_pair_signed(&sigs, &sig, [&zero_state_sig(2), &zero_state_sig(1)])).is_err(),
-        "a prior the claimant did not sign must not refute"
+        lngap_script32::sim::run(leaf.as_script(), rebut_witness_pair_signed(&sigs, &sig, [&zero_state_sig(2), &zero_state_sig(1)])).is_err(),
+        "a prior the claimant did not sign must not rebut"
     );
 }
 
 #[test]
-fn refute_pair_signed_is_about_half_the_script() {
+fn rebut_pair_signed_is_about_half_the_script() {
     let (t1, t2, _h1, _h2) = pair_setup();
     let key = pair_key([9u8; 32]);
-    let old = refute_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
-    let new = refute_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
-    println!("pair refute script: both heads read out {} B, prior by signature {} B", old.len(), new.len());
+    let old = rebut_leaf_pair_gated(&t1, &t2, &key.public(), auth2(2, 1));
+    let new = rebut_leaf_pair_signed(&t2, &key.public(), auth2(2, 1));
+    println!("pair rebut script: both heads read out {} B, prior by signature {} B", old.len(), new.len());
     assert!(new.len() * 10 < old.len() * 6, "dropping one head's readout must save over 40% of the script");
 }

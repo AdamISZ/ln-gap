@@ -343,7 +343,7 @@ fn n8_fabricated_proof_disproved_by_bisection() -> Result<()> {
 }
 
 #[test]
-fn n9_private_fork_refuted_by_heavier_chain() -> Result<()> {
+fn n9_private_fork_rebutted_by_heavier_chain() -> Result<()> {
     let mut w = FcWorld::new("FCN9")?;
     w.fork = true;
     w.register()?;
@@ -362,10 +362,10 @@ fn n9_private_fork_refuted_by_heavier_chain() -> Result<()> {
     let roles = party_txs(&w.alice);
     println!("\n=== N9 roles: {roles:?} ===");
 
-    // The hub proves inclusion on its private fork; Alice refutes with the
+    // The hub proves inclusion on its private fork; Alice rebuts with the
     // heavier real chain; the bond splits to her.
     let moves: Vec<&String> = roles.iter().filter(|r| r.starts_with("move_")).collect();
-    assert!(moves.len() >= 2, "hub's fork proof + Alice's refutation: {roles:?}");
+    assert!(moves.len() >= 2, "hub's fork proof + Alice's rebuttal: {roles:?}");
     let split = roles
         .iter()
         .find(|r| r.starts_with("split_"))

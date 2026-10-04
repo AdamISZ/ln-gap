@@ -32,7 +32,7 @@ pub const GAME_ID: u16 = 1;
 pub const STAKE_SAT: u64 = 500_000;
 pub const CHANNEL_SIDE_SAT: u64 = 3_000_000;
 /// The pre-sign fee per hop: ~1.6 sat/vB on the largest transaction, the
-/// refutation (~24 kvB since the prior is bound by signature, D63).
+/// rebuttal (~24 kvB since the prior is bound by signature, D63).
 pub const FEE_SAT: u64 = 40_000;
 pub const VENUE_SEED: [u8; 32] = [0x66; 32];
 

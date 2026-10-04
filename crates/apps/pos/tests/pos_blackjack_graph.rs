@@ -1,10 +1,10 @@
 //! The wired PoS graph for BLACKJACK on regtest (D57): real signed venue
 //! entries carrying share strings in their bodies, the members' registered
-//! check, two-head refutations, and the blackjack disprove family with
+//! check, two-head rebuttals, and the blackjack disprove family with
 //! share strings as witness elements.
 //!
 //! - A: the house deals a WRONG up-card at depth 2: the player claims
-//!   absence, the house refutes, and `bj_card_2` (the two strings from the
+//!   absence, the house rebuts, and `bj_card_2` (the two strings from the
 //!   entry bodies) takes the pot; a card leaf for a correct card fails.
 //! - B: an honest hand the PLAYER wins at the showdown (depth 4, a house
 //!   move): the player claims absence at 4, the house parks its own losing
@@ -14,7 +14,7 @@
 //!   the house could have locked the pot here.)
 //! - C: the player committed an OUT-OF-RANGE share (value 14) at position
 //!   0: honest members refuse its DEAL entry (the registered check); a
-//!   rogue seals it; the house claims absence at 1, the player refutes
+//!   rogue seals it; the house claims absence at 1, the player rebuts
 //!   (depth 1: the single-head form), and the house's `bj_share_0` takes
 //!   the pot.
 //! - D: the dealer DRAWS AT 17 (to beat the player's 19): `bj_dealer`
@@ -35,7 +35,7 @@ use lngap_lamport::winternitz::WotsSig;
 use lngap_pos::blackjack;
 use lngap_pos::graph::proposer_witness;
 use lngap_pos::instance::{self, Game as WhichGame, GameClock, PosInstance};
-use lngap_pos::refute::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
+use lngap_pos::rebut::{self, HEAD_CHUNKS, HEAD_CHUNK_START};
 use lngap_pos::{Authorship, Member, PosMiner, Registry, SealedBlock};
 use rand::{rngs::StdRng, SeedableRng};
 
@@ -206,8 +206,8 @@ impl Path {
         println!("REGTEST BJ: absence claim at depth {d}: {} vB", tx.vsize());
     }
 
-    fn refute(&mut self, rt: &Regtest, g: &mut Game, d: u32) -> (OutPoint, TxOut) {
-        let p = skel(&self.graph, &format!("absent_{d}/refute")).clone();
+    fn rebut(&mut self, rt: &Regtest, g: &mut Game, d: u32) -> (OutPoint, TxOut) {
+        let p = skel(&self.graph, &format!("absent_{d}/rebut")).clone();
         let tx0 = p.tx.clone();
         let a_prev = p.prevouts[0].clone();
         let new_head = self.head(d);
@@ -218,49 +218,49 @@ impl Path {
         let mut w = if d >= 2 {
             let prev_head = self.head(d - 1);
             let msg = [prev_head.as_slice(), new_head.as_slice()].concat();
-            let pair = g.ks(mover).sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &msg).unwrap();
+            let pair = g.ks(mover).sign_wots(&instance::rebut_label(CONTRACT_ID, 1, d), &msg).unwrap();
             self.pair_sig = Some(pair.clone());
             let prev_block = &self.sealed[&(d - 1)];
             // the prior is bound by the claimant's signature, from its entry
             let prev_key = g.ks(mover.other()).wots_public(&instance::state_label(CONTRACT_ID, 1, d - 1)).unwrap();
-            let prev_sig = refute::entry_auth_sig(&prev_key, &blackjack::auth_message(&prev_head), &prev_block.entry).expect("the prior entry carries its mover's signature");
-            refute::refute_witness_pair_signed(&sigs_new, &pair, [&new_sig, &prev_sig])
+            let prev_sig = rebut::entry_auth_sig(&prev_key, &blackjack::auth_message(&prev_head), &prev_block.entry).expect("the prior entry carries its mover's signature");
+            rebut::rebut_witness_pair_signed(&sigs_new, &pair, [&new_sig, &prev_sig])
         } else {
-            let sig = g.ks(mover).sign_wots(&instance::refute_label(CONTRACT_ID, 1, d), &new_head).unwrap();
+            let sig = g.ks(mover).sign_wots(&instance::rebut_label(CONTRACT_ID, 1, d), &new_head).unwrap();
             self.pair_sig = Some(sig.clone());
-            refute::refute_witness(&sigs_new, &sig, &new_sig)
+            rebut::rebut_witness(&sigs_new, &sig, &new_sig)
         };
         w.extend(proposer_witness(sign_with(&new_block.proposer_secret, &tx0, &a_prev, &p.leaf.script), new_block.proposer));
-        // the refutation is 2-of-2: the hub's signature, then the user's
+        // the rebuttal is 2-of-2: the hub's signature, then the user's
         w.push(sign_tx(&g.hub.payment, &tx0, &a_prev, &p.leaf.script));
         w.push(sign_tx(&g.user.payment, &tx0, &a_prev, &p.leaf.script));
         let mut tx = tx0;
         tx.input[0].witness = tapscript_witness(&w, &p.leaf.script, &p.control_block);
-        rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the refutation at depth {d} must mine: {e}"));
-        println!("REGTEST BJ: refutation at depth {d}: {} vB", tx.vsize());
+        rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("the rebuttal at depth {d} must mine: {e}"));
+        println!("REGTEST BJ: rebuttal at depth {d}: {} vB", tx.vsize());
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone())
     }
 
     /// The claimant's disprove through leaf `name` with witness strings
     /// `wits` (bottom first) below the pair reveal.
     fn disprove(&self, g: &Game, d: u32, p_op: OutPoint, p_prev: &TxOut, name: &str, wits: &[&[u8]]) -> Transaction {
-        let p_tree = g.inst.refuted_tree(&g.ctx(), d).unwrap();
+        let p_tree = g.inst.rebuttal_tree(&g.ctx(), d).unwrap();
         let name = format!("disprove_{name}");
         let l = p_tree.leaf(&name).unwrap();
         let claimant = instance::mover_at(d).other();
         let mut tx = lngap_btc::tx::build_spend(p_op, &l.timelock, vec![TxOut { value: p_prev.value - g.params.presign_fee, script_pubkey: g.payout(claimant) }]);
         let dsig = sign_tx(g.payment(claimant), &tx, p_prev, &l.script);
         let mut w = blackjack::leaf_wits(wits);
-        w.extend(refute::wots_wire(self.pair_sig.as_ref().expect("the refutation went first")));
+        w.extend(rebut::wots_wire(self.pair_sig.as_ref().expect("the rebuttal went first")));
         w.push(dsig);
         tx.input[0].witness = tapscript_witness(&w, &l.script, &p_tree.control_block(&name).unwrap());
         tx
     }
 
-    /// The ungated checked split `split_{name}` off the depth-`d` refuted
+    /// The ungated checked split `split_{name}` off the depth-`d` rebutted
     /// output: both pre-signatures and the pair reveal (either party).
     fn split(&self, g: &Game, d: u32, name: &str) -> Transaction {
-        let p = skel(&self.graph, &format!("absent_{d}/refuted/split_{name}"));
+        let p = skel(&self.graph, &format!("absent_{d}/rebuttal/split_{name}"));
         let sig_u = sign_tx(&g.user.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
         let sig_h = sign_tx(&g.hub.payment, &p.tx, &p.prevouts[0], &p.leaf.script);
         let w = blackjack::checked_split_witness(sig_u, sig_h, self.pair_sig.as_ref().unwrap());
@@ -311,7 +311,7 @@ fn wired_pos_blackjack_graph() {
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
         rt.make_time_final(g.inst.claim_from(2)).unwrap();
         path.claim(&rt, &g, 2);
-        let (p_op, p_prev) = path.refute(&rt, &mut g, 2);
+        let (p_op, p_prev) = path.rebut(&rt, &mut g, 2);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         let (a0, b0) = (g.deck.a[0].string.clone(), g.deck.b[0].string.clone());
         let bad = path.disprove(&g, 2, p_op, &p_prev, "bj_card_0", &[&a0, &b0]);
@@ -335,7 +335,7 @@ fn wired_pos_blackjack_graph() {
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
         rt.make_time_final(g.inst.claim_from(4)).unwrap();
         path.claim(&rt, &g, 4);
-        let (p_op, p_prev) = path.refute(&rt, &mut g, 4);
+        let (p_op, p_prev) = path.rebut(&rt, &mut g, 4);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         // nothing fires on the honest dealer phase
         let (a15, b15) = (g.deck.a[15].string.clone(), g.deck.b[15].string.clone());
@@ -365,7 +365,7 @@ fn wired_pos_blackjack_graph() {
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
         rt.make_time_final(g.inst.claim_from(1)).unwrap();
         path.claim(&rt, &g, 1);
-        let (p_op, p_prev) = path.refute(&rt, &mut g, 1);
+        let (p_op, p_prev) = path.rebut(&rt, &mut g, 1);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         let a0 = g.deck.a[0].string.clone();
         let tx = path.disprove(&g, 1, p_op, &p_prev, "bj_share_0", &[&a0]);
@@ -391,7 +391,7 @@ fn wired_pos_blackjack_graph() {
         rt.mine(u64::from(g.params.to_self_delay) + 2).unwrap();
         rt.make_time_final(g.inst.claim_from(4)).unwrap();
         path.claim(&rt, &g, 4);
-        let (p_op, p_prev) = path.refute(&rt, &mut g, 4);
+        let (p_op, p_prev) = path.rebut(&rt, &mut g, 4);
         rt.mine(u64::from(g.params.delta) + 1).unwrap();
         let tx = path.disprove(&g, 4, p_op, &p_prev, "bj_dealer", &[]);
         rt.mine_with(&[tx.clone()]).unwrap_or_else(|e| panic!("bj_dealer must mine: {e}"));

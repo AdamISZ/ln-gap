@@ -49,9 +49,9 @@ fn graph_build_timing() {
     let mut n = 0;
     for d in 1..=m {
         let l = inst.layout(d);
-        n += family.disprove_leaves(&l, &inst.depth_keys(d).refute).len();
+        n += family.disprove_leaves(&l, &inst.depth_keys(d).rebut).len();
         if d == sr.depths() {
-            n += family.prove_leaves(&l, &inst.depth_keys(d).refute).len();
+            n += family.prove_leaves(&l, &inst.depth_keys(d).rebut).len();
         }
     }
     let t_leaves = t.elapsed();

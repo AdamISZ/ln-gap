@@ -1,19 +1,19 @@
-//! The refutation leaf (POS_FACTCHAIN_PLAN.md step 3; D32): the answer to a
+//! The rebuttal leaf (POS_FACTCHAIN_PLAN.md step 3; D32): the answer to a
 //! "Bob did not publish a valid move in the window" claim.
 //!
-//! Bob's refutation spend proves, in one leaf:
+//! Bob's rebuttal spend proves, in one leaf:
 //!
 //! 1. the venue attested slot d's head — the EC-OTS readout of the head's 96
 //!    chunk positions (one possession proof per chunk under the slot's epoch
 //!    table), leaving the head's nibbles on the stack; and
-//! 2. the mover RE-COMMITS the same 48 bytes under a per-slot refute key
+//! 2. the mover RE-COMMITS the same 48 bytes under a per-slot rebuttal key
 //!    (Winternitz `wots_verify`), each re-committed digit tied nibble-equal
 //!    to the read-out value.
 //!
 //! The re-commitment is what parks the tuple on-chain for the disprove
-//! stage: the refutation output's tree is keyed to the refute key, so a
+//! stage: the rebuttal output's tree is keyed to the rebuttal key, so a
 //! follow-on leaf can trust a tuple carried by the key's reveal, because the
-//! refutation leaf is the only place that key's signature is tied to the
+//! rebuttal leaf is the only place that key's signature is tied to the
 //! venue attestation. (The contract's existing re-commitment discipline —
 //! pre-signed graphs have no covenants, so run-time data crosses outputs
 //! only as pinned-key signatures.)
@@ -34,16 +34,16 @@ use lngap_lamport::winternitz::{WotsExt, WotsParams, WotsPublic, WotsSecret, Wot
 pub const HEAD_CHUNK_START: usize = 40 * 2;
 pub const HEAD_CHUNKS: usize = HEAD_BYTES * 2;
 
-/// The Winternitz parameters of a refute key (the 48-byte head: 96 message
+/// The Winternitz parameters of a rebuttal key (the 48-byte head: 96 message
 /// digits plus checksum digits).
-pub fn refute_params() -> WotsParams {
+pub fn rebut_params() -> WotsParams {
     WotsParams::for_bytes(HEAD_BYTES as u32)
 }
 
-/// A refute key from entropy. (In the graph: per role per slot, pinned at
+/// A rebuttal key from entropy. (In the graph: per role per slot, pinned at
 /// open; the key-set derivation lands with the contract integration.)
-pub fn refute_key(entropy: [u8; 32]) -> WotsSecret {
-    WotsSecret::from_entropy(refute_params(), entropy)
+pub fn rebut_key(entropy: [u8; 32]) -> WotsSecret {
+    WotsSecret::from_entropy(rebut_params(), entropy)
 }
 
 /// A WOTS signature's witness elements in WIRE order (bottom of stack
@@ -78,13 +78,13 @@ pub fn wots_wire_tied(sig: &WotsSig) -> Vec<Vec<u8>> {
     w
 }
 
-/// The refutation leaf for one slot: `table` is the slot's epoch table (only
+/// The rebuttal leaf for one slot: `table` is the slot's epoch table (only
 /// the head chunks' points are embedded in the script) and `key` the mover's
-/// refute key for the slot. `gate` runs on the register file right after the
+/// rebuttal key for the slot. `gate` runs on the register file right after the
 /// re-commitment verify — the graph always passes the D41 authorship
 /// fragment (the mover's state-key preimages checked against the parked
 /// head's claimed state).
-pub fn refute_leaf(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Builder) -> Builder) -> ScriptBuf {
+pub fn rebut_leaf(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Builder) -> Builder) -> ScriptBuf {
     let mut b = gate(Builder::new().wots_verify(key));
     // the re-committed digits to the altstack (d_0 comes out first)
     for _ in 0..HEAD_CHUNKS {
@@ -98,13 +98,13 @@ pub fn refute_leaf(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Build
     b.push_int(1).into_script()
 }
 
-/// The refutation witness, wire order. `head_sigs[j]` must sign the spend's
+/// The rebuttal witness, wire order. `head_sigs[j]` must sign the spend's
 /// sighash under the point for the attested value of head chunk `j`
 /// (= header chunk `HEAD_CHUNK_START + j`); `sig` re-commits the head.
 /// `auth` is the mover's state-key signature over the head's signed region
 /// (the D41 authorship block, D43's tied-WOTS form: the reveal hashes
 /// ride below the register file; the message digits are the file's own).
-pub fn refute_witness(head_sigs: &[Vec<u8>], sig: &WotsSig, auth: &WotsSig) -> Vec<Vec<u8>> {
+pub fn rebut_witness(head_sigs: &[Vec<u8>], sig: &WotsSig, auth: &WotsSig) -> Vec<Vec<u8>> {
     assert_eq!(head_sigs.len(), HEAD_CHUNKS);
     let mut w = Vec::with_capacity(HEAD_CHUNKS + auth.params.total_digits() as usize + 2 * sig.params.total_digits() as usize);
     // chunk sigs, descending: head chunk 0's sig ends up consumed first
@@ -128,7 +128,7 @@ pub fn check_entry_sig(pk: &WotsPublic, msg: &[u8], sigs: &[[u8; 20]]) -> bool {
 
 /// An entry's authorship signature (`entry = head || reveal hashes || body`)
 /// as a [`WotsSig`] over `msg`, the game's `auth_message` of its head:
-/// what a refutation carries for the claimant's prior head, taken from the
+/// what a rebuttal carries for the claimant's prior head, taken from the
 /// claimant's own published entry. `None` if the entry is too short or the
 /// hashes do not form a signature of `msg`.
 pub fn entry_auth_sig(pk: &WotsPublic, msg: &[u8], entry: &[u8]) -> Option<WotsSig> {
@@ -143,23 +143,23 @@ pub fn disprove_witness(sig: &WotsSig) -> Vec<Vec<u8>> {
     wots_wire(sig)
 }
 
-// ----- the two-head refutation (D35, plan 5.1 option (a)) -----
+// ----- the two-head rebuttal (D35, plan 5.1 option (a)) -----
 
-/// The Winternitz parameters of a PAIR refute key: the refutation at depth
+/// The Winternitz parameters of a PAIR rebuttal key: the rebuttal at depth
 /// `d >= 2` re-commits `head(d-1) || head(d)` (the prior state lives in the
 /// previous slot's head — the tuple (state, move, state') spans two slots).
 pub fn pair_params() -> WotsParams {
     WotsParams::for_bytes(2 * HEAD_BYTES as u32)
 }
 
-/// A pair refute key from entropy. (In the graph: the mover's, one per
+/// A pair rebuttal key from entropy. (In the graph: the mover's, one per
 /// depth, pinned at open; the label-disciplined derivation is in
 /// `crate::instance`.)
 pub fn pair_key(entropy: [u8; 32]) -> WotsSecret {
     WotsSecret::from_entropy(pair_params(), entropy)
 }
 
-/// The two-head refutation leaf, with a GATE over the re-committed digits:
+/// The two-head rebuttal leaf, with a GATE over the re-committed digits:
 /// `gate` runs on the register file (the 192 message digits, digit `j` at stack
 /// depth `191 - j`) right after the re-commitment verify, before the
 /// readout ties the digits to the attestation. The conjunction is
@@ -168,7 +168,7 @@ pub fn pair_key(entropy: [u8; 32]) -> WotsSecret {
 /// attested pair. (The terminal exhibit, D37: the gate is
 /// `status != OPEN` on the new head, so the leaf fires only on a finished
 /// game.)
-pub fn refute_leaf_pair_gated(
+pub fn rebut_leaf_pair_gated(
     table_prev: &EpochTable,
     table: &EpochTable,
     key: &WotsPublic,
@@ -191,7 +191,7 @@ pub fn refute_leaf_pair_gated(
     b.push_int(1).into_script()
 }
 
-/// The two-head refutation leaf with the PRIOR head bound by signature, not
+/// The two-head rebuttal leaf with the PRIOR head bound by signature, not
 /// by the venue (the prior-by-signature change): `gate` must check BOTH
 /// parked heads' authorship — the new head under the mover's depth-`d`
 /// state key and the prior under the claimant's depth-`d-1` key. That key
@@ -201,10 +201,10 @@ pub fn refute_leaf_pair_gated(
 /// the claim is "move `d` was not published", and the prior's publication
 /// is the counter's question, whose tree reads it out as its own new head.
 /// Half the readout's script constants go (about 17 kvB of a 36.6 kvB
-/// chess refutation). Each game's signed region must cover every prior
+/// chess rebuttal). Each game's signed region must cover every prior
 /// field its leaves read; word0, which no game signs, is pinned by
 /// `wrong_slot`, so a forged prior word0 fires against the mover.
-pub fn refute_leaf_pair_signed(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Builder) -> Builder) -> ScriptBuf {
+pub fn rebut_leaf_pair_signed(table: &EpochTable, key: &WotsPublic, gate: impl FnOnce(Builder) -> Builder) -> ScriptBuf {
     let mut b = gate(Builder::new().wots_verify(key));
     // the new head's digits (the file's top 96) to the altstack, its
     // digit 0 coming out first; the prior's 96, now judged by the gate's
@@ -221,11 +221,11 @@ pub fn refute_leaf_pair_signed(table: &EpochTable, key: &WotsPublic, gate: impl 
     b.push_int(1).into_script()
 }
 
-/// The witness of [`refute_leaf_pair_signed`], wire order: the NEW head's
+/// The witness of [`rebut_leaf_pair_signed`], wire order: the NEW head's
 /// chunk sigs (descending), then both authorship blocks, then the pair
 /// reveal. `auth` is `[new, prior]` in consumption order (the new head's
 /// block is checked first).
-pub fn refute_witness_pair_signed(sigs: &[Vec<u8>], sig: &WotsSig, auth: [&WotsSig; 2]) -> Vec<Vec<u8>> {
+pub fn rebut_witness_pair_signed(sigs: &[Vec<u8>], sig: &WotsSig, auth: [&WotsSig; 2]) -> Vec<Vec<u8>> {
     assert_eq!(sigs.len(), HEAD_CHUNKS);
     let n_auth: usize = auth.iter().map(|s| s.params.total_digits() as usize + s.params.checksum_digits as usize).sum();
     let mut w = Vec::with_capacity(HEAD_CHUNKS + n_auth + 2 * sig.params.total_digits() as usize);
@@ -239,7 +239,7 @@ pub fn refute_witness_pair_signed(sigs: &[Vec<u8>], sig: &WotsSig, auth: [&WotsS
     w
 }
 
-/// The two-head refutation witness, wire order: the NEW head's chunk sigs
+/// The two-head rebuttal witness, wire order: the NEW head's chunk sigs
 /// (descending), then the PRIOR head's (descending — its chunk 0's sig is
 /// consumed first after the reveal), then the pair reveal. `sigs_prev`/`sigs`
 /// must sign the spend's sighash under the two slots' tables' head-chunk
@@ -247,9 +247,9 @@ pub fn refute_witness_pair_signed(sigs: &[Vec<u8>], sig: &WotsSig, auth: [&WotsS
 /// (D41, D43 tied-WOTS form) — `auth` in CONSUMPTION order: the block the
 /// gate checks FIRST (`auth[0]`, the new head's) lands on the region top;
 /// tic-tac-toe passes both heads' blocks (`[new, prev]`), chess the judged
-/// head's alone (D42: the pair refute's stack budget — D43 makes
+/// head's alone (D42: the pair rebut's stack budget — D43 makes
 /// both-heads fit again; the narrowing stands as a size choice).
-pub fn refute_witness_pair(
+pub fn rebut_witness_pair(
     sigs_prev: &[Vec<u8>],
     sigs: &[Vec<u8>],
     sig: &WotsSig,

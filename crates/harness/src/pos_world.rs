@@ -48,7 +48,7 @@ pub fn members() -> Vec<Member> {
 }
 
 /// A block the venue sealed, kept whole for later steps' exhibit
-/// construction (the attestation is the refutation's raw material).
+/// construction (the attestation is the rebuttal's raw material).
 pub struct PosWorld {
     pub h: Harness,
     pub miner: PosMiner,

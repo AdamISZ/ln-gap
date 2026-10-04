@@ -1,7 +1,7 @@
 # Testing a chess rule in Script: exhibits
 
 Chess uses the same machinery as [tic-tac-toe](tictactoe-predicates.md):
-the mover's refutation parks two consecutive heads as a 192-digit register
+the mover's rebuttal parks two consecutive heads as a 192-digit register
 file, and the claimant spends the one *disprove leaf* whose rule the move
 broke. Two things are new in chess:
 
@@ -140,7 +140,7 @@ sequenceDiagram
     participant B as Black (mover)
     participant C as Bitcoin
     W->>C: absent_2: "no valid move 2" (189 vB)
-    B->>C: refute: venue's seal of head 2, both heads parked (24,121 vB)
+    B->>C: rebut: venue's seal of head 2, both heads parked (24,121 vB)
     Note over W: runs the 14 leaves off chain:<br/>chess_ray fires with j = 1
     W->>C: disprove_chess_ray, witness [1, the 195 reveal pairs, σ_W] (4,947 vB)
     Note over C: pays White the whole contract output

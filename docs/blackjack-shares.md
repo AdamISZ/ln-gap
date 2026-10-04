@@ -55,7 +55,7 @@ flowchart TB
         S["mover's signature<br/>over the head"]
         Bo["body: the share strings<br/>this move reveals"]
     end
-    H -- "parked by the refutation<br/>(192 digits)" --> L["disprove leaf"]
+    H -- "parked by the rebuttal<br/>(192 digits)" --> L["disprove leaf"]
     Bo -- "copied by the claimant<br/>into the leaf's witness" --> L
     Bo -. "members check, before sealing:<br/>every revealed string opens<br/>its commitment to a value in 0..12" .-> V["venue"]
 ```

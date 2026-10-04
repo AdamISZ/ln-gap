@@ -36,7 +36,7 @@
 //! goes on chain by force-closing the channel. The session, the venue and
 //! the dispute layer are shared with the blackjack demo (`lngap-demo`). Nothing else
 //! connects them: a disprover reads the mover's reveal off the confirmed
-//! refutation on the chain, as it would in deployment.
+//! rebuttal on the chain, as it would in deployment.
 
 mod player;
 
@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     let mut dir = PathBuf::from("chess-venue");
     let mut block_secs = 20u64;
     // the deposit covers the longest dispute path at the demo's fixed
-    // pre-sign fee: claim or counter, refutation, split (4 x 40k)
+    // pre-sign fee: claim or counter, rebuttal, split (4 x 40k)
     let mut timing = Timing { ell: 90, backoff: 5, margin: 60, start_secs: 60, deposit: 170_000 };
     // the last move of a game, in plies (moves by either side): a game
     // that reaches it without a mate is a draw
