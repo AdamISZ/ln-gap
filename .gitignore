@@ -10,3 +10,6 @@
 upstream/
 /docs/design-notes/
 /blackjack-venue/
+
+# the Groth16 working directory crates/apps/zk/scripts/groth16-setup.sh builds by default (holds a GPL-3.0 ELF: never commit it)
+/groth16/

@@ -84,8 +84,8 @@ blackjack, the channel), and the scenario suites:
 
 Limit the harness to two threads: each test drives its own node, and more
 in parallel mainly costs CPU. The zero-knowledge tests run with
-`cargo test -p lngap-zk --release`. The test against the real Groth16
-verifier is opt-in and needs a separate setup.
+`cargo test -p lngap-zk --release`. The tests against the real Groth16
+verifier are opt-in; see *Disputed computation* below.
 
 
 ## Running the demos
@@ -204,3 +204,21 @@ pages, or automatic if you switch on **automatic disputes**.
   node down.
 - The parties can also run without `--web`, taking typed commands in the
   terminal instead.
+
+### Disputed computation (zero knowledge)
+
+The `lngap-zk` crate plays BitVMX's search over a RISC-V program's
+execution as a game on the venue, with only the one disputed step settled
+on chain. With `bitcoind` available, a narrated dispute over a small
+vendored program runs straight from the build:
+
+    cargo run --release -p lngap-zk --bin lngap-zk-demo -- hello honest
+    cargo run --release -p lngap-zk --bin lngap-zk-demo -- hello fake 600
+    cargo run --release -p lngap-zk --bin lngap-zk-demo -- hello bad-input
+
+The paper's headline example disputes BitVMX's **Groth16 verifier** checking
+a real RISC Zero proof (about 479 million steps). Its verifier program is
+GPL-3.0 and isn't included here, so a script assembles it, a sample proof
+and a small parameter patch on your own machine; see
+[`crates/apps/zk/GROTH16.md`](crates/apps/zk/GROTH16.md).
+
