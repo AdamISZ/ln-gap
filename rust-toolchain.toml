@@ -1,0 +1,5 @@
+# The toolchain the README and CI name ("tested with 1.96"). rustup picks it
+# up automatically; bump it here and in the README together.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy"]
