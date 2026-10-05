@@ -1,0 +1,84 @@
+name: CI
+
+# Push and PR: lint and build, then the test suites the README lists (they
+# start throwaway regtest bitcoinds, so the job installs Bitcoin Core).
+# On demand only (Actions tab, "Run workflow"): the opt-in (ignored) tests
+# that need no Groth16 ELF, after a cold build that refetches the pinned git
+# dependencies (BitVMX-CPU, the FairgateLabs script crates).
+#
+# archive/ is skipped: its crates are still compiled as dependencies of the
+# harness and chess-fc, but not linted or tested on their own. The real
+# Groth16 tests are never run here: their setup builds a GPL-3.0 ELF that
+# must not end up in a cache or an artifact.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  BITCOIN_VERSION: "31.0"
+  BITCOIN_SHA256: d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c65074
+  EXCLUDE_ARCHIVE: >-
+    --exclude lngap-party --exclude lngap-spv --exclude lngap-names
+    --exclude lngap-names-fc --exclude lngap-tictactoe-fc
+
+jobs:
+  build:
+    name: Build and clippy
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug
+      # Advisory: clippy's warnings do not fail the job (there is a backlog).
+      - run: cargo clippy --locked --workspace --all-targets $EXCLUDE_ARCHIVE
+      - run: cargo test --locked --workspace $EXCLUDE_ARCHIVE --no-run
+
+  test:
+    name: Tests (regtest)
+    if: github.event_name != 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/bitcoind
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug
+          save-if: false
+      # Every crate but the harness and the ZK crate; then the harness's
+      # scenario suites, two at a time as the README advises.
+      - run: cargo test --locked --workspace $EXCLUDE_ARCHIVE --exclude lngap-harness --exclude lngap-zk
+      - run: cargo test --locked -p lngap-harness --test pos_stall --test pos_chess --test fee_lock -- --test-threads=2
+
+  zk:
+    name: ZK tests (release)
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/bitcoind
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+      - run: cargo test --locked --release -p lngap-zk
+
+  opt-in:
+    name: Opt-in tests, cold build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/bitcoind
+      # No cache: refetch every git dependency at its pinned revision.
+      - run: cargo build --locked --release --workspace $EXCLUDE_ARCHIVE --all-targets
+      - run: cargo test --locked --release -p lngap-chess -- --include-ignored
+      - run: cargo test --locked --release -p lngap-pos --test pos_depth_scaling -- --include-ignored
