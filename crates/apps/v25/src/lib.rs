@@ -235,12 +235,50 @@ pub fn node_leaf(ctx: &CommitCtx, l: &Layout, path_key: &WotsPublic, levels: usi
     Leaf::new(format!("node_{ell}"), concat(&[head.as_bytes(), check.as_bytes(), one.as_bytes()]), Timelock::csv(ctx.params.delta))
 }
 
-/// `pair_kill` on `P_{d,i}`: two different openings under member `i`'s
-/// period key (the one on chain and any other). Witness, wire order: one
-/// opening, the other, the claimant's signature.
-pub fn pair_kill_leaf(ctx: &CommitCtx, l: &Layout, root_key: &WotsPublic) -> Leaf {
+/// The post body: the pair reveal of heads `d-1 ‖ d` under the depth-`d`
+/// rebuttal key and both heads' authorship (v1, D63), the register file
+/// then dropped. The same body serves a ladder step, a self-post and (with
+/// the dating checks after it) a rebuttal.
+fn post_body(b: Builder, l: &Layout, keys: &PosDepthKeys, keys_prev: &PosDepthKeys) -> Builder {
+    let mut b = b.wots_verify(&keys.rebut);
+    b = ttt::authorship_fragment(b, l.file, l.new, &keys.state);
+    b = ttt::authorship_fragment(b, l.file, 0, &keys_prev.state);
+    drop_n(b, l.file)
+}
+
+/// `post` on a ladder output: the mover of depth `l.depth` posts its move
+/// on chain, 2-of-2 pre-signed so that its output is the next ladder
+/// output. Witness, wire order: the prior head's tied authorship block,
+/// the new head's, the pair reveal, the hub's signature, the user's.
+pub fn post_leaf(ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: &PosDepthKeys, name: &str) -> Leaf {
+    let b = post_body(ctx.two_of_two_verify(Builder::new()), l, keys, keys_prev);
+    Leaf::new(name.to_string(), b.push_int(1).into_script(), Timelock::NONE)
+}
+
+/// `self_post_{d}` on the contract output: a censored mover posts its move
+/// on chain itself, into the ladder at depth `d`. It races the claimant's
+/// `absent_d`, which is valid only after the window. Like every leaf of
+/// the contract output the broadcaster can spend, it waits for
+/// `to_self_delay` when the mover is the broadcaster.
+pub fn self_post_leaf(ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: &PosDepthKeys) -> Leaf {
+    let mut b = Builder::new();
+    let mut tl = Timelock::NONE;
+    if l.mover == ctx.broadcaster && ctx.params.to_self_delay > 0 {
+        b = b.csv(ctx.params.to_self_delay);
+        tl.csv = Some(ctx.params.to_self_delay);
+    }
+    let b = post_body(ctx.two_of_two_verify(b), l, keys, keys_prev);
+    Leaf::new(format!("self_post_{}", l.depth), b.push_int(1).into_script(), tl)
+}
+
+/// `pair_continue` on `P_{d,i}`: member `i` opened two different roots for
+/// the period, so the dating cannot be trusted either way, and the game
+/// continues on chain from depth `d` (a member's fault moves no money).
+/// 2-of-2 pre-signed into the ladder output at depth `d`. Witness, wire
+/// order: one opening, the other, the hub's signature, the user's.
+pub fn pair_continue_leaf(ctx: &CommitCtx, root_key: &WotsPublic) -> Leaf {
     let m = root_key.params.message_digits as usize;
-    let mut b = gate(ctx, l).wots_verify(root_key);
+    let mut b = ctx.two_of_two_verify(Builder::new()).wots_verify(root_key);
     for _ in 0..m {
         b = b.push_opcode(OP_TOALTSTACK);
     }
@@ -261,24 +299,38 @@ pub fn pair_kill_leaf(ctx: &CommitCtx, l: &Layout, root_key: &WotsPublic) -> Lea
     }
     b = b.push_opcode(OP_VERIFY);
     b = drop_n(b, 2 * m);
-    Leaf::new("pair_kill", b.push_int(1).into_script(), Timelock::csv(ctx.params.delta))
+    Leaf::new("pair_continue", b.push_int(1).into_script(), Timelock::NONE)
 }
 
-/// `empty_kill` on `P_{d,i}`: member `i` closed the period empty.
-/// Witness, wire order: the preimage `z`, the claimant's signature.
-pub fn empty_kill_leaf(ctx: &CommitCtx, l: &Layout, empty_hash: &Hash160) -> Leaf {
-    let b = gate(ctx, l).push_opcode(OP_HASH160).push_bytes(empty_hash).push_opcode(OP_EQUAL);
-    Leaf::new("empty_kill", b.into_script(), Timelock::csv(ctx.params.delta))
+/// `empty_continue` on `P_{d,i}`: member `i` closed the period empty, so a
+/// root under its key was made afterwards; continue on chain as for a
+/// pair. Witness, wire order: the preimage `z`, the hub's signature, the
+/// user's.
+pub fn empty_continue_leaf(ctx: &CommitCtx, empty_hash: &Hash160) -> Leaf {
+    let b = ctx.two_of_two_verify(Builder::new()).push_opcode(OP_HASH160).push_bytes(empty_hash).push_opcode(OP_EQUAL);
+    Leaf::new("empty_continue", b.into_script(), Timelock::NONE)
 }
 
-/// The tree of the claim output `A_d`: one rebuttal per window member and
-/// the claimant's timeout splits.
+/// `waive` on `A_d`: the claimant has signed its own move at `d + 1`, so it
+/// accepted move `d`; the claim is defeated and pays the mover, 2-of-2
+/// pre-signed. `claimant_next` is the claimant's state key for `d + 1`.
+/// Witness, wire order: that signature, the hub's signature, the user's.
+pub fn waive_leaf(ctx: &CommitCtx, claimant_next: &WotsPublic) -> Leaf {
+    let b = ctx.two_of_two_verify(Builder::new()).wots_verify(claimant_next);
+    let b = drop_n(b, claimant_next.params.message_digits as usize);
+    Leaf::new("waive", b.push_int(1).into_script(), Timelock::NONE)
+}
+
+/// The tree of the claim output `A_d`: one rebuttal per window member, the
+/// waiver (when there is a depth `d + 1`), and the claimant's timeout
+/// splits.
 #[allow(clippy::too_many_arguments)]
 pub fn claim_tree(
     ctx: &CommitCtx,
     l: &Layout,
     keys: &PosDepthKeys,
     keys_prev: &PosDepthKeys,
+    keys_next: Option<&PosDepthKeys>,
     window: &[WindowMember],
     path_key: &WotsPublic,
     levels: usize,
@@ -288,6 +340,9 @@ pub fn claim_tree(
         .iter()
         .map(|w| rebut_leaf(ctx, l, keys, keys_prev, w, path_key, levels, &format!("rebut_{}", w.member)))
         .collect();
+    if let Some(next) = keys_next {
+        leaves.push(waive_leaf(ctx, &next.state));
+    }
     for o in outcomes {
         leaves.push(split_leaf(ctx, o, ctx.params.delta, &keys.claimant_code));
     }
@@ -306,21 +361,46 @@ pub fn rebuttal_tree(
     contract: u32,
     outcomes: &[Outcome],
 ) -> anyhow::Result<TapTree> {
-    let mut leaves = Vec::new();
-    for pl in ttt::disprove_leaves(l, &keys.rebut) {
-        let head = gate(ctx, l).into_script();
-        leaves.push(Leaf::new(format!("disprove_{}", pl.name), concat(&[head.as_bytes(), pl.script.as_bytes()]), Timelock::csv(ctx.params.delta)));
-    }
+    let mut leaves = disprove_family(ctx, l, keys);
     leaves.push(leaf_hash_leaf(ctx, l, keys, path_key, contract));
     for ell in 0..levels {
         leaves.push(node_leaf(ctx, l, path_key, levels, ell, w.slot));
     }
-    leaves.push(pair_kill_leaf(ctx, l, &w.root_key));
-    leaves.push(empty_kill_leaf(ctx, l, &w.empty_hash));
+    leaves.push(pair_continue_leaf(ctx, &w.root_key));
+    leaves.push(empty_continue_leaf(ctx, &w.empty_hash));
+    leaves.extend(checked_splits(ctx, l, keys, outcomes));
+    TapTree::new(leaves)
+}
+
+fn disprove_family(ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys) -> Vec<Leaf> {
+    ttt::disprove_leaves(l, &keys.rebut)
+        .into_iter()
+        .map(|pl| {
+            let head = gate(ctx, l).into_script();
+            Leaf::new(format!("disprove_{}", pl.name), concat(&[head.as_bytes(), pl.script.as_bytes()]), Timelock::csv(ctx.params.delta))
+        })
+        .collect()
+}
+
+fn checked_splits(ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Vec<Leaf> {
     let window = ctx.params.delta + ctx.params.delta_prime;
-    for o in outcomes {
-        leaves.push(ttt::checked_split_leaf(ctx, l, o, window, &keys.mover_code, &keys.rebut));
+    outcomes.iter().map(|o| ttt::checked_split_leaf(ctx, l, o, window, &keys.mover_code, &keys.rebut)).collect()
+}
+
+/// The tree of a LADDER output at depth `j`: move `j` is on chain (posted,
+/// or parked by a rebuttal). The rule family judges it (after `delta`);
+/// the next mover posts move `j + 1` (no delay); failing that, the mover
+/// of `j` is paid R(state `j`) by its checked split (after
+/// `delta + delta'`), which for an open state with the opponent to move is
+/// the opponent's forfeit. `keys[i]` is depth `i + 1`'s key set.
+pub fn ladder_tree(ctx: &CommitCtx, game_id: u16, j: u32, keys: &[PosDepthKeys], outcomes: &[Outcome]) -> anyhow::Result<TapTree> {
+    let l = Layout::at(j, game_id, keys[(j - 1) as usize].mover);
+    let mut leaves = disprove_family(ctx, &l, &keys[(j - 1) as usize]);
+    if (j as usize) < keys.len() {
+        let next = Layout::at(j + 1, game_id, keys[j as usize].mover);
+        leaves.push(post_leaf(ctx, &next, &keys[j as usize], &keys[(j - 1) as usize], "post"));
     }
+    leaves.extend(checked_splits(ctx, &l, &keys[(j - 1) as usize], outcomes));
     TapTree::new(leaves)
 }
 
