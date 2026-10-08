@@ -1,0 +1,24 @@
+[package]
+name = "lngap-v25"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# LN-GAP 2.5's contract graph (V25_POC_PLAN.md, Phase 4): moves dated by
+# members' seal closings (lngap-seal), rebuttals through a member's
+# connector leaf, inclusion disputed level by level with BitVMX's BLAKE3.
+# Tic-tac-toe first, reusing v1's disprove family (lngap-pos).
+
+[dependencies]
+lngap-seal = { path = "../seal" }
+lngap-pos = { path = "../pos" }
+lngap-channel = { path = "../../channel" }
+lngap-contract = { path = "../../contract" }
+lngap-lamport = { path = "../../lamport" }
+lngap-btc = { path = "../../btc" }
+lngap-factchain = { path = "../factchain" }
+lngap-tictactoe = { path = "../tictactoe" }
+anyhow.workspace = true
+bitcoin.workspace = true
+bitcoin-script-functions = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-functions", tag = "v0.6.0" }
+bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-stack", tag = "v0.6.0" }

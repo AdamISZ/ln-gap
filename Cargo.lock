@@ -1248,6 +1248,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-v25"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "bitcoin-script-functions",
+ "bitcoin-script-stack",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-factchain",
+ "lngap-lamport",
+ "lngap-pos",
+ "lngap-seal",
+ "lngap-tictactoe",
+]
+
+[[package]]
 name = "lngap-zk"
 version = "0.1.0"
 dependencies = [
