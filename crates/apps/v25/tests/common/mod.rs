@@ -20,7 +20,7 @@ use lngap_pos::ttt::{self, Layout};
 use lngap_seal::dating::{Choice, PeriodTree};
 use lngap_seal::{ceremony, first_tree, Member, PresignedChain, SealSpec};
 use lngap_tictactoe::{Board, TicTacToe};
-use lngap_v25::{claim_tree, path_message, path_params, rebuttal_tree, WindowMember};
+use lngap_v25::{carrier_tree, claim_tree, level_message, level_params, rebuttal_tree, TttDated, WindowMember, CARRIER_SAT, LEVEL_BYTES};
 
 pub const GAME_ID: u16 = 1;
 pub const D: u32 = 2;
@@ -82,7 +82,8 @@ pub struct Game {
     pub pubs: [PartyPubKeys; 2],
     /// Key sets for depths 1..=max (index depth - 1).
     pub keys: Vec<PosDepthKeys>,
-    pub path_key: WotsPublic,
+    /// The mover's level keys for depth `D`, one per path level.
+    pub level_keys: Vec<WotsPublic>,
     pub outcomes: Vec<Outcome>,
 }
 
@@ -99,13 +100,13 @@ impl Game {
         let ou = instance::gen_pos_keys(&mut user_ks, Role::User, id, SEQ, max_depth, instance::Game::Ttt).unwrap();
         let oh = instance::gen_pos_keys(&mut hub_ks, Role::Hub, id, SEQ, max_depth, instance::Game::Ttt).unwrap();
         let keys = instance::collect_keys(&ou, &oh, max_depth).unwrap();
-        // the mover's path key for depth 2 (the hub moves at even depths)
+        // the mover's level keys for depth 2 (the hub moves at even depths)
         assert_eq!(instance::mover_at(D), Role::Hub);
-        let path_key = hub_ks.generate_wots(&path_label(id), lngap_v25::path_bytes(LEVELS)).unwrap();
-        assert_eq!(path_key.params, path_params(LEVELS));
+        let level_keys: Vec<WotsPublic> = (0..LEVELS).map(|ell| hub_ks.generate_wots(&level_label(id, ell), LEVEL_BYTES).unwrap()).collect();
+        assert_eq!(level_keys[0].params, level_params());
         let params = ChannelParams::regtest(Amount::from_sat(400_000));
         let pubs = [user.public(), hub.public()];
-        Game { id, user, hub, user_ks, hub_ks, params, pubs, keys, path_key, outcomes: Contract::outcomes(&TicTacToe) }
+        Game { id, user, hub, user_ks, hub_ks, params, pubs, keys, level_keys, outcomes: Contract::outcomes(&TicTacToe) }
     }
     /// Broadcaster: the hub, so the user's claim needs no to_self_delay.
     pub fn ctx(&self) -> CommitCtx<'_> {
@@ -138,8 +139,8 @@ impl Game {
     }
 }
 
-pub fn path_label(id: u32) -> String {
-    format!("v25/path/{id}/{D}")
+pub fn level_label(id: u32, ell: usize) -> String {
+    format!("v25/level/{id}/{D}/{ell}")
 }
 
 pub fn sig(kp: &Keypair, tx: &Transaction, input: usize, prevouts: &[TxOut], leaf: &ScriptBuf) -> Vec<u8> {
@@ -156,6 +157,8 @@ pub struct Open {
     pub c_tree: TapTree,
     pub c_op: OutPoint,
     pub c_out: TxOut,
+    /// The claim's carrier outputs, one per path level, and their trees.
+    pub carriers: Vec<(OutPoint, TxOut, TapTree)>,
 }
 
 /// Build the contract output (one leaf: `absent_2` after `lock`), fund it,
@@ -164,21 +167,27 @@ pub fn open(rt: &Regtest, g: &Game, window: Vec<WindowMember>, lock: u32) -> Ope
     let ctx = g.ctx();
     let l = g.layout();
     let (kp, kn) = (&g.keys[0], &g.keys[1]);
-    let a_tree = claim_tree(&ctx, &l, kn, kp, g.keys.get(D as usize), &window, &g.path_key, LEVELS, &g.outcomes).unwrap();
+    let a_tree = claim_tree(&TttDated, &ctx, &l, kn, kp, g.keys.get(D as usize), &window, &g.outcomes).unwrap();
     let absent = lngap_pos::graph::absent_leaf(&ctx, "absent_2", Role::User, lock);
-    let self_post = lngap_v25::self_post_leaf(&ctx, &l, kn, kp);
+    let self_post = lngap_v25::self_post_leaf(&TttDated, &ctx, &l, kn, kp);
     let c_tree = TapTree::new(vec![absent, self_post]).unwrap();
     let value = Amount::from_sat(100_000);
     let (c_op, c_out) = rt.fund(&c_tree.script_pubkey(), value).unwrap();
-    let a_out = TxOut { value: value - g.params.presign_fee, script_pubkey: a_tree.script_pubkey() };
+    let trees: Vec<TapTree> = g.level_keys.iter().map(|k| carrier_tree(&ctx, Role::Hub, k).unwrap()).collect();
+    let carry = Amount::from_sat(CARRIER_SAT);
+    let a_out = TxOut { value: value - g.params.presign_fee - carry * trees.len() as u64, script_pubkey: a_tree.script_pubkey() };
     let leaf = c_tree.leaf("absent_2").unwrap();
-    let mut claim = build_spend(c_op, &leaf.timelock, vec![a_out.clone()]);
+    let mut outs = vec![a_out.clone()];
+    outs.extend(trees.iter().map(|t| TxOut { value: carry, script_pubkey: t.script_pubkey() }));
+    let mut claim = build_spend(c_op, &leaf.timelock, outs);
     let w = vec![
         sig(&g.hub.payment, &claim, 0, std::slice::from_ref(&c_out), &leaf.script),
         sig(&g.user.payment, &claim, 0, std::slice::from_ref(&c_out), &leaf.script),
     ];
     claim.input[0].witness = tapscript_witness(&w, &leaf.script, &c_tree.control_block("absent_2").unwrap());
-    Open { a_tree, claim, a_out, window, c_tree, c_op, c_out }
+    let txid = claim.compute_txid();
+    let carriers = trees.into_iter().enumerate().map(|(k, t)| (OutPoint { txid, vout: k as u32 + 1 }, claim.output[k + 1].clone(), t)).collect();
+    Open { a_tree, claim, a_out, window, c_tree, c_op, c_out, carriers }
 }
 
 /// A member's window entry for slot `s` of its period 1.
@@ -205,7 +214,7 @@ pub fn mine_missing(rt: &Regtest, txs: &[Transaction]) {
 /// The hub's rebuttal through window member `wm` (index into the window):
 /// unfold the member's connector path, then spend `A_2` and the leaf.
 #[allow(clippy::too_many_arguments)]
-pub fn rebut(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[VenueMember], heads: (&[u8; 48], &[u8; 48]), tree: &PeriodTree, root_sig: &WotsSig) -> (OutPoint, TxOut, WotsSig, WotsSig, Transaction) {
+pub fn rebut(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[VenueMember], heads: (&[u8; 48], &[u8; 48]), tree: &PeriodTree, root_sig: &WotsSig) -> (OutPoint, TxOut, WotsSig, Vec<WotsSig>, Transaction) {
     let path = path_of(tree, o.window[wm].slot);
     rebut_with(rt, g, o, wm, venue, heads, path, root_sig, true)
 }
@@ -213,7 +222,7 @@ pub fn rebut(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[VenueMemb
 /// As [`rebut`], with the asserted path given explicitly; `mine` false
 /// returns the transaction without broadcasting it.
 #[allow(clippy::too_many_arguments)]
-pub fn rebut_with(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[VenueMember], heads: (&[u8; 48], &[u8; 48]), path: (Vec<[u8; 20]>, Vec<[u8; 20]>), root_sig: &WotsSig, mine: bool) -> (OutPoint, TxOut, WotsSig, WotsSig, Transaction) {
+pub fn rebut_with(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[VenueMember], heads: (&[u8; 48], &[u8; 48]), path: (Vec<[u8; 20]>, Vec<[u8; 20]>), root_sig: &WotsSig, mine: bool) -> (OutPoint, TxOut, WotsSig, Vec<WotsSig>, Transaction) {
     let ctx_l = g.layout();
     let w = o.window[wm].clone();
     let vm = &venue[w.member];
@@ -221,15 +230,15 @@ pub fn rebut_with(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[Venu
         mine_missing(rt, &vm.chain.connector_path(w.period, w.slot).unwrap());
     }
     let ctx = g.ctx();
-    let p_tree = rebuttal_tree(&ctx, &ctx_l, &g.keys[1], &w, &g.path_key, LEVELS, g.id, &g.outcomes).unwrap();
+    let p_tree = rebuttal_tree(&TttDated, &ctx, &ctx_l, &g.keys[1], &w, &g.level_keys, g.id, &g.outcomes).unwrap();
     let a_op = OutPoint { txid: o.claim.compute_txid(), vout: 0 };
-    let p_out = TxOut { value: o.a_out.value + w.leaf.1.value - g.params.presign_fee, script_pubkey: p_tree.script_pubkey() };
-    let mut tx = build_tx(
-        &[(a_op, Sequence::ENABLE_RBF_NO_LOCKTIME), (w.leaf.0, Sequence::ENABLE_RBF_NO_LOCKTIME)],
-        vec![p_out.clone()],
-        absolute::LockTime::ZERO,
-    );
-    let prevouts = [o.a_out.clone(), w.leaf.1.clone()];
+    let carried: u64 = o.carriers.iter().map(|c| c.1.value.to_sat()).sum();
+    let p_out = TxOut { value: o.a_out.value + w.leaf.1.value + Amount::from_sat(carried) - g.params.presign_fee, script_pubkey: p_tree.script_pubkey() };
+    let mut ins = vec![(a_op, Sequence::ENABLE_RBF_NO_LOCKTIME), (w.leaf.0, Sequence::ENABLE_RBF_NO_LOCKTIME)];
+    ins.extend(o.carriers.iter().map(|c| (c.0, Sequence::ENABLE_RBF_NO_LOCKTIME)));
+    let mut tx = build_tx(&ins, vec![p_out.clone()], absolute::LockTime::ZERO);
+    let mut prevouts = vec![o.a_out.clone(), w.leaf.1.clone()];
+    prevouts.extend(o.carriers.iter().map(|c| c.1.clone()));
     let name = format!("rebut_{}", w.member);
     let leaf = o.a_tree.leaf(&name).unwrap();
     // the mover's reveals
@@ -241,9 +250,8 @@ pub fn rebut_with(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[Venu
     let new_auth = g.ks(Role::Hub).sign_wots(&instance::state_label(id, SEQ, D), &ttt::auth_message(new_head)).unwrap();
     let prior_auth = g.ks(Role::User).sign_wots(&instance::state_label(id, SEQ, D - 1), &ttt::auth_message(prev_head)).unwrap();
     let (digests, siblings) = path;
-    let path = g.ks(Role::Hub).sign_wots(&path_label(id), &path_message(&digests, &siblings)).unwrap();
-    let mut wit = wots_wire(&path);
-    wit.extend(wots_wire(root_sig));
+    let levels: Vec<WotsSig> = (0..LEVELS).map(|ell| g.ks(Role::Hub).sign_wots(&level_label(id, ell), &level_message(&digests[ell], &siblings[ell])).unwrap()).collect();
+    let mut wit = wots_wire(root_sig);
     wit.extend(wots_wire_tied(&prior_auth));
     wit.extend(wots_wire_tied(&new_auth));
     wit.extend(wots_wire(&pair));
@@ -251,12 +259,18 @@ pub fn rebut_with(rt: &Regtest, g: &mut Game, o: &Open, wm: usize, venue: &[Venu
     wit.push(sig(&g.user.payment, &tx, 0, &prevouts, &leaf.script));
     tx.input[0].witness = tapscript_witness(&wit, &leaf.script, &o.a_tree.control_block(&name).unwrap());
     tx.input[1].witness = vm.chain.leaf_witness(w.period, w.slot, &vm.member.leaf_preimage(w.period, w.slot)).unwrap();
+    for (k, (c, lv)) in o.carriers.iter().zip(&levels).enumerate() {
+        let leaf = c.2.leaf("carry").unwrap();
+        let mut cw = wots_wire(lv);
+        cw.push(sig(&g.hub.payment, &tx, k + 2, &prevouts, &leaf.script));
+        tx.input[k + 2].witness = tapscript_witness(&cw, &leaf.script, &c.2.control_block("carry").unwrap());
+    }
     if !mine {
-        return (OutPoint { txid: tx.compute_txid(), vout: 0 }, p_out, pair, path, tx);
+        return (OutPoint { txid: tx.compute_txid(), vout: 0 }, p_out, pair, levels, tx);
     }
     rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("the rebuttal through member {} must mine: {e:#}", w.member));
     println!("V25 rebuttal through member {}: {} vB", w.member, tx.vsize());
-    (OutPoint { txid: tx.compute_txid(), vout: 0 }, p_out, pair, path, tx)
+    (OutPoint { txid: tx.compute_txid(), vout: 0 }, p_out, pair, levels, tx)
 }
 
 /// The path of slot `s`: digests `c_0 .. c_L` and siblings.
@@ -269,7 +283,7 @@ pub fn path_of(tree: &PeriodTree, s: u32) -> (Vec<[u8; 20]>, Vec<[u8; 20]>) {
 /// below the claimant's signature; paying the user. Dry (not broadcast).
 pub fn claimant_spend(g: &Game, w: &WindowMember, p_op: OutPoint, p_out: &TxOut, name: &str, wire: Vec<Vec<u8>>) -> Transaction {
     let ctx = g.ctx();
-    let p_tree = rebuttal_tree(&ctx, &g.layout(), &g.keys[1], w, &g.path_key, LEVELS, g.id, &g.outcomes).unwrap();
+    let p_tree = rebuttal_tree(&TttDated, &ctx, &g.layout(), &g.keys[1], w, &g.level_keys, g.id, &g.outcomes).unwrap();
     let leaf = p_tree.leaf(name).unwrap();
     let mut tx = build_spend(p_op, &leaf.timelock, vec![TxOut { value: p_out.value - g.params.presign_fee, script_pubkey: g.pubs[0].payout_spk.clone() }]);
     let mut wit = wire;
@@ -281,7 +295,7 @@ pub fn claimant_spend(g: &Game, w: &WindowMember, p_op: OutPoint, p_out: &TxOut,
 /// The hub's checked split of `P` by outcome `code`, after `delta + delta'`.
 pub fn checked_split(g: &mut Game, w: &WindowMember, p_op: OutPoint, p_out: &TxOut, code: u8, pair: &WotsSig) -> Transaction {
     let ctx = g.ctx();
-    let p_tree = rebuttal_tree(&ctx, &g.layout(), &g.keys[1], w, &g.path_key, LEVELS, g.id, &g.outcomes).unwrap();
+    let p_tree = rebuttal_tree(&TttDated, &ctx, &g.layout(), &g.keys[1], w, &g.level_keys, g.id, &g.outcomes).unwrap();
     let o = g.outcomes.iter().find(|o| o.code == code).unwrap().clone();
     let name = format!("split_{}", o.name);
     let leaf = p_tree.leaf(&name).unwrap();
@@ -326,14 +340,14 @@ pub fn leaf_of(id: u32, head: &[u8; 48]) -> [u8; 20] {
 
 /// The ladder output at depth `j` for game `g`.
 pub fn ladder(g: &Game, j: u32) -> TapTree {
-    lngap_v25::ladder_tree(&g.ctx(), GAME_ID, j, &g.keys, &g.outcomes).unwrap()
+    lngap_v25::ladder_tree(&TttDated, &g.ctx(), GAME_ID, j, &g.keys, &g.outcomes).unwrap()
 }
 
 /// A continuation off `P` through leaf `name` (2-of-2 pre-signed) into the
 /// ladder at depth 2, with `wire` below the two signatures. Dry.
 pub fn continue_tx(g: &Game, w: &WindowMember, p_op: OutPoint, p_out: &TxOut, name: &str, wire: Vec<Vec<u8>>) -> (Transaction, TxOut) {
     let ctx = g.ctx();
-    let p_tree = rebuttal_tree(&ctx, &g.layout(), &g.keys[1], w, &g.path_key, LEVELS, g.id, &g.outcomes).unwrap();
+    let p_tree = rebuttal_tree(&TttDated, &ctx, &g.layout(), &g.keys[1], w, &g.level_keys, g.id, &g.outcomes).unwrap();
     let leaf = p_tree.leaf(name).unwrap();
     let t_out = TxOut { value: p_out.value - g.params.presign_fee, script_pubkey: ladder(g, D).script_pubkey() };
     let mut tx = build_spend(p_op, &leaf.timelock, vec![t_out.clone()]);

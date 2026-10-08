@@ -14,8 +14,8 @@
 //!   disprove takes the pot;
 //! - S3, a substituted move (the option attack): a colluding member dated
 //!   a move A the hub never signed; the hub later signs B and rebuts with
-//!   B's heads and A's path; the rebuttal's own checks pass (the path's
-//!   top is the root), and the user's `leaf_hash` disprove takes the pot
+//!   B's heads and A's path; the rebuttal's own checks pass (the path
+//!   leads to the root), and the user's `leaf_hash` disprove takes the pot
 //!   (here the substitution loses; it would win only if B were the dated
 //!   leaf, i.e. if the member had dated B in time);
 //! - S1, a stall: the hub never moved; no member dated anything for this
@@ -92,13 +92,13 @@ fn ttt_disputes_dated_by_members() {
     println!("V25 absence claim: {} vB", opens[0].claim.vsize());
 
     // ---- S2: a false claim, defeated; the checked split pays HubWins ----
-    let (p_op, p_out, pair, path, _) = rebut(&rt, &mut games[0], &opens[0], 0, &venue, (&heads[0].0, &h2_ok), &tree, &root_sigs[0]);
+    let (p_op, p_out, pair, levels, _) = rebut(&rt, &mut games[0], &opens[0], 0, &venue, (&heads[0].0, &h2_ok), &tree, &root_sigs[0]);
     let w0 = opens[0].window[0].clone();
     // no disprove fires: leaf_hash and the node checks hold for an honest path
     rt.mine(u64::from(games[0].params.delta)).unwrap();
-    let lh = claimant_spend(&games[0], &w0, p_op, &p_out, "leaf_hash", [wots_wire(&pair), wots_wire(&path)].concat());
+    let lh = claimant_spend(&games[0], &w0, p_op, &p_out, "leaf_hash", [wots_wire(&pair), wots_wire(&levels[0])].concat());
     assert!(rt.mine_with(std::slice::from_ref(&lh)).is_err(), "an honest leaf digest does not fire leaf_hash");
-    let n0 = claimant_spend(&games[0], &w0, p_op, &p_out, "node_0", wots_wire(&path));
+    let n0 = claimant_spend(&games[0], &w0, p_op, &p_out, "node_0", [wots_wire(&levels[0]), wots_wire(&levels[1])].concat());
     assert!(rt.mine_with(std::slice::from_ref(&n0)).is_err(), "an honest path does not fire node_0");
     rt.mine(u64::from(games[0].params.delta_prime)).unwrap();
     let split = checked_split(&mut games[0], &w0, p_op, &p_out, 1, &pair);
@@ -115,10 +115,10 @@ fn ttt_disputes_dated_by_members() {
 
     // ---- S3: a substituted move; leaf_hash fires ----
     let (_, h2_b) = games[2].play(2, &heads[2].1, 8); // B: the move the hub signs, later
-    let (p_op, p_out, pair, path, _) = rebut(&rt, &mut games[2], &opens[2], 0, &venue, (&heads[2].0, &h2_b), &tree, &root_sigs[0]);
+    let (p_op, p_out, pair, levels, _) = rebut(&rt, &mut games[2], &opens[2], 0, &venue, (&heads[2].0, &h2_b), &tree, &root_sigs[0]);
     let w2 = opens[2].window[0].clone();
     rt.mine(u64::from(games[2].params.delta)).unwrap();
-    let lh = claimant_spend(&games[2], &w2, p_op, &p_out, "leaf_hash", [wots_wire(&pair), wots_wire(&path)].concat());
+    let lh = claimant_spend(&games[2], &w2, p_op, &p_out, "leaf_hash", [wots_wire(&pair), wots_wire(&levels[0])].concat());
     rt.mine_with(std::slice::from_ref(&lh)).unwrap_or_else(|e| panic!("S3: leaf_hash must fire on a substituted move: {e:#}"));
     println!("V25 S3 leaf_hash disprove: {} vB", lh.vsize());
 
@@ -224,12 +224,12 @@ fn member_faults() {
     // ---- a malformed path: a wrong level-1 sibling; node_1 fires ----
     let (digests, mut siblings) = path_of(&tree1, 3);
     siblings[1] = [0x55; 20];
-    let (p_op, p_out, _, path, _) = rebut_with(&rt, &mut games[3], &opens[3], 0, &venue, (&prior[3].0, &h_g4), (digests, siblings), &root1, true);
+    let (p_op, p_out, _, levels, _) = rebut_with(&rt, &mut games[3], &opens[3], 0, &venue, (&prior[3].0, &h_g4), (digests, siblings), &root1, true);
     let w = opens[3].window[0].clone();
     rt.mine(u64::from(games[3].params.delta)).unwrap();
-    let n0 = claimant_spend(&games[3], &w, p_op, &p_out, "node_0", wots_wire(&path));
+    let n0 = claimant_spend(&games[3], &w, p_op, &p_out, "node_0", [wots_wire(&levels[0]), wots_wire(&levels[1])].concat());
     assert!(rt.mine_with(std::slice::from_ref(&n0)).is_err(), "level 0 is honest: node_0 does not fire");
-    let n1 = claimant_spend(&games[3], &w, p_op, &p_out, "node_1", wots_wire(&path));
+    let n1 = claimant_spend(&games[3], &w, p_op, &p_out, "node_1", [wots_wire(&levels[1]), wots_wire(&root1)].concat());
     rt.mine_with(std::slice::from_ref(&n1)).unwrap_or_else(|e| panic!("node_1 must fire on a wrong sibling: {e:#}"));
     println!("V25 node_1 disprove: {} vB", n1.vsize());
 }

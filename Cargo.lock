@@ -1255,6 +1255,7 @@ dependencies = [
  "bitcoin",
  "bitcoin-script-functions",
  "bitcoin-script-stack",
+ "emulator",
  "lngap-btc",
  "lngap-channel",
  "lngap-contract",
@@ -1263,6 +1264,7 @@ dependencies = [
  "lngap-pos",
  "lngap-seal",
  "lngap-tictactoe",
+ "lngap-zk",
 ]
 
 [[package]]

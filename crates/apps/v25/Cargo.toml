@@ -22,3 +22,7 @@ anyhow.workspace = true
 bitcoin.workspace = true
 bitcoin-script-functions = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-functions", tag = "v0.6.0" }
 bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-stack", tag = "v0.6.0" }
+
+[dev-dependencies]
+lngap-zk = { path = "../zk" }
+emulator = { git = "https://github.com/FairgateLabs/BitVMX-CPU", rev = "299009c65e635327025ee13ffe1e1f1671bd0615" }
