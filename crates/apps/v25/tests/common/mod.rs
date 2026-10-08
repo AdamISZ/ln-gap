@@ -167,9 +167,9 @@ pub fn open(rt: &Regtest, g: &Game, window: Vec<WindowMember>, lock: u32) -> Ope
     let ctx = g.ctx();
     let l = g.layout();
     let (kp, kn) = (&g.keys[0], &g.keys[1]);
-    let a_tree = claim_tree(&TttDated, &ctx, &l, kn, kp, g.keys.get(D as usize), &window, &g.outcomes).unwrap();
+    let a_tree = claim_tree(&TttDated, &ctx, &l, kn, Some(kp), g.keys.get(D as usize), &window, &g.outcomes).unwrap();
     let absent = lngap_pos::graph::absent_leaf(&ctx, "absent_2", Role::User, lock);
-    let self_post = lngap_v25::self_post_leaf(&TttDated, &ctx, &l, kn, kp);
+    let self_post = lngap_v25::self_post_leaf(&TttDated, &ctx, &l, kn, Some(kp));
     let c_tree = TapTree::new(vec![absent, self_post]).unwrap();
     let value = Amount::from_sat(100_000);
     let (c_op, c_out) = rt.fund(&c_tree.script_pubkey(), value).unwrap();

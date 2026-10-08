@@ -1256,6 +1256,7 @@ dependencies = [
  "bitcoin-script-functions",
  "bitcoin-script-stack",
  "emulator",
+ "hex",
  "lngap-btc",
  "lngap-channel",
  "lngap-contract",

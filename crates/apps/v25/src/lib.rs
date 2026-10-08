@@ -256,8 +256,7 @@ fn gate(ctx: &CommitCtx, l: &Layout) -> Builder {
 /// Witness, wire order (bottom first): the root reveal, the prior head's
 /// tied authorship block, the new head's, the pair reveal, the hub's
 /// signature, the user's (consumed first).
-pub fn rebut_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: &PosDepthKeys, w: &WindowMember, name: &str) -> Leaf {
-    assert!(l.prior.is_some(), "rebuttals cover depths from 2");
+pub fn rebut_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>, w: &WindowMember, name: &str) -> Leaf {
     let b = post_body(g, ctx.two_of_two_verify(Builder::new()), l, keys, keys_prev);
     let b = drop_n(b.wots_verify(&w.root_key), DIGITS);
     Leaf::new(name.to_string(), b.push_int(1).into_script(), Timelock::NONE)
@@ -332,12 +331,15 @@ pub fn node_leaf(ctx: &CommitCtx, l: &Layout, lower: &WotsPublic, upper: &WotsPu
 
 /// The post body: the pair reveal of heads `d-1 ‖ d` under the depth-`d`
 /// rebuttal key and both heads' authorship (v1, D63), the register file
-/// then dropped. The same body serves a ladder step, a self-post and (with
+/// then dropped. At depth 1 there is no prior: the reveal is of the head
+/// alone (`keys_prev` is `None`). The same body serves a ladder step, a self-post and (with
 /// the dating checks after it) a rebuttal.
-fn post_body(g: &dyn Dated, b: Builder, l: &Layout, keys: &PosDepthKeys, keys_prev: &PosDepthKeys) -> Builder {
+fn post_body(g: &dyn Dated, b: Builder, l: &Layout, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Builder {
     let mut b = b.wots_verify(&keys.rebut);
     b = g.authorship(b, l.file, l.new, &keys.state);
-    b = g.authorship(b, l.file, 0, &keys_prev.state);
+    if l.prior.is_some() {
+        b = g.authorship(b, l.file, 0, &keys_prev.expect("a pair has a prior").state);
+    }
     drop_n(b, l.file)
 }
 
@@ -345,7 +347,7 @@ fn post_body(g: &dyn Dated, b: Builder, l: &Layout, keys: &PosDepthKeys, keys_pr
 /// on chain, 2-of-2 pre-signed so that its output is the next ladder
 /// output. Witness, wire order: the prior head's tied authorship block,
 /// the new head's, the pair reveal, the hub's signature, the user's.
-pub fn post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: &PosDepthKeys, name: &str) -> Leaf {
+pub fn post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>, name: &str) -> Leaf {
     let b = post_body(g, ctx.two_of_two_verify(Builder::new()), l, keys, keys_prev);
     Leaf::new(name.to_string(), b.push_int(1).into_script(), Timelock::NONE)
 }
@@ -355,7 +357,7 @@ pub fn post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys
 /// `absent_d`, which is valid only after the window. Like every leaf of
 /// the contract output the broadcaster can spend, it waits for
 /// `to_self_delay` when the mover is the broadcaster.
-pub fn self_post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: &PosDepthKeys) -> Leaf {
+pub fn self_post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Leaf {
     let mut b = Builder::new();
     let mut tl = Timelock::NONE;
     if l.mover == ctx.broadcaster && ctx.params.to_self_delay > 0 {
@@ -425,7 +427,7 @@ pub fn claim_tree(
     ctx: &CommitCtx,
     l: &Layout,
     keys: &PosDepthKeys,
-    keys_prev: &PosDepthKeys,
+    keys_prev: Option<&PosDepthKeys>,
     keys_next: Option<&PosDepthKeys>,
     window: &[WindowMember],
     outcomes: &[Outcome],
@@ -489,7 +491,7 @@ pub fn ladder_tree(g: &dyn Dated, ctx: &CommitCtx, game_id: u16, j: u32, keys: &
     let mut leaves = disprove_family(g, ctx, &l, &keys[(j - 1) as usize]);
     if (j as usize) < keys.len() {
         let next = Layout::at(j + 1, game_id, keys[j as usize].mover);
-        leaves.push(post_leaf(g, ctx, &next, &keys[j as usize], &keys[(j - 1) as usize], "post"));
+        leaves.push(post_leaf(g, ctx, &next, &keys[j as usize], Some(&keys[(j - 1) as usize]), "post"));
     }
     leaves.extend(g.mover_splits(ctx, &l, &keys[(j - 1) as usize], outcomes));
     TapTree::new(leaves)

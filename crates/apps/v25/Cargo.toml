@@ -26,3 +26,4 @@ bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-scr
 [dev-dependencies]
 lngap-zk = { path = "../zk" }
 emulator = { git = "https://github.com/FairgateLabs/BitVMX-CPU", rev = "299009c65e635327025ee13ffe1e1f1671bd0615" }
+hex.workspace = true
