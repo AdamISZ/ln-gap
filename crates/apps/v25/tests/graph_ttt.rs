@@ -7,8 +7,10 @@
 //!
 //! - S2, a false claim: the hub moved legally and in time; the user claims
 //!   absence anyway; the hub rebuts through member 0 (unfolding its
-//!   connector leaf), no disprove fires, and the hub's checked split pays
-//!   R(state) = HubWins after `delta + delta'`;
+//!   connector leaf), no disprove fires, and after `delta + delta'` the
+//!   rebuttal stands: the user's bond goes to the hub and the game
+//!   continues on the ladder, where the user doesn't move and the hub's
+//!   checked split pays R(state) = HubWins (Phase 7);
 //! - S4, an illegal move dated: the hub played onto the user's cell; it can
 //!   still rebut (the move was dated), and the user's `cell_occupied`
 //!   disprove takes the pot;
@@ -24,6 +26,8 @@
 //! Run with `--test-threads=1` or 2.
 
 mod common;
+
+use bitcoin::OutPoint;
 
 use common::*;
 use lngap_btc::regtest::Regtest;
@@ -91,7 +95,8 @@ fn ttt_disputes_dated_by_members() {
     }
     println!("V25 absence claim: {} vB", opens[0].claim.vsize());
 
-    // ---- S2: a false claim, defeated; the checked split pays HubWins ----
+    // ---- S2: a false claim, defeated: the user's bond to the hub, the game
+    // continues on the ladder; the user doesn't move, the hub's ladder split ----
     let (p_op, p_out, pair, levels, _) = rebut(&rt, &mut games[0], &opens[0], 0, &venue, (&heads[0].0, &h2_ok), &tree, &root_sigs[0]);
     let w0 = opens[0].window[0].clone();
     // no disprove fires: leaf_hash and the node checks hold for an honest path
@@ -101,9 +106,14 @@ fn ttt_disputes_dated_by_members() {
     let n0 = claimant_spend(&games[0], &w0, p_op, &p_out, "node_0", [wots_wire(&levels[0]), wots_wire(&levels[1])].concat());
     assert!(rt.mine_with(std::slice::from_ref(&n0)).is_err(), "an honest path does not fire node_0");
     rt.mine(u64::from(games[0].params.delta_prime)).unwrap();
-    let split = checked_split(&mut games[0], &w0, p_op, &p_out, 1, &pair);
-    rt.mine_with(std::slice::from_ref(&split)).unwrap_or_else(|e| panic!("S2: the hub's checked split must mine: {e:#}"));
-    println!("V25 S2 checked split (HubWins): {} vB; leaf_hash leaf {} vB dry, node_0 {} vB dry", split.vsize(), lh.vsize(), n0.vsize());
+    let (stands, t_out) = stands_tx(&games[0], &w0, p_op, &p_out);
+    rt.mine_with(std::slice::from_ref(&stands)).unwrap_or_else(|e| panic!("S2: the rebuttal stands: {e:#}"));
+    assert_eq!(stands.output[1].value, BOND, "S2: the false claimant's bond goes to the hub");
+    let t_op = OutPoint { txid: stands.compute_txid(), vout: 0 };
+    rt.mine(u64::from(games[0].params.delta + games[0].params.delta_prime)).unwrap();
+    let split = ladder_split(&mut games[0], D, t_op, &t_out, 1, &pair);
+    rt.mine_with(std::slice::from_ref(&split)).unwrap_or_else(|e| panic!("S2: the hub's ladder split must mine: {e:#}"));
+    println!("V25 S2 stands (bond {BOND} to the hub, the rest to the ladder): {} vB; the user didn't move: ladder split (HubWins) {} vB; leaf_hash {} vB dry, node_0 {} vB dry", stands.vsize(), split.vsize(), lh.vsize(), n0.vsize());
 
     // ---- S4: an illegal move, dated; cell_occupied_4 fires ----
     let (p_op, p_out, pair, _, _) = rebut(&rt, &mut games[1], &opens[1], 1, &venue, (&heads[1].0, &h2_bad), &tree, &root_sigs[1]);

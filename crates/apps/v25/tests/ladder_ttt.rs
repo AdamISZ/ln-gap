@@ -17,14 +17,15 @@
 //! - S10, the self-mining residual: member 2 closes its period AFTER its
 //!   grace (a block the harness mines, as a member with hashpower could),
 //!   with the hub's late move in its root; the connector exists and no pair
-//!   arises, so the hub's rebuttal stands and the checked split pays
-//!   HubWins: the late move was rescued. Documented, not prevented.
+//!   arises, so the hub's rebuttal stands; since Phase 7 that costs the
+//!   user only its bond and the game continues on the ladder: the late
+//!   move was rescued, but no stake moved. Documented, not prevented.
 //!
 //! Run with `--test-threads=1` or 2.
 
 mod common;
 
-use bitcoin::{OutPoint, Transaction, TxOut};
+use bitcoin::{OutPoint, TxOut};
 use common::*;
 use lngap_btc::regtest::Regtest;
 use lngap_btc::tx::build_spend;
@@ -85,30 +86,6 @@ fn post(rt: &Regtest, g: &mut Game, p: &Play, j: u32, op: OutPoint, out: &TxOut,
     rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("posting move {j} must mine: {e:#}"));
     println!("V25 ladder post of move {j} ({}): {} vB", mover.name(), tx.vsize());
     (OutPoint { txid: tx.compute_txid(), vout: 0 }, t_out, pair)
-}
-
-/// The checked split of the ladder output at depth `j` by outcome `code`
-/// (the mover of `j` proves R(state `j`) = code), after `delta + delta'`.
-fn ladder_split(g: &mut Game, j: u32, op: OutPoint, out: &TxOut, code: u8, pair: &WotsSig) -> Transaction {
-    let tree = ladder(g, j);
-    let o = g.outcomes.iter().find(|o| o.code == code).unwrap().clone();
-    let name = format!("split_{}", o.name);
-    let leaf = tree.leaf(&name).unwrap();
-    let [u, h] = o.payout.dist(out.value - g.params.presign_fee);
-    let mut outs = Vec::new();
-    if u > bitcoin::Amount::ZERO {
-        outs.push(TxOut { value: u, script_pubkey: g.pubs[0].payout_spk.clone() });
-    }
-    if h > bitcoin::Amount::ZERO {
-        outs.push(TxOut { value: h, script_pubkey: g.pubs[1].payout_spk.clone() });
-    }
-    let mut tx = build_spend(op, &leaf.timelock, outs);
-    let id = g.id;
-    let reveal = g.ks(instance::mover_at(j)).reveal_uint(&instance::code_label(id, SEQ, j), u32::from(code)).unwrap();
-    let su = sig(&g.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script);
-    let sh = sig(&g.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script);
-    tx.input[0].witness = tapscript_witness(&ttt::checked_split_witness(su, sh, &reveal, pair), &leaf.script, &tree.control_block(&name).unwrap());
-    tx
 }
 
 #[test]
@@ -210,11 +187,18 @@ fn ladder_self_post_waiver_and_the_residual() {
     rt.mine_with(std::slice::from_ref(&s7)).unwrap_or_else(|e| panic!("S7: the hub's split must pay HubWins: {e:#}"));
     println!("V25 S7 split after the user's stall (HubWins): {} vB", s7.vsize());
 
-    // ---- S10: the late closing's root holds the late move; the rebuttal stands ----
-    let (p_op, p_out, pair10, _, _) = rebut(&rt, &mut g10, &o10, 0, &venue, (&p10.heads[1], &p10.heads[2]), &tree2, &root2);
+    // ---- S10: the late closing's root holds the late move; the rebuttal
+    // stands, but it decides no game: the user's bond to the hub, the game
+    // continues on the ladder, the user plays on ----
+    let (p_op, p_out, _, _, _) = rebut(&rt, &mut g10, &o10, 0, &venue, (&p10.heads[1], &p10.heads[2]), &tree2, &root2);
     let w10 = o10.window[0].clone();
     rt.mine(u64::from(g10.params.delta + g10.params.delta_prime)).unwrap();
-    let s10 = checked_split(&mut g10, &w10, p_op, &p_out, 1, &pair10);
-    rt.mine_with(std::slice::from_ref(&s10)).unwrap_or_else(|e| panic!("S10: {e:#}"));
-    println!("V25 S10: a self-mined late closing rescued the late move (HubWins): {} vB", s10.vsize());
+    let (s10, t_out) = stands_tx(&g10, &w10, p_op, &p_out);
+    rt.mine_with(std::slice::from_ref(&s10)).unwrap_or_else(|e| panic!("S10: the rebuttal stands: {e:#}"));
+    assert_eq!(s10.output.len(), 2);
+    assert_eq!(s10.output[1].value, BOND, "S10: only the bond moved");
+    assert_eq!(s10.output[0].script_pubkey, ladder(&g10, 2).script_pubkey(), "S10: the stake stays in the game");
+    p10.mv(&mut g10, 1); // the user plays on
+    let _ = post(&rt, &mut g10, &p10, 3, OutPoint { txid: s10.compute_txid(), vout: 0 }, &t_out, None);
+    println!("V25 S10: a self-mined late closing rescued the late move; the rebuttal stands ({} vB), the user's bond ({BOND}) to the hub, no stake moved; the game goes on", s10.vsize());
 }

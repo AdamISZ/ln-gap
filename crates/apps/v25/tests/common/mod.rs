@@ -292,14 +292,31 @@ pub fn claimant_spend(g: &Game, w: &WindowMember, p_op: OutPoint, p_out: &TxOut,
     tx
 }
 
-/// The hub's checked split of `P` by outcome `code`, after `delta + delta'`.
-pub fn checked_split(g: &mut Game, w: &WindowMember, p_op: OutPoint, p_out: &TxOut, code: u8, pair: &WotsSig) -> Transaction {
+/// The claimant's bond in these tests.
+pub const BOND: Amount = Amount::from_sat(20_000);
+
+/// `stands` off `P` (2-of-2 pre-signed, after `delta + delta'`): the
+/// user's bond to the hub, the rest into the ladder at depth 2. Dry.
+pub fn stands_tx(g: &Game, w: &WindowMember, p_op: OutPoint, p_out: &TxOut) -> (Transaction, TxOut) {
     let ctx = g.ctx();
     let p_tree = rebuttal_tree(&TttDated, &ctx, &g.layout(), &g.keys[1], w, &g.level_keys, g.id, &g.outcomes).unwrap();
+    let leaf = p_tree.leaf("stands").unwrap();
+    let t_out = TxOut { value: p_out.value - g.params.presign_fee - BOND, script_pubkey: ladder(g, D).script_pubkey() };
+    let bond = TxOut { value: BOND, script_pubkey: g.pubs[1].payout_spk.clone() };
+    let mut tx = build_spend(p_op, &leaf.timelock, vec![t_out.clone(), bond]);
+    let wit = vec![sig(&g.hub.payment, &tx, 0, std::slice::from_ref(p_out), &leaf.script), sig(&g.user.payment, &tx, 0, std::slice::from_ref(p_out), &leaf.script)];
+    tx.input[0].witness = tapscript_witness(&wit, &leaf.script, &p_tree.control_block("stands").unwrap());
+    (tx, t_out)
+}
+
+/// The checked split of the ladder output at depth `j` by outcome `code`
+/// (the mover of `j` proves R(state `j`) = code), after `delta + delta'`.
+pub fn ladder_split(g: &mut Game, j: u32, op: OutPoint, out: &TxOut, code: u8, pair: &WotsSig) -> Transaction {
+    let tree = ladder(g, j);
     let o = g.outcomes.iter().find(|o| o.code == code).unwrap().clone();
     let name = format!("split_{}", o.name);
-    let leaf = p_tree.leaf(&name).unwrap();
-    let [u, h] = o.payout.dist(p_out.value - g.params.presign_fee);
+    let leaf = tree.leaf(&name).unwrap();
+    let [u, h] = o.payout.dist(out.value - g.params.presign_fee);
     let mut outs = Vec::new();
     if u > Amount::ZERO {
         outs.push(TxOut { value: u, script_pubkey: g.pubs[0].payout_spk.clone() });
@@ -307,14 +324,15 @@ pub fn checked_split(g: &mut Game, w: &WindowMember, p_op: OutPoint, p_out: &TxO
     if h > Amount::ZERO {
         outs.push(TxOut { value: h, script_pubkey: g.pubs[1].payout_spk.clone() });
     }
-    let mut tx = build_spend(p_op, &leaf.timelock, outs);
+    let mut tx = build_spend(op, &leaf.timelock, outs);
     let id = g.id;
-    let reveal = g.ks(Role::Hub).reveal_uint(&instance::code_label(id, SEQ, D), u32::from(code)).unwrap();
-    let su = sig(&g.user.payment, &tx, 0, std::slice::from_ref(p_out), &leaf.script);
-    let sh = sig(&g.hub.payment, &tx, 0, std::slice::from_ref(p_out), &leaf.script);
-    tx.input[0].witness = tapscript_witness(&ttt::checked_split_witness(su, sh, &reveal, pair), &leaf.script, &p_tree.control_block(&name).unwrap());
+    let reveal = g.ks(instance::mover_at(j)).reveal_uint(&instance::code_label(id, SEQ, j), u32::from(code)).unwrap();
+    let su = sig(&g.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script);
+    let sh = sig(&g.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script);
+    tx.input[0].witness = tapscript_witness(&ttt::checked_split_witness(su, sh, &reveal, pair), &leaf.script, &tree.control_block(&name).unwrap());
     tx
 }
+
 
 /// The user's timeout split off `A_2` (UserWins) after `delta`.
 pub fn timeout_split(g: &mut Game, o: &Open) -> Transaction {

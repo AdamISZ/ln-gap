@@ -27,8 +27,10 @@
 //!   member's root, is not BLAKE3 of the ordered child and sibling); and
 //!   the continuations into the on-chain ladder, `pair_continue` (member
 //!   `i` opened two different roots for the period) and `empty_continue`
-//!   (member `i` closed the period empty); then the mover's splits after
-//!   `delta + delta'`.
+//!   (member `i` closed the period empty); then, after `delta + delta'`,
+//!   `stands`: the claim is defeated, the claimant's bond goes to the
+//!   mover and the game continues on the ladder at `d` (at a game's
+//!   final depth, the mover's splits or proofs instead).
 //!
 //! The rebuttal commits; it never hashes. The level disproves run
 //! BitVMX's BLAKE3 over nibbles, so no `OP_CAT` is needed. Member trees
@@ -107,6 +109,11 @@ pub trait Dated: Sync {
     /// The mover's splits on an output that parks move `l.depth` (and, for
     /// a family with a final proof, the proofs and the claimant's split).
     fn mover_splits(&self, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Vec<Leaf>;
+    /// Whether the game ends at `depth` (a defeated claim there is decided
+    /// by the mover's splits, not continued on the ladder).
+    fn ends_at(&self, _depth: u32) -> bool {
+        false
+    }
     /// The choice of a head.
     fn choice(&self, head: &[u8; 48]) -> Vec<u8> {
         let (from, n) = self.choice_region();
@@ -173,6 +180,9 @@ impl Dated for ZkDated<'_> {
     }
     fn disproves(&self, l: &Layout, rebut: &WotsPublic) -> Vec<PosLeaf> {
         self.family.disprove_leaves(l, rebut)
+    }
+    fn ends_at(&self, depth: u32) -> bool {
+        self.family.final_depth() == Some(depth)
     }
     fn mover_splits(&self, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Vec<Leaf> {
         let w = ctx.params.delta + ctx.params.delta_prime;
@@ -424,6 +434,19 @@ pub fn empty_continue_leaf(ctx: &CommitCtx, empty_hash: &Hash160) -> Leaf {
     Leaf::new("empty_continue", b.into_script(), Timelock::NONE)
 }
 
+/// `stands` on `P_{d,i}`: no disprove fired within the window, so the
+/// claim is defeated. It decides no game: 2-of-2 pre-signed after
+/// `delta + delta'`, its transaction pays the claimant's BOND to the mover
+/// and continues the game on the ladder at depth `d` (Phase 7: a false
+/// claim costs its maker the bond, which covers the on-chain play it
+/// forced; the pot follows the game). Witness: the hub's signature, the
+/// user's.
+pub fn stands_leaf(ctx: &CommitCtx) -> Leaf {
+    let w = ctx.params.delta + ctx.params.delta_prime;
+    let b = ctx.two_of_two_verify(Builder::new().csv(w));
+    Leaf::new("stands", b.push_int(1).into_script(), Timelock::csv(w))
+}
+
 /// `waive` on `A_d`: the claimant has signed its own move at `d + 1`, so it
 /// accepted move `d`; the claim is defeated and pays the mover, 2-of-2
 /// pre-signed. `claimant_next` is the claimant's state key for `d + 1`.
@@ -481,7 +504,11 @@ pub fn rebuttal_tree(
     }
     leaves.push(pair_continue_leaf(ctx, &w.root_key));
     leaves.push(empty_continue_leaf(ctx, &w.empty_hash));
-    leaves.extend(g.mover_splits(ctx, l, keys, outcomes));
+    if g.ends_at(l.depth) {
+        leaves.extend(g.mover_splits(ctx, l, keys, outcomes));
+    } else {
+        leaves.push(stands_leaf(ctx));
+    }
     TapTree::new(leaves)
 }
 
@@ -493,6 +520,13 @@ fn disprove_family(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKe
             Leaf::new(format!("disprove_{}", pl.name), concat(&[head.as_bytes(), pl.script.as_bytes()]), Timelock::csv(ctx.params.delta))
         })
         .collect()
+}
+
+/// The bond that covers the on-chain play a defeated claim can force
+/// (Phase 7): `posts` ladder posts of `post_vb` and the game's end of
+/// `end_vb`, at `feerate` sat/vB.
+pub fn ladder_bond(posts: u32, post_vb: u64, end_vb: u64, feerate: u64) -> bitcoin::Amount {
+    bitcoin::Amount::from_sat((u64::from(posts) * post_vb + end_vb) * feerate)
 }
 
 /// The tree of a LADDER output at depth `j`: move `j` is on chain (posted,

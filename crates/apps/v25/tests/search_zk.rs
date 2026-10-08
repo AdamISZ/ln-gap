@@ -5,7 +5,9 @@
 //!
 //! - Z1, the honest O(1) path: the verifier claims the prover absent at
 //!   depth 5; the prover rebuts through member 1; the level disproves don't
-//!   fire; the prover's split pays after `delta + delta'`;
+//!   fire; after `delta + delta'` the rebuttal stands: the hub's bond to the
+//!   prover, the game on the ladder at 5, where the hub doesn't move and the
+//!   prover's split pays (Phase 7);
 //! - Z2, the final step: the verifier claims the prover absent at 23; the
 //!   prover rebuts through member 0 and proves the step (D59), after the
 //!   verifier's window;
@@ -51,6 +53,9 @@ use lngap_zk::final_d60::input_key_params;
 use lngap_zk::game::{final_witness, play, Entry, Search};
 
 const VALID: [u8; 4] = [0x11; 4];
+
+/// The claimant's bond in these tests.
+const BOND: Amount = Amount::from_sat(50_000);
 
 fn pdf() -> String {
     format!("{}/../zk/programs/hello-world-binary.yaml", env!("CARGO_MANIFEST_DIR"))
@@ -354,8 +359,17 @@ fn scenarios(pdf: &str, input: &[u8], tag: &str) {
     }
     let (delta, w) = (z1.params.delta, z1.params.delta + z1.params.delta_prime);
     let pay = |z: &Z, out: &TxOut, r: Role| vec![TxOut { value: out.value - z.params.presign_fee, script_pubkey: z.pubs[r.idx()].payout_spk.clone() }];
+    // a defeated claim (Phase 7): the claimant's bond to the mover, the rest
+    // into the ladder at `d`
+    let stands = |z: &Z, d: u32, p_tree: &TapTree, p_op: OutPoint, p_out: &TxOut| {
+        let t_out = TxOut { value: p_out.value - z.params.presign_fee - BOND, script_pubkey: z.ladder(d).script_pubkey() };
+        let bond = TxOut { value: BOND, script_pubkey: z.pubs[mover_at(d).idx()].payout_spk.clone() };
+        let tx = two_of_two(z, p_tree, p_op, p_out, "stands", vec![], vec![t_out.clone(), bond]);
+        (tx, t_out)
+    };
 
-    // ---- Z1: a false claim at 5; the prover's split after w ----
+    // ---- Z1: a false claim at 5: the rebuttal stands (the hub's bond to
+    // the prover), the ladder at 5; the hub doesn't move; the prover's split ----
     let (p_op, p_out, pair, levels) = rebut(&rt, &mut z1, z1d, &o1, 1, &venue, &tree, &roots[1]);
     let p_tree = z1.p_tree(z1d, &o1.window[1].clone());
     rt.mine(u64::from(delta)).unwrap();
@@ -365,17 +379,25 @@ fn scenarios(pdf: &str, input: &[u8], tag: &str) {
     assert!(rt.test_accept(&top).is_err(), "Z1: the top level leads to the member's root");
     println!("V25Z leaf_hash (dry): {} vB; node_{} (dry): {} vB", lh.vsize(), LEVELS - 1, top.vsize());
     rt.mine(u64::from(w - delta)).unwrap();
-    let s1 = two_of_two(&z1, &p_tree, p_op, &p_out, "split_UserWins", vec![], pay(&z1, &p_out, Role::User));
-    rt.mine_with(std::slice::from_ref(&s1)).unwrap_or_else(|e| panic!("Z1: the prover's split: {e:#}"));
-    println!("V25Z Z1 the prover's split after w: {} vB", s1.vsize());
+    let (st1, t_out) = stands(&z1, z1d, &p_tree, p_op, &p_out);
+    rt.mine_with(std::slice::from_ref(&st1)).unwrap_or_else(|e| panic!("Z1: the rebuttal stands: {e:#}"));
+    let t_op = OutPoint { txid: st1.compute_txid(), vout: 0 };
+    rt.mine(u64::from(w)).unwrap();
+    let s1 = two_of_two(&z1, &z1.ladder(z1d), t_op, &t_out, "split_UserWins", vec![], pay(&z1, &t_out, Role::User));
+    rt.mine_with(std::slice::from_ref(&s1)).unwrap_or_else(|e| panic!("Z1: the prover's ladder split: {e:#}"));
+    println!("V25Z Z1 stands {} vB (bond {BOND} to the prover); the hub didn't move on the ladder: the prover's split {} vB", st1.vsize(), s1.vsize());
 
     // ---- Z4: a false claim at depth 1 (no prior head) ----
     let (p_op, p_out, _, _) = rebut(&rt, &mut z4, z4d, &o4, 1, &venue, &tree, &roots[1]);
     let p_tree = z4.p_tree(z4d, &o4.window[1].clone());
     rt.mine(u64::from(w)).unwrap();
-    let s4 = two_of_two(&z4, &p_tree, p_op, &p_out, "split_UserWins", vec![], pay(&z4, &p_out, Role::User));
-    rt.mine_with(std::slice::from_ref(&s4)).unwrap_or_else(|e| panic!("Z4: the prover's split at depth 1: {e:#}"));
-    println!("V25Z Z4 depth 1 rebutted, the prover's split: {} vB", s4.vsize());
+    let (st4, t_out) = stands(&z4, z4d, &p_tree, p_op, &p_out);
+    rt.mine_with(std::slice::from_ref(&st4)).unwrap_or_else(|e| panic!("Z4: the rebuttal stands at depth 1: {e:#}"));
+    let t_op = OutPoint { txid: st4.compute_txid(), vout: 0 };
+    rt.mine(u64::from(w)).unwrap();
+    let s4 = two_of_two(&z4, &z4.ladder(z4d), t_op, &t_out, "split_UserWins", vec![], pay(&z4, &t_out, Role::User));
+    rt.mine_with(std::slice::from_ref(&s4)).unwrap_or_else(|e| panic!("Z4: the prover's ladder split at depth 1: {e:#}"));
+    println!("V25Z Z4 depth 1 rebutted: stands {} vB; the prover's ladder split {} vB", st4.vsize(), s4.vsize());
 
     // ---- Z2: the final step; the prover proves after w ----
     let (p_op, p_out, pair, _) = rebut(&rt, &mut z2, z2d, &o2, 0, &venue, &tree, &roots[0]);
@@ -415,7 +437,15 @@ fn scenarios(pdf: &str, input: &[u8], tag: &str) {
     rt.mine(u64::from(w)).unwrap();
     rt.mine_with(std::slice::from_ref(&proof)).unwrap_or_else(|e| panic!("Z3: the final proof from the ladder: {e:#}"));
     total += proof.vsize() + cont.vsize();
-    println!("V25Z [{tag}] Z3 ladder: {posts} posts + the proof = {total} vB in all; worst case {} blocks at w = {w} per move", (posts + 1) * u32::from(w));
+    // only the griefing side runs out its window; the honest side posts at once
+    let griefer = posts.div_ceil(2);
+    println!("V25Z [{tag}] Z3 ladder: {posts} posts + the proof = {total} vB in all; worst case about {} blocks ({griefer} moves at w = {w}, the rest a block each)", griefer * u32::from(w) + (posts - griefer) + u32::from(w));
+    // Phase 7: bonds sized from the measured ladder (a false claim at depth
+    // 2 can force all of it), at 10 sat/vB
+    let post_vb = (total - proof.vsize() - cont.vsize()) as u64 / u64::from(posts);
+    let as_built = lngap_v25::ladder_bond(posts, post_vb, proof.vsize() as u64, 10);
+    let lean = lngap_v25::ladder_bond(posts, 1_000, proof.vsize() as u64, 10);
+    println!("V25Z [{tag}] bond to cover the ladder at 10 sat/vB: {as_built} as built ({post_vb} vB a post), about {lean} with a lean post (~1 kvB)");
     println!("V25Z [{tag}] total {:.1?}", t0.elapsed());
 }
 
