@@ -1204,6 +1204,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-sessions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "blake3",
+ "emulator",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-contract",
+ "lngap-lamport",
+ "lngap-pos",
+ "lngap-seal",
+ "lngap-tictactoe",
+ "lngap-v25",
+ "lngap-zk",
+]
+
+[[package]]
 name = "lngap-spv"
 version = "0.1.0"
 dependencies = [

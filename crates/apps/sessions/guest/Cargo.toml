@@ -1,0 +1,16 @@
+[package]
+name = "lngap-sessions-guest"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# The sessions PoC's statement program for BitVMX (rv32im, no_std): a
+# MOCK of the withdrawal statement. Built by build-guest.sh; the ELF is
+# checked in beside it.
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+panic = "abort"
+debug = false

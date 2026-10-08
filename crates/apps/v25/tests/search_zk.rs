@@ -105,7 +105,7 @@ impl Z {
         Z { id, user, hub, ks, params, pubs, keys, family, outcomes: Contract::outcomes(&TicTacToe), level_keys: HashMap::new(), heads }
     }
     fn g(&self) -> ZkDated<'_> {
-        ZkDated(self.family.as_ref())
+        ZkDated::new(self.family.as_ref())
     }
     fn ctx(&self) -> CommitCtx<'_> {
         CommitCtx { params: &self.params, keys: &self.pubs, broadcaster: Role::Hub, seq: SEQ, rev_hash: [0u8; 20] }

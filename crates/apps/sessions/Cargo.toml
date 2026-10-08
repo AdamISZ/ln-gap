@@ -1,0 +1,28 @@
+[package]
+name = "lngap-sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# LN-GAP 2.5's session layer (V25_POC_PLAN.md, Phase 6): a toy L2 of hub
+# IOUs, the session contract (activation, fold, default, a disputed
+# withdrawal through lngap-v25's graph over the search game), with the
+# withdrawal statement MOCKED by a small BitVMX program (guest/).
+
+[dependencies]
+lngap-v25 = { path = "../v25" }
+lngap-seal = { path = "../seal" }
+lngap-zk = { path = "../zk" }
+lngap-pos = { path = "../pos" }
+lngap-channel = { path = "../../channel" }
+lngap-contract = { path = "../../contract" }
+lngap-lamport = { path = "../../lamport" }
+lngap-btc = { path = "../../btc" }
+anyhow.workspace = true
+bitcoin.workspace = true
+hex.workspace = true
+blake3 = "1"
+emulator = { git = "https://github.com/FairgateLabs/BitVMX-CPU", rev = "299009c65e635327025ee13ffe1e1f1671bd0615" }
+
+[dev-dependencies]
+lngap-tictactoe = { path = "../tictactoe" }

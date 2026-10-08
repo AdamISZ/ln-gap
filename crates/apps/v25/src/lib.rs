@@ -143,9 +143,21 @@ pub const ZK_CHOICE_BYTES: u32 = 44;
 /// depth after `delta + delta'` unless disproved, except at the final
 /// depth, where it must prove the step (D59) and the claimant's split
 /// waits a further `delta'`.
-pub struct ZkDated<'a>(pub &'a dyn lngap_pos::ext::Family);
+pub struct ZkDated<'a> {
+    pub family: &'a dyn lngap_pos::ext::Family,
+    /// Pre-sign the final step's proofs (2-of-2 with fixed outputs, after
+    /// the same window) instead of the mover's runtime spend: for a
+    /// contract whose winner must be paid an exact amount (a session's
+    /// withdrawal), one transaction per proof class.
+    pub prove_presigned: bool,
+}
 
-impl ZkDated<'_> {
+impl<'a> ZkDated<'a> {
+    /// The mover's runtime proofs (v1's D59).
+    pub fn new(family: &'a dyn lngap_pos::ext::Family) -> ZkDated<'a> {
+        ZkDated { family, prove_presigned: false }
+    }
+
     /// The search's choice of a head (no family needed).
     pub fn choice_of(head: &[u8; 48]) -> Vec<u8> {
         head[4..4 + ZK_CHOICE_BYTES as usize].to_vec()
@@ -160,15 +172,19 @@ impl Dated for ZkDated<'_> {
         (4, ZK_CHOICE_BYTES as usize)
     }
     fn disproves(&self, l: &Layout, rebut: &WotsPublic) -> Vec<PosLeaf> {
-        self.0.disprove_leaves(l, rebut)
+        self.family.disprove_leaves(l, rebut)
     }
     fn mover_splits(&self, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Vec<Leaf> {
         let w = ctx.params.delta + ctx.params.delta_prime;
-        let last = self.0.final_depth() == Some(l.depth);
+        let last = self.family.final_depth() == Some(l.depth);
         let mut leaves = Vec::new();
         if last {
-            let gate = Builder::new().csv(w).checksigverify(&ctx.key(l.mover).payment).into_script();
-            for (name, script) in self.0.prove_leaves(l, &keys.rebut) {
+            let gate = if self.prove_presigned {
+                ctx.two_of_two_verify(Builder::new().csv(w)).into_script()
+            } else {
+                Builder::new().csv(w).checksigverify(&ctx.key(l.mover).payment).into_script()
+            };
+            for (name, script) in self.family.prove_leaves(l, &keys.rebut) {
                 leaves.push(Leaf::new(name, concat(&[gate.as_bytes(), script.as_bytes()]), Timelock::csv(w)));
             }
         }
