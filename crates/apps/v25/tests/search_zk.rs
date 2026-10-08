@@ -217,7 +217,8 @@ fn rebut(rt: &Regtest, z: &mut Z, d: u32, o: &Open, wm: usize, venue: &[VenueMem
         tx.input[k + 2].witness = tapscript_witness(&cw, &leaf.script, &c.2.control_block("carry").unwrap());
     }
     rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("the rebuttal at {d} must mine: {e:#}"));
-    println!("V25Z rebuttal at {d} through member {}: {} vB", w.member, tx.vsize());
+    let carrier_vb = (tx.input[2].witness.size() as f64 / 4.0 + 41.0).round();
+    println!("V25Z rebuttal at {d} through member {}: {} vB (one carrier input: {carrier_vb} vB)", w.member, tx.vsize());
     (OutPoint { txid: tx.compute_txid(), vout: 0 }, p_out, pair, levels)
 }
 
