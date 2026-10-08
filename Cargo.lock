@@ -1193,6 +1193,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-seal"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "lngap-btc",
+ "lngap-lamport",
+]
+
+[[package]]
 name = "lngap-spv"
 version = "0.1.0"
 dependencies = [

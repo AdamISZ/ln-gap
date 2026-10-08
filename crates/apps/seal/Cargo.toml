@@ -1,0 +1,11 @@
+[package]
+name = "lngap-seal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lngap-btc = { path = "../../btc" }
+lngap-lamport = { path = "../../lamport" }
+anyhow.workspace = true
+bitcoin.workspace = true
