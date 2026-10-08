@@ -9,3 +9,4 @@ lngap-btc = { path = "../../btc" }
 lngap-lamport = { path = "../../lamport" }
 anyhow.workspace = true
 bitcoin.workspace = true
+blake3 = "1"

@@ -1198,6 +1198,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "blake3",
  "lngap-btc",
  "lngap-lamport",
 ]

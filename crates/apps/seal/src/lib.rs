@@ -43,6 +43,9 @@
 //! covers. Here the ceremony is a single toy party (`ceremony`), whose
 //! secrets go out of scope when it returns.
 
+pub mod dating;
+pub mod world;
+
 use anyhow::{anyhow, ensure, Result};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::{Keypair, XOnlyPublicKey};
