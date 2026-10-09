@@ -1,23 +1,20 @@
-//! The session contract's own pieces (V25_POC_PLAN.md, Phase 6; the
-//! failure scenarios of research/scenarios.pdf): its terms, the
-//! binary-decomposed payout of a withdrawal `b` on the dispute path, the
-//! default to the hub at `T_close`, and the game contract's `settle`.
+//! The session contract (LN-GAP v3, research/lngap_v3.pdf): its terms,
+//! the contract reserves, the binary-decomposed payout of a withdrawal `b`
+//! on the dispute path, the default at `T_close`, and the input-word
+//! checks.
 //!
-//! Two contracts, because a withdrawal starts when Alice decides and its
-//! deadlines must count from that start:
-//! - the SESSION contract, before any withdrawal, carries only `default`
-//!   (the hub, after `T_close`) and Alice's unilateral start (`escalate`,
-//!   her first move into the on-chain ladder): no absence claims, so a
-//!   force-close mid-session gives the hub nothing to spend before `T_close`
-//!   (every signed state must be safe to publish);
-//! - the GAME contract, signed at a cooperative start, carries the dispute
-//!   graph with deadlines counted from that start, `escalate` (either
-//!   party takes the game onto the ladder, replaying the moves so far), and
-//!   `settle` (the claim accepted at the game's end), and no default.
+//! One contract, no venue. Its output carries two leaves besides the
+//! channel's revocation:
+//! - `default`: after `T_close`, a pre-signed transaction paying the hub
+//!   and returning Alice's reserve (not withdrawing is not a lie);
+//! - `escalate`: Alice's claim on chain, as move 1 of BitVMX's search with
+//!   her signed input words; the search continues on lngap-v25's ladder
+//!   (`ZkDated` with pre-signed proofs, so that a proved withdrawal pays
+//!   exactly `b`), and the first ladder output carries the hub's
+//!   input-word checks.
 //!
-//! The dispute itself is lngap-v25's graph over the search game
-//! (`ZkDated` with pre-signed proofs, so that a proved withdrawal pays
-//! exactly `b`).
+//! The cooperative withdrawal is a fold of the channel and never touches
+//! the contract.
 
 use anyhow::{ensure, Result};
 use bitcoin::opcodes::all::*;
@@ -42,6 +39,10 @@ pub struct Terms {
     pub deposit: u32,
     /// `T_close`: after it, with no claim, everything goes to the hub.
     pub t_close: u32,
+    /// The contract reserves `r_A`, `r_H`: returned in every honest
+    /// outcome, forfeited to the other side by losing a dispute.
+    pub reserve_alice: Amount,
+    pub reserve_hub: Amount,
 }
 
 impl Terms {
@@ -50,6 +51,11 @@ impl Terms {
     }
     pub fn v_max(&self) -> Amount {
         self.unit * u64::from(self.v_max_units())
+    }
+    /// Both reserves: what the winner of a dispute takes on top of its
+    /// share of `V_max`.
+    pub fn reserves(&self) -> Amount {
+        self.reserve_alice + self.reserve_hub
     }
 }
 
@@ -121,23 +127,51 @@ pub fn bit_tree(ctx: &CommitCtx, i: u32, b_key: &WotsPublic) -> Result<TapTree> 
     TapTree::new(vec![bit_leaf(ctx, i, b_key, true), bit_leaf(ctx, i, b_key, false), equiv_b_leaf(ctx, i, b_key)])
 }
 
-/// The outputs of every split that pays Alice's withdrawal: `K` outputs of
-/// `u 2^i`, each Alice's iff bit `i` of her signed `b` is set, and the rest
-/// of `available` (less `fee`) to the hub.
+/// `alice_reserve` on the reserve output: Alice, after `delta` (the hub's
+/// chance to show an equivocation on `b`). Witness: her signature.
+pub fn reserve_leaf(ctx: &CommitCtx) -> Leaf {
+    let b = Builder::new().csv(ctx.params.delta).checksig(&ctx.key(Role::User).payment);
+    Leaf::new("alice_reserve", b.into_script(), Timelock::csv(ctx.params.delta))
+}
+
+/// The reserve output of a payout to Alice: both reserves, hers after
+/// `delta`, the hub's with `equiv_b` (index `K`, after the bit outputs').
+pub fn reserve_tree(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic) -> Result<TapTree> {
+    TapTree::new(vec![reserve_leaf(ctx), equiv_b_leaf(ctx, t.bits, b_key)])
+}
+
+/// The outputs of every transaction that pays Alice's withdrawal (her
+/// proof, the hub's timeout): `K` outputs of `u 2^i`, each Alice's iff bit
+/// `i` of her signed `b` is set; output `K`, both reserves, Alice's; the
+/// rest of `available` (less `fee`) to the hub.
 pub fn payout(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount, fee: Amount) -> Result<Vec<TxOut>> {
     let total = available.checked_sub(fee).ok_or_else(|| anyhow::anyhow!("the fee exceeds the output"))?;
-    ensure!(total >= t.v_max(), "{total} cannot pay V_max {}", t.v_max());
+    ensure!(total >= t.v_max() + t.reserves(), "{total} cannot pay V_max {} and the reserves", t.v_max());
     let mut outs: Vec<TxOut> = (0..t.bits).map(|i| Ok(TxOut { value: t.unit * (1u64 << i), script_pubkey: bit_tree(ctx, i, b_key)?.script_pubkey() })).collect::<Result<_>>()?;
-    let rest = total - t.v_max();
+    outs.push(TxOut { value: t.reserves(), script_pubkey: reserve_tree(ctx, t, b_key)?.script_pubkey() });
+    let rest = total - t.v_max() - t.reserves();
     if rest >= ctx.params.dust {
         outs.push(TxOut { value: rest, script_pubkey: ctx.key(Role::Hub).payout_spk.clone() });
     }
     Ok(outs)
 }
 
-/// An input-word check on the GAME contract, the hub's leaf: Alice's
-/// signature (her depth-1 input key for word `j`) on a value that is NOT
-/// `expected` gives the hub the contract. The statement's input must carry
+/// The outputs of the transaction that ends the session by default after
+/// `T_close`: Alice's reserve back to her, the rest (less `fee`) to the
+/// hub.
+pub fn default_outputs(ctx: &CommitCtx, t: &Terms, available: Amount, fee: Amount) -> Result<Vec<TxOut>> {
+    let total = available.checked_sub(fee).ok_or_else(|| anyhow::anyhow!("the fee exceeds the output"))?;
+    ensure!(total > t.reserve_alice, "{total} cannot return the reserve");
+    Ok(vec![
+        TxOut { value: t.reserve_alice, script_pubkey: ctx.key(Role::User).payout_spk.clone() },
+        TxOut { value: total - t.reserve_alice, script_pubkey: ctx.key(Role::Hub).payout_spk.clone() },
+    ])
+}
+
+/// An input-word check on the FIRST LADDER OUTPUT (the one `escalate`
+/// creates, which carries Alice's signed input words), the hub's leaf:
+/// Alice's signature (her input key for word `j`) on a value that is NOT
+/// `expected` gives the hub everything, both reserves included. The statement's input must carry
 /// the session's constants in fixed words: the journal's length, the
 /// image id (otherwise Alice could prove another program's output, which
 /// the verifier would accept), the memo `c` (otherwise another session's
@@ -160,18 +194,10 @@ pub fn input_word_leaf(ctx: &CommitCtx, name: &str, key: &WotsPublic, expected: 
     Leaf::new(name.to_string(), b.into_script(), Timelock::NONE)
 }
 
-/// `settle` on the GAME contract: after the game's end (`at`, a height
-/// past the last depth's deadline and the hub's chance to force the last
-/// step on chain), Alice's claim is accepted; 2-of-2 pre-signed, paying
-/// the withdrawal's decomposition. Witness: the hub's signature, the
-/// user's.
-pub fn settle_leaf(ctx: &CommitCtx, at: u32) -> Leaf {
-    let b = ctx.two_of_two_verify(Builder::new().cltv(at));
-    Leaf::new("settle", b.push_int(1).into_script(), Timelock::cltv(at))
-}
-
-/// `default` on the SESSION contract: after `T_close`, the hub's key.
+/// `default` on the session contract: after `T_close`, 2-of-2 pre-signed
+/// at the session's start, paying [`default_outputs`]. Witness: the hub's
+/// signature, the user's.
 pub fn default_leaf(ctx: &CommitCtx, t_close: u32) -> Leaf {
-    let b = Builder::new().cltv(t_close).checksig(&ctx.key(Role::Hub).payment);
-    Leaf::new("default", b.into_script(), Timelock::cltv(t_close))
+    let b = ctx.two_of_two_verify(Builder::new().cltv(t_close));
+    Leaf::new("default", b.push_int(1).into_script(), Timelock::cltv(t_close))
 }

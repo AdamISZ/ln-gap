@@ -403,6 +403,17 @@ pub fn post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys
 /// contract output it waits `to_self_delay`. Witness, wire order: move 1's
 /// authorship block, its reveal, the hub's signature, the user's.
 pub fn escalate_leaf(g: &dyn Dated, ctx: &CommitCtx, l1: &Layout, keys1: &PosDepthKeys) -> Leaf {
+    escalate_leaf_with(g, ctx, l1, keys1, &[])
+}
+
+/// `escalate` that also puts the prover's signed input `words` on chain
+/// with move 1 (LN-GAP v3: the claim's input words, so that the contract's
+/// input-word checks apply to every dispute). Each word's signature is
+/// verified under its one-time key and its digits dropped. Witness, wire
+/// order: the words' reveals, LAST word first (the first word is verified
+/// first, so it sits on top of them), then move 1's authorship block, its
+/// reveal, the hub's signature, the user's.
+pub fn escalate_leaf_with(g: &dyn Dated, ctx: &CommitCtx, l1: &Layout, keys1: &PosDepthKeys, words: &[WotsPublic]) -> Leaf {
     assert_eq!(l1.depth, 1, "the ladder is entered at depth 1");
     let mut b = Builder::new();
     let mut tl = Timelock::NONE;
@@ -410,7 +421,10 @@ pub fn escalate_leaf(g: &dyn Dated, ctx: &CommitCtx, l1: &Layout, keys1: &PosDep
         b = b.csv(ctx.params.to_self_delay);
         tl.csv = Some(ctx.params.to_self_delay);
     }
-    let b = post_body(g, ctx.two_of_two_verify(b), l1, keys1, None);
+    let mut b = post_body(g, ctx.two_of_two_verify(b), l1, keys1, None);
+    for k in words {
+        b = drop_n(b.wots_verify(k), k.params.message_digits as usize);
+    }
     Leaf::new("escalate", b.push_int(1).into_script(), tl)
 }
 
@@ -557,6 +571,11 @@ pub fn ladder_bond(posts: u32, post_vb: u64, end_vb: u64, feerate: u64) -> bitco
 /// opponent's forfeit; for the search, the mover of `j` (or, at the final
 /// depth, its proof). `keys[i]` is depth `i + 1`'s key set.
 pub fn ladder_tree(g: &dyn Dated, ctx: &CommitCtx, game_id: u16, j: u32, keys: &[PosDepthKeys], outcomes: &[Outcome]) -> anyhow::Result<TapTree> {
+    TapTree::new(ladder_leaves(g, ctx, game_id, j, keys, outcomes))
+}
+
+/// The leaves of [`ladder_tree`], for a contract that adds its own.
+pub fn ladder_leaves(g: &dyn Dated, ctx: &CommitCtx, game_id: u16, j: u32, keys: &[PosDepthKeys], outcomes: &[Outcome]) -> Vec<Leaf> {
     let l = Layout::at(j, game_id, keys[(j - 1) as usize].mover);
     let mut leaves = disprove_family(g, ctx, &l, &keys[(j - 1) as usize]);
     if (j as usize) < keys.len() {
@@ -564,7 +583,7 @@ pub fn ladder_tree(g: &dyn Dated, ctx: &CommitCtx, game_id: u16, j: u32, keys: &
         leaves.push(post_leaf(g, ctx, &next, &keys[j as usize], Some(&keys[(j - 1) as usize]), "post"));
     }
     leaves.extend(g.mover_splits(ctx, &l, &keys[(j - 1) as usize], outcomes));
-    TapTree::new(leaves)
+    leaves
 }
 
 #[cfg(test)]
