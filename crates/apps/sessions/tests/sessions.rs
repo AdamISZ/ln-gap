@@ -14,7 +14,19 @@
 //!   disprove takes the pot;
 //! - S, the hub stalls: it never answers Alice's claim at depth 2; her
 //!   absence claim stands and its timeout split pays b;
-//! - D, the default: no claim by T_close; the hub takes the contract.
+//! - H8, H1: the SESSION contract carries only `default` and Alice's start
+//!   (no absence claim before a withdrawal: a force-close gives the hub
+//!   nothing to spend); with the hub gone, Alice starts unilaterally
+//!   (`self_post_1` into the ladder) and its split pays b after w;
+//! - A6: had Alice signed two values of b, the hub takes a bit output of
+//!   hers with `equiv_b` before her delay runs out;
+//! - settle: a game in which the hub never forces the last step settles
+//!   after its end, paying b;
+//! - D, the default: no withdrawal by T_close; the hub takes the session
+//!   contract.
+//!
+//! Disputes run in GAME contracts (deadlines counted from the start,
+//! `settle`, no default); the session contract precedes any withdrawal.
 //!
 //! Run with `--test-threads=1` or 2.
 
@@ -43,10 +55,10 @@ use lngap_pos::ttt::Layout;
 use lngap_seal::dating::{Choice, PeriodTree, PAD_LEAF};
 use lngap_seal::{ceremony, first_tree, Member, PresignedChain, SealSpec};
 use lngap_sessions::l2::{Op, HUB, L2};
-use lngap_sessions::session::{bit_tree, default_leaf, payout, Terms};
+use lngap_sessions::session::{bit_tree, default_leaf, payout, settle_leaf, Terms};
 use lngap_sessions::statement::{input, write_program};
 use lngap_tictactoe::TicTacToe;
-use lngap_v25::{carrier_tree, claim_tree, level_message, rebuttal_tree, self_post_leaf, WindowMember, ZkDated, CARRIER_SAT, LEVEL_BYTES};
+use lngap_v25::{carrier_tree, claim_tree, ladder_tree, level_message, rebuttal_tree, self_post_leaf, WindowMember, ZkDated, CARRIER_SAT, LEVEL_BYTES};
 use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::dispute::{search, Behaviour};
 use lngap_zk::family::ZkFamily;
@@ -57,6 +69,8 @@ use lngap_zk::nibble_witness;
 const GAME_ID: u16 = 1;
 const SEQ: u64 = 1;
 const LEVELS: usize = 2;
+/// Blocks between a game's last deadline and `settle`.
+const SETTLE_GAP: u32 = 30;
 
 // ---------------------------------------------------------------- venue
 
@@ -207,23 +221,45 @@ impl Session {
         let l = Layout::at(d, GAME_ID, mover_at(d));
         rebuttal_tree(&self.g(), &self.ctx(), &l, self.k(d), w, &lk, self.terms.id, &self.outcomes).unwrap()
     }
-    /// The contract output: `absent_d` and `self_post_d` at every depth
-    /// (a claim at `d` valid after `lock + d`: each depth's deadline
-    /// follows the last), and the default after `T_close`.
-    fn fund(&mut self, rt: &Regtest, lock: u32) -> Funded {
+    /// The SESSION contract, before any withdrawal: only `default` (the
+    /// hub, after `T_close`) and Alice's unilateral start `self_post_1`.
+    /// No absence claims: a force-close mid-session gives the hub nothing
+    /// to spend before `T_close`.
+    fn fund_session(&mut self, rt: &Regtest) -> Funded {
         let ctx = self.ctx();
-        let mut leaves = vec![default_leaf(&ctx, self.terms.t_close)];
-        for d in 1..=self.m() {
+        let l = Layout::at(1, GAME_ID, mover_at(1));
+        let leaves = vec![default_leaf(&ctx, self.terms.t_close), self_post_leaf(&self.g(), &ctx, &l, self.k(1), None)];
+        let tree = TapTree::new(leaves).unwrap();
+        let (op, out) = rt.fund(&tree.script_pubkey(), self.value()).unwrap();
+        Funded { tree, op, out }
+    }
+    /// The GAME contract, signed at a cooperative start at height `h0`
+    /// (Alice's first move already sent): `absent_d` for every later depth,
+    /// its deadline counted from the start (`h0 + d`), the movers'
+    /// `self_post_d`, and `settle` after the last deadline; no default.
+    fn fund_game(&mut self, rt: &Regtest, h0: u32) -> Funded {
+        let ctx = self.ctx();
+        let mut leaves = vec![settle_leaf(&ctx, self.settle_at(h0))];
+        for d in 2..=self.m() {
             let l = Layout::at(d, GAME_ID, mover_at(d));
-            leaves.push(lngap_pos::graph::absent_leaf(&ctx, &format!("absent_{d}"), mover_at(d).other(), lock + d));
-            let mut sp = self_post_leaf(&self.g(), &ctx, &l, self.k(d), (d >= 2).then(|| self.k(d - 1)));
-            sp.name = format!("self_post_{d}");
-            leaves.push(sp);
+            leaves.push(lngap_pos::graph::absent_leaf(&ctx, &format!("absent_{d}"), mover_at(d).other(), h0 + d));
+            leaves.push(self_post_leaf(&self.g(), &ctx, &l, self.k(d), Some(self.k(d - 1))));
         }
         let tree = TapTree::new(leaves).unwrap();
-        let value = self.terms.v_max() + Amount::from_sat(2_000_000); // V_max and a fee reserve
-        let (op, out) = rt.fund(&tree.script_pubkey(), value).unwrap();
+        let (op, out) = rt.fund(&tree.script_pubkey(), self.value()).unwrap();
         Funded { tree, op, out }
+    }
+    /// `V_max` and a fee reserve.
+    fn value(&self) -> Amount {
+        self.terms.v_max() + Amount::from_sat(2_000_000)
+    }
+    /// When a game started at `h0` settles: after the last depth's deadline
+    /// and time for the hub to force the last step on chain.
+    fn settle_at(&self, h0: u32) -> u32 {
+        h0 + self.m() + SETTLE_GAP
+    }
+    fn ladder(&self, j: u32) -> TapTree {
+        ladder_tree(&self.g(), &self.ctx(), GAME_ID, j, &self.keys, &self.outcomes).unwrap()
     }
     /// The pre-signed absence claim at `d` through window `window`.
     fn claim(&mut self, c: &Funded, d: u32, window: Vec<WindowMember>) -> Claim {
@@ -337,7 +373,25 @@ impl Session {
         ow.push(sig(okp, &o, 0, std::slice::from_ref(&prev), &oleaf.script));
         o.input[0].witness = tapscript_witness(&ow, &oleaf.script, &tree.control_block(&other).unwrap());
         assert!(rt.test_accept(&o).is_err(), "bit {i}: {other} must fail on b = {b}");
+        if set {
+            // Alice's leaf waits delta (the hub's equivocation window)
+            rt.mine(u64::from(self.params.delta)).unwrap();
+        }
         rt.mine_with(std::slice::from_ref(&s)).unwrap_or_else(|e| panic!("bit {i}: {name}: {e:#}"));
+        s
+    }
+    /// The hub takes bit output `i` with two different signatures on `b`
+    /// (Alice equivocated). Dry.
+    fn equiv_bit(&self, tx: &Transaction, i: u32, b1: u32, b2: u32) -> Transaction {
+        let tree = bit_tree(&self.ctx(), i, &self.b_key()).unwrap();
+        let name = format!("equiv_b_{i}");
+        let leaf = tree.leaf(&name).unwrap();
+        let prev = tx.output[i as usize].clone();
+        let op = OutPoint { txid: tx.compute_txid(), vout: i };
+        let mut s = build_spend(op, &leaf.timelock, vec![TxOut { value: prev.value - Amount::from_sat(1_000), script_pubkey: self.pubs[1].payout_spk.clone() }]);
+        let mut w = [wots_wire(&self.b_sig(b1)), wots_wire(&self.b_sig(b2))].concat();
+        w.push(sig(&self.hub.payment, &s, 0, std::slice::from_ref(&prev), &leaf.script));
+        s.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(&name).unwrap());
         s
     }
 }
@@ -393,11 +447,13 @@ fn sessions_on_regtest() {
         Session::new(terms(44, t_close), &pdf(44), rounds),
         Session::new(terms(45, t_close), &pdf(45), rounds),
     );
+    let (mut u, mut t) = (Session::new(terms(46, t_close), &pdf(46), rounds), Session::new(terms(47, t_close), &pdf(47), rounds));
     let m = r.m();
     println!("SESS the statement: {rounds} rounds, {m} depths; V_max {} in {} bits of {}", r.terms.v_max(), r.terms.bits, r.terms.unit);
     assert!(!l2.is_final_return(6, 43));
     r.play(9);
     x.play(6);
+    u.play(12);
 
     // the members date Alice's final records (R at slot 0, X at slot 1)
     let tree = PeriodTree::new(vec![zk_leaf(42, m, &r.heads[(m - 1) as usize]), zk_leaf(43, m, &x.heads[(m - 1) as usize]), PAD_LEAF, PAD_LEAF]);
@@ -409,7 +465,9 @@ fn sessions_on_regtest() {
 
     let lock = base + 4;
     let wm = |i: usize, s: u32| window_member(i, &venue[i], s);
-    let (cr, cx, cs, cd) = (r.fund(&rt, lock), x.fund(&rt, lock), st.fund(&rt, lock), df.fund(&rt, lock));
+    let (cr, cx, cs) = (r.fund_game(&rt, lock), x.fund_game(&rt, lock), st.fund_game(&rt, lock));
+    let (cd, cu) = (df.fund_session(&rt), u.fund_session(&rt));
+    let ct = t.fund_game(&rt, lock);
     let claim_r = r.claim(&cr, m, vec![wm(0, 0), wm(1, 0)]);
     let claim_x = x.claim(&cx, m, vec![wm(0, 1), wm(1, 1)]);
     let claim_s = st.claim(&cs, 2, vec![wm(0, 2), wm(1, 2)]);
@@ -418,6 +476,10 @@ fn sessions_on_regtest() {
         rt.mine_with(std::slice::from_ref(&c.tx)).unwrap_or_else(|e| panic!("claim: {e:#}"));
     }
     let (delta, w) = (r.params.delta, r.params.delta + r.params.delta_prime);
+    let w_win = w;
+    // settle's transaction exists from the start, but not before the game's end
+    let settle = t.pay_b(&ct.tree, ct.op, &ct.out, "settle", vec![]);
+    assert!(rt.height().unwrap() < t.settle_at(lock) && rt.test_accept(&settle).is_err(), "settle: not before the game's end");
 
     // ===== R: the hub refused; the final step is proved; b paid =====
     {
@@ -466,6 +528,54 @@ fn sessions_on_regtest() {
         println!("SESS S: the hub never answered; the timeout split pays b = 12: {} vB", split.vsize());
         for i in 0..st.terms.bits {
             st.spend_bit(&rt, &split, i, 12);
+        }
+    }
+
+    // ===== H8, H1, A6: the session contract; the hub force-closes, then disappears =====
+    {
+        // H8: before any withdrawal the session output carries only the
+        // default and Alice's start, so the hub can spend nothing before T_close
+        let names: Vec<&str> = cu.tree.leaves().iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names.len(), 2, "H8: {names:?}");
+        assert!(names.contains(&"default") && names.contains(&"self_post_1"), "H8: {names:?}");
+        println!("SESS H8: the session output carries only {names:?}: no absence claim exists before a withdrawal starts");
+        // H1: Alice starts unilaterally, her first move on chain, into the ladder
+        let leaf = cu.tree.leaf("self_post_1").unwrap();
+        let l1 = u.ladder(1);
+        let t_out = TxOut { value: cu.out.value - u.params.presign_fee, script_pubkey: l1.script_pubkey() };
+        let mut tx = build_spend(cu.op, &leaf.timelock, vec![t_out.clone()]);
+        let (mut w, _) = u.post_wire(1);
+        w.push(sig(&u.hub.payment, &tx, 0, std::slice::from_ref(&cu.out), &leaf.script));
+        w.push(sig(&u.user.payment, &tx, 0, std::slice::from_ref(&cu.out), &leaf.script));
+        tx.input[0].witness = tapscript_witness(&w, &leaf.script, &cu.tree.control_block("self_post_1").unwrap());
+        rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("H1: the unilateral start: {e:#}"));
+        println!("SESS H1: Alice's unilateral start (self_post_1, her claim on chain): {} vB", tx.vsize());
+        // the hub never posts move 2: after w, Alice's ladder split pays b
+        let l1_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
+        let split = u.pay_b(&l1, l1_op, &t_out, "split_UserWins", vec![]);
+        assert!(rt.test_accept(&split).is_err(), "H1: not before the hub's window ends");
+        rt.mine(u64::from(w_win)).unwrap();
+        rt.mine_with(std::slice::from_ref(&split)).unwrap_or_else(|e| panic!("H1: the ladder split: {e:#}"));
+        println!("SESS H1: the hub never answered; the ladder split pays b = 12: {} vB", split.vsize());
+        // A6: had Alice also signed b = 13, the hub takes a bit of hers (bit 2
+        // is set in 12) before her delay runs out, with the two signatures
+        let eq = u.equiv_bit(&split, 2, 12, 13);
+        rt.mine_with(std::slice::from_ref(&eq)).unwrap_or_else(|e| panic!("A6: equiv_b: {e:#}"));
+        println!("SESS A6: two signatures on b: the hub takes bit 2 with equiv_b: {} vB", eq.vsize());
+        for i in [0, 1, 3] {
+            u.spend_bit(&rt, &split, i, 12);
+        }
+    }
+
+    // ===== settle: a game where the hub never forces the last step =====
+    {
+        if rt.height().unwrap() < t.settle_at(lock) {
+            rt.mine_to_height(t.settle_at(lock)).unwrap();
+        }
+        rt.mine_with(std::slice::from_ref(&settle)).unwrap_or_else(|e| panic!("settle: {e:#}"));
+        println!("SESS settle: after the game's end, Alice's claim accepted, b = 5 paid: {} vB", settle.vsize());
+        for i in 0..t.terms.bits {
+            t.spend_bit(&rt, &settle, i, 5);
         }
     }
 
