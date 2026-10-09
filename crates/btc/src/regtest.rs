@@ -24,6 +24,9 @@ pub struct Regtest {
     keep: bool,
     _tmp: Option<tempfile::TempDir>,
     mine_to: Address,
+    /// The node's RPC URL (no wallet path) and cookie file.
+    url: String,
+    cookie: PathBuf,
 }
 
 /// If `tools/explorer.sh` left a node running on this datadir (it records
@@ -93,12 +96,12 @@ impl Regtest {
         let rpc_port: u16 = port.trim().parse().context("rpcport")?;
         let cookie = datadir.join("regtest").join(".cookie");
         let url = format!("http://127.0.0.1:{rpc_port}");
-        let rpc = Client::new(&format!("{url}/wallet/harness"), Auth::CookieFile(cookie))?;
+        let rpc = Client::new(&format!("{url}/wallet/harness"), Auth::CookieFile(cookie.clone()))?;
         rpc.get_block_count().with_context(|| format!("no node answering on port {rpc_port}"))?;
         let mine_to = rpc
             .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32m))?
             .require_network(Network::Regtest)?;
-        Ok(Regtest { child: None, rpc, datadir: datadir.to_path_buf(), keep: true, _tmp: None, mine_to })
+        Ok(Regtest { child: None, rpc, datadir: datadir.to_path_buf(), keep: true, _tmp: None, mine_to, url, cookie })
     }
 
     fn start_inner(initial_blocks: u64, fixed: Option<PathBuf>) -> Result<Regtest> {
@@ -178,13 +181,22 @@ impl Regtest {
             std::thread::sleep(Duration::from_millis(100));
         };
         rpc.create_wallet("harness", None, None, None, None)?;
-        let rpc = Client::new(&format!("{url}/wallet/harness"), Auth::CookieFile(cookie))?;
+        let rpc = Client::new(&format!("{url}/wallet/harness"), Auth::CookieFile(cookie.clone()))?;
         let mine_to = rpc
             .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32m))?
             .require_network(Network::Regtest)?;
-        let rt = Regtest { child: Some(child), rpc, datadir, keep, _tmp: tmp, mine_to };
+        let rt = Regtest { child: Some(child), rpc, datadir, keep, _tmp: tmp, mine_to, url, cookie };
         rt.mine(initial_blocks)?;
         Ok(rt)
+    }
+
+    /// The node's RPC URL (append `/wallet/<name>` for a wallet) and its
+    /// cookie file: for other programs to talk to the same node.
+    pub fn rpc_url(&self) -> &str {
+        &self.url
+    }
+    pub fn cookie(&self) -> &PathBuf {
+        &self.cookie
     }
 
     pub fn datadir(&self) -> &PathBuf {
@@ -278,6 +290,19 @@ impl Regtest {
             .call("sendrawtransaction", &[serde_json::Value::String(serialize_hex(tx)), serde_json::json!(0)])
             .with_context(|| format!("sendrawtransaction (maxfeerate 0) of {}", tx.compute_txid()))?;
         Ok(v.as_str().ok_or_else(|| anyhow!("sendrawtransaction: no txid"))?.parse()?)
+    }
+
+    /// Submit a package (parents first, then a child that pays for them)
+    /// through `submitpackage`: how a zero-fee TRUC parent with an anchor
+    /// is relayed, bumped by its child. Error with the node's reasons
+    /// unless every transaction was accepted.
+    pub fn submit_package(&self, txs: &[Transaction]) -> Result<()> {
+        let raw: Vec<serde_json::Value> = txs.iter().map(|t| serde_json::Value::String(serialize_hex(t))).collect();
+        let v: serde_json::Value = self.rpc.call("submitpackage", &[serde_json::Value::Array(raw)]).context("submitpackage")?;
+        if v.get("package_msg").and_then(|m| m.as_str()) != Some("success") {
+            bail!("package refused: {v}");
+        }
+        Ok(())
     }
 
     /// Run the transaction through `testmempoolaccept`: `Ok(vsize)` if the

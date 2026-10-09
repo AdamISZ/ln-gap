@@ -27,7 +27,7 @@ use lngap_channel::{CommitCtx, Role};
 use lngap_lamport::winternitz::{WotsExt, WotsPublic};
 
 /// A session's terms.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Terms {
     /// The contract's identifier `c`, the memo a return must carry.
     pub id: u32,
@@ -35,6 +35,11 @@ pub struct Terms {
     pub unit: Amount,
     /// `K`: a withdrawal is `b < 2^K` units, so `V_max = (2^K - 1) u`.
     pub bits: u32,
+    /// On the dispute path, bits below this get no output (they would be
+    /// dust): `b` is paid rounded down to a multiple of `2^low_bits` units,
+    /// the remainder to the hub. 0 pays every bit; with sats as the unit,
+    /// 9 (512 sats).
+    pub low_bits: u32,
     /// Alice's deposit `D`, in units.
     pub deposit: u32,
     /// `T_close`: after it, with no claim, everything goes to the hub.
@@ -141,15 +146,17 @@ pub fn reserve_tree(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic) -> Result<Ta
 }
 
 /// The outputs of every transaction that pays Alice's withdrawal (her
-/// proof, the hub's timeout): `K` outputs of `u 2^i`, each Alice's iff bit
-/// `i` of her signed `b` is set; output `K`, both reserves, Alice's; the
-/// rest of `available` (less `fee`) to the hub.
+/// proof, the hub's timeout): for each bit `i` from `low_bits` to `K - 1`,
+/// an output of `u 2^i`, Alice's iff bit `i` of her signed `b` is set; then
+/// both reserves, Alice's; the rest of `available` (less `fee`) to the
+/// hub.
 pub fn payout(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount, fee: Amount) -> Result<Vec<TxOut>> {
     let total = available.checked_sub(fee).ok_or_else(|| anyhow::anyhow!("the fee exceeds the output"))?;
     ensure!(total >= t.v_max() + t.reserves(), "{total} cannot pay V_max {} and the reserves", t.v_max());
-    let mut outs: Vec<TxOut> = (0..t.bits).map(|i| Ok(TxOut { value: t.unit * (1u64 << i), script_pubkey: bit_tree(ctx, i, b_key)?.script_pubkey() })).collect::<Result<_>>()?;
+    let mut outs: Vec<TxOut> = (t.low_bits..t.bits).map(|i| Ok(TxOut { value: t.unit * (1u64 << i), script_pubkey: bit_tree(ctx, i, b_key)?.script_pubkey() })).collect::<Result<_>>()?;
+    let paid: Amount = outs.iter().map(|o| o.value).sum();
     outs.push(TxOut { value: t.reserves(), script_pubkey: reserve_tree(ctx, t, b_key)?.script_pubkey() });
-    let rest = total - t.v_max() - t.reserves();
+    let rest = total - paid - t.reserves();
     if rest >= ctx.params.dust {
         outs.push(TxOut { value: rest, script_pubkey: ctx.key(Role::Hub).payout_spk.clone() });
     }

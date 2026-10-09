@@ -88,11 +88,19 @@ const FEERATE: u64 = 2;
 const SMALL: Amount = Amount::from_sat(20_000);
 const LARGE: Amount = Amount::from_sat(200_000);
 
-/// A party's fee coins. Every pre-signed transaction is signed
-/// SIGHASH_ALL|ANYONECANPAY at zero fee, so whoever broadcasts it adds one
-/// of its own coins as the fee: each side pays for its own moves. The
-/// signatures fix the outputs, so there is no change; a party keeps coins
-/// of fitting sizes, as Lightning's anchor wallets keep a reserve.
+/// A party's fee coins. No pre-signed transaction pays a fee of its own;
+/// whoever broadcasts one pays, so each side pays for its own moves:
+/// - a link of the ladder's chain (escalate, a move) must keep its txid,
+///   since the next link is signed against it: it is a TRUC (v3)
+///   transaction with a zero-value pay-to-anchor output, and its poster
+///   bumps it with a child spending the anchor and a coin of its own
+///   (one-parent-one-child package relay);
+/// - a transaction that ends the chain (a timeout, a proof, the default),
+///   whose outputs only runtime spends use, is signed ALL|ANYONECANPAY and
+///   its broadcaster adds a coin as an input; it may be large (the proof
+///   is about 59 kvB, beyond TRUC's 10 kvB). The signatures fix its
+///   outputs, so that coin has no change: a party keeps coins of fitting
+///   sizes.
 struct FeeWallet {
     kp: Keypair,
     tree: TapTree,
@@ -117,6 +125,22 @@ impl FeeWallet {
         let txid = tx.compute_txid();
         let coins = tx.output.iter().enumerate().map(|(i, o)| (OutPoint { txid, vout: i as u32 }, o.clone())).collect();
         FeeWallet { kp: *kp, tree, coins }
+    }
+    /// A TRUC child of `parent` (whose output `anchor` is its pay-to-anchor)
+    /// paying `FEERATE` on the pair, its change back to this wallet.
+    fn bump(&mut self, parent: &Transaction, anchor: u32) -> Transaction {
+        let need = Amount::from_sat((parent.vsize() as u64 + 200) * FEERATE);
+        let i = self.coins.iter().enumerate().filter(|(_, c)| c.1.value >= need + Amount::from_sat(1_000)).min_by_key(|(_, c)| c.1.value).map(|(i, _)| i).expect("a fee coin large enough");
+        let (op, coin) = self.coins.remove(i);
+        let a_op = OutPoint { txid: parent.compute_txid(), vout: anchor };
+        let change = TxOut { value: coin.value - need, script_pubkey: coin.script_pubkey.clone() };
+        let mut tx = lngap_btc::tx::build_tx(&[(a_op, Sequence::ENABLE_RBF_NO_LOCKTIME), (op, Sequence::ENABLE_RBF_NO_LOCKTIME)], vec![change.clone()], bitcoin::absolute::LockTime::ZERO);
+        tx.version = bitcoin::transaction::Version(3);
+        let leaf = self.tree.leaf("fee").unwrap();
+        let w = vec![sig(&self.kp, &tx, 1, &[parent.output[anchor as usize].clone(), coin], &leaf.script)];
+        tx.input[1].witness = tapscript_witness(&w, &leaf.script, &self.tree.control_block("fee").unwrap());
+        self.coins.push((OutPoint { txid: tx.compute_txid(), vout: 0 }, change));
+        tx
     }
     /// Add a fee input to `tx` (input 0 spends `prevout`): the smallest coin
     /// that pays `FEERATE` on the grown transaction.
@@ -334,15 +358,23 @@ impl Session {
     /// `c`, with the claim words; otherwise `post` from the ladder output
     /// at `j - 1`. An escalation after off-chain play replays the moves
     /// made, each posted with the signatures the poster holds.
-    /// The poster `by` pays its fee.
-    fn post(&mut self, rt: &Regtest, j: u32, op: OutPoint, out: &TxOut, c: Option<&Funded>, by: Role) -> (OutPoint, TxOut, Transaction) {
+    /// Link `j` of the ladder's chain, pre-signed: a TRUC transaction at
+    /// zero fee spending `(op, out)` (for move 1 the contract output `c`,
+    /// through `escalate`; else the ladder output after move `j - 1`) into
+    /// the ladder output after move `j`, plus a zero-value anchor. Its txid
+    /// is fixed by `op`, so the next link can be signed against it at once.
+    /// The witness carries the move (and for move 1 the claim words) below
+    /// the 2-of-2 signatures; the txid doesn't cover it.
+    fn ladder_tx(&mut self, j: u32, op: OutPoint, out: &TxOut, c: Option<&Funded>) -> Transaction {
         let (tree, name) = match c {
             Some(c) => (c.tree.clone(), "escalate"),
             None => (self.ladder(j - 1), "post"),
         };
         let leaf = tree.leaf(name).unwrap();
         let t_out = TxOut { value: out.value, script_pubkey: self.ladder(j).script_pubkey() };
-        let mut tx = build_spend(op, &leaf.timelock, vec![t_out.clone()]);
+        let anchor = TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_p2a() };
+        let mut tx = build_spend(op, &leaf.timelock, vec![t_out, anchor]);
+        tx.version = bitcoin::transaction::Version(3);
         let mut w = vec![];
         if c.is_some() {
             for &k in self.claim_words().iter().rev() {
@@ -350,12 +382,38 @@ impl Session {
             }
         }
         w.extend(wots_wire(&self.move_sig(j)));
-        w.push(presig(&self.hub.payment, &tx, out, &leaf.script));
-        w.push(presig(&self.user.payment, &tx, out, &leaf.script));
+        w.push(sig(&self.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
+        w.push(sig(&self.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(name).unwrap());
-        let tx = self.wallets[by.idx()].pay(tx, out);
-        confirm(rt, &tx).unwrap_or_else(|e| panic!("{}: posting move {j}: {e}", self.cid));
-        (OutPoint { txid: tx.compute_txid(), vout: 0 }, t_out, tx)
+        tx
+    }
+    /// Broadcast a link of the chain: its poster `by` bumps it with a
+    /// child (one-parent-one-child package); the parent and child.
+    fn broadcast_link(&mut self, rt: &Regtest, tx: &Transaction, by: Role) -> Transaction {
+        assert!(rt.test_accept(tx).is_err(), "a link carries no fee of its own");
+        let child = self.wallets[by.idx()].bump(tx, 1);
+        rt.submit_package(&[tx.clone(), child.clone()]).unwrap_or_else(|e| panic!("{}: the package: {e:#}", self.cid));
+        rt.mine(1).unwrap();
+        assert!(rt.confirmations(&tx.compute_txid()).unwrap().is_some(), "the link is mined");
+        child
+    }
+    /// Post move `j` from `(op, out)` (or escalate from `c`), by `by`.
+    fn post(&mut self, rt: &Regtest, j: u32, op: OutPoint, out: &TxOut, c: Option<&Funded>, by: Role) -> (OutPoint, TxOut, Transaction) {
+        let tx = self.ladder_tx(j, op, out, c);
+        self.broadcast_link(rt, &tx, by);
+        (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone(), tx)
+    }
+    /// The whole chain, pre-signed before anything is broadcast: move 1
+    /// through `escalate`, then each move against the previous link's
+    /// (already known) txid.
+    fn presign_chain(&mut self, c: &Funded) -> Vec<Transaction> {
+        let mut chain = vec![self.ladder_tx(1, c.op, &c.out, Some(c))];
+        for j in 2..=self.m() {
+            let prev = chain.last().unwrap();
+            let (op, out) = (OutPoint { txid: prev.compute_txid(), vout: 0 }, prev.output[0].clone());
+            chain.push(self.ladder_tx(j, op, &out, None));
+        }
+        chain
     }
     /// Escalate, by `by`, after the contract's `to_self_delay`.
     fn escalate(&mut self, rt: &Regtest, c: &Funded, by: Role) -> (OutPoint, TxOut, Transaction) {
@@ -471,23 +529,30 @@ impl Session {
     /// The whole search on chain, from the escalation to the final step
     /// (Alice's record at depth `m`): the ladder output there and the
     /// dispute's total size so far.
+    /// Every link is pre-signed first (its txid predicted), then each is
+    /// broadcast by its mover with a child that pays its fee; the sizes
+    /// count both.
     fn play_on_chain(&mut self, rt: &Regtest, c: &Funded) -> (OutPoint, TxOut, u64) {
-        let (mut op, mut out, tx) = self.escalate(rt, c, Role::User);
-        let mut vb = tx.vsize() as u64;
-        println!("SESS {}: escalate (move 1 and {} signed input words): {} vB", self.cid, self.claim_words().len(), tx.vsize());
+        let chain = self.presign_chain(c);
+        rt.mine(u64::from(self.params.to_self_delay)).unwrap();
+        let child = self.broadcast_link(rt, &chain[0], Role::User);
+        let mut vb = (chain[0].vsize() + child.vsize()) as u64;
+        println!("SESS {}: escalate (move 1 and {} signed input words): {} vB, its child {} vB", self.cid, self.claim_words().len(), chain[0].vsize(), child.vsize());
         let (mut alice, mut hub) = (0u64, 0u64);
-        for j in 2..=self.m() {
-            let (o, t, tx) = self.post(rt, j, op, &out, None, mover_at(j));
+        for (k, tx) in chain.iter().enumerate().skip(1) {
+            let j = k as u32 + 1;
+            let child = self.broadcast_link(rt, tx, mover_at(j));
+            let n = (tx.vsize() + child.vsize()) as u64;
             if mover_at(j) == Role::User {
-                alice += tx.vsize() as u64;
+                alice += n;
             } else {
-                hub += tx.vsize() as u64;
+                hub += n;
             }
-            (op, out) = (o, t);
         }
         vb += alice + hub;
-        println!("SESS {}: moves 2 to {} posted: Alice's {alice} vB, the hub's {hub} vB", self.cid, self.m());
-        (op, out, vb)
+        println!("SESS {}: moves 2 to {} pre-signed, then posted with their children: Alice's {alice} vB, the hub's {hub} vB", self.cid, self.m());
+        let last = chain.last().unwrap();
+        (OutPoint { txid: last.compute_txid(), vout: 0 }, last.output[0].clone(), vb)
     }
     /// The final step at the last ladder output: Alice's pre-signed proof.
     fn prove_last(&mut self, op: OutPoint, out: &TxOut) -> (Transaction, String) {
@@ -516,7 +581,7 @@ impl Session {
 }
 
 fn terms(id: u32, t_close: u32) -> Terms {
-    Terms { id, unit: Amount::from_sat(100_000), bits: 4, deposit: 10, t_close, reserve_alice: Amount::from_sat(200_000), reserve_hub: Amount::from_sat(300_000) }
+    Terms { id, unit: Amount::from_sat(100_000), bits: 4, low_bits: 0, deposit: 10, t_close, reserve_alice: Amount::from_sat(200_000), reserve_hub: Amount::from_sat(300_000) }
 }
 
 #[test]

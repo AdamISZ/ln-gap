@@ -19,6 +19,7 @@ lngap-contract = { path = "../../contract" }
 lngap-lamport = { path = "../../lamport" }
 lngap-btc = { path = "../../btc" }
 anyhow.workspace = true
+serde.workspace = true
 bitcoin.workspace = true
 hex.workspace = true
 blake3 = "1"

@@ -3,6 +3,7 @@
 //! ([`statement`]), and the session contract's payout and default
 //! ([`session`]). The dispute is lngap-v25's graph over the search game.
 
+pub mod contract;
 pub mod l2;
 pub mod session;
 pub mod statement;
