@@ -38,6 +38,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bitcoin::hashes::Hash;
 use bitcoin::key::Keypair;
@@ -61,7 +62,7 @@ use lngap_pos::ttt::Layout;
 use lngap_seal::dating::{Choice, PeriodTree, PAD_LEAF};
 use lngap_seal::{ceremony, first_tree, Member, PresignedChain, SealSpec};
 use lngap_sessions::l2::{Op, HUB, L2};
-use lngap_sessions::session::{bit_tree, default_leaf, payout, settle_leaf, Terms};
+use lngap_sessions::session::{bit_tree, default_leaf, input_word_leaf, payout, settle_leaf, Terms};
 use lngap_sessions::statement::{input, write_program};
 use lngap_tictactoe::TicTacToe;
 use lngap_v25::{carrier_tree, claim_tree, ladder_tree, level_message, rebuttal_tree, escalate_leaf, WindowMember, ZkDated, CARRIER_SAT, LEVEL_BYTES};
@@ -130,6 +131,13 @@ fn sig(kp: &Keypair, tx: &Transaction, input: usize, prevouts: &[TxOut], leaf: &
 /// One session contract between Alice (the user, the prover) and the hub.
 struct Session {
     terms: Terms,
+    /// The contract's number (labels, keys, dating); the memo `c` is
+    /// `terms.id`.
+    cid: u32,
+    /// The input word that carries `b`, and the game contract's input-word
+    /// checks: (leaf name, word, the value it must have).
+    b_word: usize,
+    checks: Vec<(String, usize, u32)>,
     user: PartyKeys,
     hub: PartyKeys,
     ks: [KeyStore; 2],
@@ -165,7 +173,12 @@ struct Claim {
 
 impl Session {
     fn new(terms: Terms, pdf: &str, rounds: u32) -> Session {
-        let id = terms.id;
+        Session::with(terms, terms.id, pdf, rounds, 0, vec![])
+    }
+    /// A session on any statement program: contract number `cid`, `b` in
+    /// input word `b_word`, the game contract's input-word `checks`.
+    fn with(terms: Terms, cid: u32, pdf: &str, rounds: u32, b_word: usize, checks: Vec<(String, usize, u32)>) -> Session {
+        let id = cid;
         let user = PartyKeys::from_seed(Role::User, Seed::from_label(&format!("sess/{id}/alice")));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label(&format!("sess/{id}/hub")));
         let mut ks = [KeyStore::new(Seed::from_label(&format!("sess/{id}/alice-ks"))), KeyStore::new(Seed::from_label(&format!("sess/{id}/hub-ks")))];
@@ -175,12 +188,11 @@ impl Session {
         let oh = instance::gen_pos_keys(&mut ks[1], Role::Hub, id, SEQ, m, instance::Game::Zk).unwrap();
         let keys = instance::collect_keys(&ou, &oh, m).unwrap();
         let info = ProgramInfo::load(pdf).unwrap();
-        assert_eq!(info.input_words, 2, "the statement's input is (b, c)");
-        let input_secrets: Vec<WotsSecret> = (0..2u8).map(|j| WotsSecret::from_entropy(input_key_params(), [0x60 + j + id as u8; 32])).collect();
+        let input_secrets: Vec<WotsSecret> = (0..info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x60u8.wrapping_add(j as u8).wrapping_add(id as u8); 32])).collect();
         let family = ZkFamily::new(search, info, input_secrets.iter().map(|k| k.public()).collect());
         let params = ChannelParams { presign_fee: Amount::from_sat(80_000), ..ChannelParams::regtest(Amount::from_sat(20_000_000)) };
         let pubs = [user.public(), hub.public()];
-        Session { terms, user, hub, ks, params, pubs, keys, family, input_secrets, outcomes: Contract::outcomes(&TicTacToe), level_keys: HashMap::new(), pdf: pdf.to_string(), heads: vec![], entries: vec![] }
+        Session { terms, cid, b_word, checks, user, hub, ks, params, pubs, keys, family, input_secrets, outcomes: Contract::outcomes(&TicTacToe), level_keys: HashMap::new(), pdf: pdf.to_string(), heads: vec![], entries: vec![] }
     }
     fn m(&self) -> u32 {
         self.keys.len() as u32
@@ -195,29 +207,34 @@ impl Session {
         &self.keys[(d - 1) as usize]
     }
     fn b_key(&self) -> WotsPublic {
-        self.input_secrets[0].public()
+        self.input_secrets[self.b_word].public()
     }
-    /// Alice's signature on her claimed `b` (her depth-1 input word 0).
+    /// Alice's signature on her claimed `b` (her depth-1 input word
+    /// `b_word`).
     fn b_sig(&self, b: u32) -> WotsSig {
-        self.input_secrets[0].sign(&input_message(b)).unwrap()
+        self.input_secrets[self.b_word].sign(&input_message(b)).unwrap()
     }
-    /// Play the search on Alice's claim `(b, c)`: BitVMX's parties, the hub
-    /// challenging; the game's entries.
+    /// Play the search on Alice's claim `(b, c)` (the mock statement).
     fn play(&mut self, b: u32) {
-        let dir = std::env::temp_dir().join(format!("lngap-sess-{}-{}", std::process::id(), self.terms.id));
+        self.play_input(&input(b, self.terms.id), &format!("b = {b}"));
+    }
+    /// Play the search on the statement program run on `inp`: BitVMX's
+    /// parties, the hub challenging; the game's entries.
+    fn play_input(&mut self, inp: &[u8], what: &str) {
+        let dir = std::env::temp_dir().join(format!("lngap-sess-{}-{}", std::process::id(), self.cid));
         let _ = std::fs::remove_dir_all(&dir);
-        let s = search(&self.pdf, &input(b, self.terms.id), &dir, &Behaviour::default(), &Behaviour::default(), ForceCondition::ValidInputStepAndHash).unwrap().expect("the hub challenges");
+        let s = search(&self.pdf, inp, &dir, &Behaviour::default(), &Behaviour::default(), ForceCondition::ValidInputStepAndHash).unwrap().expect("the hub challenges");
         let _ = std::fs::remove_dir_all(&dir);
         let rounds = self.m().div_ceil(2) - 1;
         self.entries = play(&s, &Search { game_id: GAME_ID, rounds }).unwrap();
         self.heads = self.entries.iter().map(|e| e.head).collect();
-        println!("SESS {}: Alice claims b = {b}: the program {:?} at step {}", self.terms.id, s.claim.0, s.claim.1);
+        println!("SESS {}: Alice claims {what}: the program {:?} at step {}", self.cid, s.claim.0, s.claim.1);
     }
     fn level_keys(&mut self, d: u32) -> Vec<WotsPublic> {
         if let Some(k) = self.level_keys.get(&d) {
             return k.clone();
         }
-        let id = self.terms.id;
+        let id = self.cid;
         let k: Vec<WotsPublic> = (0..LEVELS).map(|ell| self.ks[mover_at(d).idx()].generate_wots(&format!("sess/level/{id}/{d}/{ell}"), LEVEL_BYTES).unwrap()).collect();
         self.level_keys.insert(d, k.clone());
         k
@@ -225,7 +242,7 @@ impl Session {
     fn p_tree(&mut self, d: u32, w: &WindowMember) -> TapTree {
         let lk = self.level_keys(d);
         let l = Layout::at(d, GAME_ID, mover_at(d));
-        rebuttal_tree(&self.g(), &self.ctx(), &l, self.k(d), w, &lk, self.terms.id, &self.outcomes).unwrap()
+        rebuttal_tree(&self.g(), &self.ctx(), &l, self.k(d), w, &lk, self.cid, &self.outcomes).unwrap()
     }
     /// The SESSION contract, before any withdrawal: only `default` (the
     /// hub, after `T_close`) and `escalate`, Alice's unilateral start (her
@@ -251,6 +268,9 @@ impl Session {
         let mut leaves = vec![settle_leaf(&ctx, self.settle_at(h0)), escalate_leaf(&self.g(), &ctx, &l1, self.k(1))];
         for d in 2..=self.m() {
             leaves.push(lngap_pos::graph::absent_leaf(&ctx, &format!("absent_{d}"), mover_at(d).other(), h0 + d));
+        }
+        for (name, j, expected) in &self.checks {
+            leaves.push(input_word_leaf(&ctx, name, &self.input_secrets[*j].public(), *expected));
         }
         let tree = TapTree::new(leaves).unwrap();
         let (op, out) = rt.fund(&tree.script_pubkey(), self.value()).unwrap();
@@ -290,7 +310,7 @@ impl Session {
     }
     /// The pair reveal at `d` and both heads' authorship, wire order.
     fn post_wire(&mut self, d: u32) -> (Vec<Vec<u8>>, WotsSig) {
-        let id = self.terms.id;
+        let id = self.cid;
         let (new, mv) = (self.heads[(d - 1) as usize], mover_at(d));
         let new_auth = self.ks[mv.idx()].sign_wots(&instance::state_label(id, SEQ, d), &auth_message(&new)).unwrap();
         let mut w = vec![];
@@ -322,7 +342,7 @@ impl Session {
         w.push(sig(&self.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(name).unwrap());
         rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("posting move {j}: {e:#}"));
-        println!("SESS {}: ladder post of move {j}: {} vB", self.terms.id, tx.vsize());
+        println!("SESS {}: ladder post of move {j}: {} vB", self.cid, tx.vsize());
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, t_out)
     }
     /// The mover's rebuttal of claim `c` through window member `wm`.
@@ -342,7 +362,7 @@ impl Session {
         ins.extend(c.carriers.iter().map(|x| (x.0, Sequence::ENABLE_RBF_NO_LOCKTIME)));
         let mut tx = build_tx(&ins, vec![p_out.clone()], absolute::LockTime::ZERO);
         let (digests, siblings) = path_of(tree, w.slot);
-        let id = self.terms.id;
+        let id = self.cid;
         let levels: Vec<WotsSig> = (0..LEVELS).map(|ell| self.ks[mover_at(d).idx()].sign_wots(&format!("sess/level/{id}/{d}/{ell}"), &level_message(&digests[ell], &siblings[ell])).unwrap()).collect();
         let (post, pair) = self.post_wire(d);
         let name = format!("rebut_{}", w.member);
@@ -637,6 +657,155 @@ fn sessions_on_regtest() {
         rt.mine_to_height(t_close).unwrap();
         rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("D: the default: {e:#}"));
         println!("SESS D: the default after T_close: {} vB", tx.vsize());
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The verifier ELF as shipped (GPL, not vendored): BitVMX-CPU's built
+/// copy, from the Cargo checkout.
+fn groth16_verifier_elf() -> std::path::PathBuf {
+    let home = std::env::var("CARGO_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".cargo"));
+    let checkouts = home.join("git/checkouts");
+    for d in std::fs::read_dir(&checkouts).unwrap().flatten() {
+        if !d.file_name().to_string_lossy().starts_with("bitvmx-cpu-") {
+            continue;
+        }
+        for rev in std::fs::read_dir(d.path()).unwrap().flatten() {
+            let elf = rev.path().join("docker-riscv32/verifier/build/zkverifier-new-mul.elf");
+            if rev.file_name().to_string_lossy().starts_with("299009c") && elf.exists() {
+                return elf;
+            }
+        }
+    }
+    panic!("BitVMX-CPU 299009c not found under {}", checkouts.display());
+}
+
+/// The pinned guest's image id (r0/guests/README.md), as the input's
+/// words 1 to 8.
+const IMAGE_ID: &str = "4beda75466ff0db4aa6c6fe9512140368ad287c695f0ff162775db93039aa639";
+
+/// Opt-in: sessions on the REAL statement program, BitVMX's Groth16
+/// verifier (59 depths), with a real proof of the withdrawal guest
+/// (tests/data). Two BitVMX searches (about 9 minutes each in release).
+///
+/// - R: Alice's valid claim (b = 9, memo 42), the hub refuses: the search
+///   is played, the hub forces the last step on chain, Alice's dated record
+///   parks it, her pre-signed proof pays b = 9 in bits, read from the
+///   input's word 41;
+/// - X: the same proof with b changed to 10: the verifier halts with
+///   failure, and the hub's `halt_exit` disprove wins;
+/// - I: Alice's input signs a different image id (another program's
+///   proof): the hub's `image_1` check takes the game contract;
+/// - M: Alice's input signs memo 43 for this session (42): the hub's
+///   `memo` check takes it.
+#[test]
+#[ignore]
+fn sessions_on_the_groth16_verifier() {
+    let rt = Regtest::start().unwrap();
+    let dir = std::env::temp_dir().join(format!("lngap-sess-real-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(groth16_verifier_elf(), dir.join("zkverifier.elf")).unwrap();
+    std::fs::write(dir.join("groth16.yaml"), "elf: zkverifier.elf\nnary_search: 2\nmax_steps: 536870912\ninput_section_name: .input\ninputs:\n  - size: 172\n    owner: prover\n").unwrap();
+    let pdf = dir.join("groth16.yaml").display().to_string();
+    let valid = hex::decode(include_str!("data/withdraw-9-42.hex").trim()).unwrap();
+    let words = lngap_zk::final_d60::input_words(&valid);
+    assert_eq!(words.len(), 43, "length, image id, proof, b, c");
+    let (b_word, c_word) = (41, 42);
+    assert_eq!((words[0], words[b_word], words[c_word]), (2, 9, 42));
+    let id_words = lngap_zk::final_d60::input_words(&hex::decode(IMAGE_ID).unwrap());
+    assert_eq!(&words[1..9], id_words.as_slice(), "the proof is of the pinned guest");
+    let mut tampered = valid.clone();
+    tampered[164] = 10; // b, word 41's low byte
+    let rounds = emulator::loader::program_definition::ProgramDefinition::from_config(&pdf).unwrap().nary_def().total_rounds() as u32;
+
+    let t_close_pad = 600;
+    let base = rt.height().unwrap() + 12;
+    let t_close = base + t_close_pad;
+    let checks: Vec<(String, usize, u32)> = [("journal_len".to_string(), 0, 2), ("memo".to_string(), c_word, 42)]
+        .into_iter()
+        .chain((1..9).map(|j| (format!("image_{j}"), j, id_words[j - 1])))
+        .collect();
+    let t = Instant::now();
+    let mk = |cid| Session::with(terms(42, t_close), cid, &pdf, rounds, b_word, checks.clone());
+    let (mut r, mut x, i, mm) = (mk(61), mk(62), mk(63), mk(64));
+    let m = r.m();
+    println!("SESS [real] the Groth16 verifier: {rounds} rounds, {m} depths; four sessions' keys and families in {:.1?}", t.elapsed());
+    let t = Instant::now();
+    r.play_input(&valid, "b = 9 (a valid proof)");
+    x.play_input(&tampered, "b = 10 (the proof is for 9)");
+    println!("SESS [real] both searches in {:.0?}", t.elapsed());
+
+    let venue = venue(&rt, base);
+    let tree = PeriodTree::new(vec![zk_leaf(61, m, &r.heads[(m - 1) as usize]), zk_leaf(62, m, &x.heads[(m - 1) as usize]), PAD_LEAF, PAD_LEAF]);
+    rt.mine_to_height(venue[0].chain.spec.height(1) - 1).unwrap();
+    for vm in &venue {
+        rt.mine_with(&[vm.chain.close(&vm.member, 1, &tree.root()).unwrap()]).unwrap();
+    }
+    let roots: Vec<WotsSig> = venue.iter().map(|vm| vm.member.sign_root(1, &tree.root()).unwrap()).collect();
+    let lock = base + 4;
+    let wm = |k: usize, s: u32| window_member(k, &venue[k], s);
+    let t = Instant::now();
+    let (cr, cx) = (r.fund_game(&rt, lock), x.fund_game(&rt, lock));
+    let (mut i, mut mm) = (i, mm);
+    let (ci, cm) = (i.fund_game(&rt, lock), mm.fund_game(&rt, lock));
+    let claim_r = r.claim(&cr, m, vec![wm(0, 0), wm(1, 0)]);
+    let claim_x = x.claim(&cx, m, vec![wm(0, 1), wm(1, 1)]);
+    println!("SESS [real] game contracts and claims built in {:.1?}", t.elapsed());
+
+    // ===== I: a different image id; M: another session's memo =====
+    for (s, c, name, j, bad) in [(&i, &ci, "image_1", 1usize, id_words[0] ^ 1), (&mm, &cm, "memo", c_word, 43)] {
+        let leaf = c.tree.leaf(name).unwrap();
+        let spend = |v: u32| {
+            let sig_w = s.input_secrets[j].sign(&input_message(v)).unwrap();
+            let mut tx = build_spend(c.op, &leaf.timelock, vec![TxOut { value: c.out.value - Amount::from_sat(5_000), script_pubkey: s.pubs[1].payout_spk.clone() }]);
+            let mut w = wots_wire(&sig_w);
+            w.push(sig(&s.hub.payment, &tx, 0, std::slice::from_ref(&c.out), &leaf.script));
+            tx.input[0].witness = tapscript_witness(&w, &leaf.script, &c.tree.control_block(name).unwrap());
+            tx
+        };
+        let honest = if name == "memo" { 42 } else { id_words[0] };
+        assert!(rt.test_accept(&spend(honest)).is_err(), "{name}: the right value gives the hub nothing");
+        let tx = spend(bad);
+        rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("{name}: {e:#}"));
+        println!("SESS [real] {}: Alice's input signs {} = {bad:#x}; the hub's check takes the game contract: {} vB", if name == "memo" { "M" } else { "I" }, name, tx.vsize());
+    }
+
+    rt.mine_to_height(lock + m + u32::from(r.params.to_self_delay)).unwrap();
+    for c in [&claim_r, &claim_x] {
+        rt.mine_with(std::slice::from_ref(&c.tx)).unwrap_or_else(|e| panic!("claim: {e:#}"));
+    }
+    let (delta, w) = (r.params.delta, r.params.delta + r.params.delta_prime);
+
+    // ===== R: the hub refused a valid claim; the last step proved; b paid =====
+    {
+        let (p_op, p_out, pair) = r.rebut(&rt, &claim_r, 0, &venue, &tree, &roots[0]);
+        let p_tree = r.p_tree(m, &claim_r.window[0].clone());
+        let last = r.entries.last().unwrap().clone();
+        let rec = last.record.unwrap();
+        let class = lngap_zk::guard::key_of(rec.read.opcode, rec.read.micro).unwrap();
+        let proof = r.pay_b(&p_tree, p_op, &p_out, &format!("zk_prove_{class}"), [final_witness(&last.state, &rec), wots_wire(&pair)].concat());
+        rt.mine(u64::from(w)).unwrap();
+        rt.mine_with(std::slice::from_ref(&proof)).unwrap_or_else(|e| panic!("R: the proof: {e:#}"));
+        println!("SESS [real] R: zk_prove_{class} pays b = 9 (input word 41) in bits: {} vB", proof.vsize());
+        for k in 0..r.terms.bits {
+            r.spend_bit(&rt, &proof, k, 9);
+        }
+    }
+
+    // ===== X: the proof is for 9, Alice claims 10: halt_exit =====
+    {
+        let (p_op, p_out, pair) = x.rebut(&rt, &claim_x, 1, &venue, &tree, &roots[1]);
+        let p_tree = x.p_tree(m, &claim_x.window[1].clone());
+        let last = x.entries.last().unwrap().clone();
+        let (rec, cl) = (last.record.unwrap(), x.entries[0].claim.unwrap());
+        rt.mine(u64::from(delta)).unwrap();
+        let leaf = p_tree.leaf("disprove_zk_halt_exit").unwrap();
+        let mut tx = build_spend(p_op, &leaf.timelock, vec![TxOut { value: p_out.value - x.params.presign_fee, script_pubkey: x.pubs[1].payout_spk.clone() }]);
+        let mut wit = [nibble_witness(&rec.to_bytes()), nibble_witness(&cl.to_bytes()), wots_wire(&pair)].concat();
+        wit.push(sig(&x.hub.payment, &tx, 0, std::slice::from_ref(&p_out), &leaf.script));
+        tx.input[0].witness = tapscript_witness(&wit, &leaf.script, &p_tree.control_block("disprove_zk_halt_exit").unwrap());
+        rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("X: halt_exit must fire: {e:#}"));
+        println!("SESS [real] X: the verifier halted with failure; disprove_zk_halt_exit: {} vB. The hub wins.", tx.vsize());
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -135,6 +135,31 @@ pub fn payout(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount,
     Ok(outs)
 }
 
+/// An input-word check on the GAME contract, the hub's leaf: Alice's
+/// signature (her depth-1 input key for word `j`) on a value that is NOT
+/// `expected` gives the hub the contract. The statement's input must carry
+/// the session's constants in fixed words: the journal's length, the
+/// image id (otherwise Alice could prove another program's output, which
+/// the verifier would accept), the memo `c` (otherwise another session's
+/// return could be redeemed here). Witness, wire order: the word's
+/// reveal, the hub's signature.
+pub fn input_word_leaf(ctx: &CommitCtx, name: &str, key: &WotsPublic, expected: u32) -> Leaf {
+    let m = key.params.message_digits as usize;
+    assert_eq!(m, 8, "a word's key signs 4 bytes");
+    let mut b = Builder::new().checksigverify(&ctx.key(Role::Hub).payment).wots_verify(key);
+    // the digits are the word big-endian, digit 0 deepest: compare each
+    // with the expected nibble, from the top down, and count differences
+    let nibbles: Vec<i64> = expected.to_be_bytes().iter().flat_map(|x| [i64::from(x >> 4), i64::from(x & 15)]).collect();
+    for k in (0..m).rev() {
+        b = b.push_int(nibbles[k]).push_opcode(OP_NUMNOTEQUAL).push_opcode(OP_TOALTSTACK);
+    }
+    b = b.push_opcode(OP_FROMALTSTACK);
+    for _ in 1..m {
+        b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_ADD);
+    }
+    Leaf::new(name.to_string(), b.into_script(), Timelock::NONE)
+}
+
 /// `settle` on the GAME contract: after the game's end (`at`, a height
 /// past the last depth's deadline and the hub's chance to force the last
 /// step on chain), Alice's claim is accepted; 2-of-2 pre-signed, paying
