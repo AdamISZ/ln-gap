@@ -90,6 +90,13 @@ impl Claim {
         b[C_INPUT..C_INPUT + 20].copy_from_slice(&self.input);
         b
     }
+    pub fn from_bytes(b: &[u8; BLOCK]) -> Claim {
+        Claim {
+            last_step: u64::from_be_bytes(b[C_LAST_STEP..C_LAST_STEP + 8].try_into().unwrap()),
+            last_hash: b[C_LAST_HASH..C_LAST_HASH + 20].try_into().unwrap(),
+            input: b[C_INPUT..C_INPUT + 20].try_into().unwrap(),
+        }
+    }
     pub fn digest(&self) -> [u8; 20] {
         blake3_160(&self.to_bytes())
     }
@@ -145,6 +152,18 @@ impl Record {
         b[R_LS2..R_LS2 + 8].copy_from_slice(&self.last_step_2.to_be_bytes());
         b[R_STEP..R_STEP + 4].copy_from_slice(&self.step.to_be_bytes());
         b
+    }
+    pub fn from_bytes(b: &[u8; BLOCK]) -> Record {
+        let w = |i: usize| u32::from_be_bytes(b[i..i + 4].try_into().unwrap());
+        let q = |i: usize| u64::from_be_bytes(b[i..i + 8].try_into().unwrap());
+        Record {
+            read: Read { mem_witness: b[R_MEMW], read_1_addr: w(R_R1A), read_1_value: w(R_R1V), read_2_addr: w(R_R2A), read_2_value: w(R_R2V), pc: w(R_PC), micro: b[R_MICRO], opcode: w(R_OP) },
+            write: Step::from_bytes(b[R_WADDR..R_WADDR + 13].try_into().unwrap()),
+            witness: w(R_WITNESS),
+            last_step_1: q(R_LS1),
+            last_step_2: q(R_LS2),
+            step: w(R_STEP),
+        }
     }
     pub fn digest(&self) -> [u8; 20] {
         blake3_160(&self.to_bytes())
@@ -1046,4 +1065,24 @@ pub fn play_read(read: &crate::dispute::ReadSearched, search: &Search, phase1: &
     );
     v.push(search.terminal(&last));
     Ok(v)
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::*;
+
+    #[test]
+    fn blocks_round_trip() {
+        let c = Claim { last_step: 478_100_841, last_hash: [7; 20], input: [0; 20] };
+        assert_eq!(Claim::from_bytes(&c.to_bytes()), c);
+        let r = Record {
+            read: Read { mem_witness: 3, read_1_addr: 1, read_1_value: 93, read_2_addr: 2, read_2_value: 0, pc: 0x1000, micro: 1, opcode: 0x73 },
+            write: Step { write_addr: 9, write_value: 10, pc: 0x1004, micro: 0 },
+            witness: 11,
+            last_step_1: 12,
+            last_step_2: u64::MAX,
+            step: 13,
+        };
+        assert_eq!(Record::from_bytes(&r.to_bytes()), r);
+    }
 }

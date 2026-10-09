@@ -6,7 +6,10 @@
 //! it happens), `default` and `escalate`; a dispute is
 //! BitVMX's search over the statement program, played on the ladder from
 //! move 1 with lean moves (lngap-v25, lngap-zk). What is pre-signed:
-//! - the chain's links: `escalate` (move 1) and each move's `post`, TRUC
+//! - the chain's links: `escalate` (move 1 and the claim's input words),
+//!   then, if the claim's words don't cover the input, `inputs` (the
+//!   rest of it: the verifier executes the program on the whole input
+//!   before its first move), and each move's `post`, TRUC
 //!   (v3) transactions at zero fee with a zero-value anchor, each signed
 //!   against the previous link's txid (fixed, since nothing can be added
 //!   to a link: its poster pays with a child spending the anchor);
@@ -25,8 +28,10 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use lngap_btc::keys::Seed;
 use lngap_btc::sighash::{sign_tapscript, sign_tapscript_acp, tapscript_sighash};
-use lngap_btc::taptree::TapTree;
-use lngap_btc::tx::build_spend;
+use bitcoin::script::Builder;
+use lngap_btc::script::BuilderExt;
+use lngap_btc::taptree::{Leaf, TapTree};
+use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyPubKeys, Role};
 use lngap_contract::{Outcome, Payout};
@@ -34,7 +39,7 @@ use lngap_lamport::keystore::KeyStore;
 use lngap_lamport::winternitz::WotsPublic;
 use lngap_pos::instance::{mover_at, PosDepthKeys};
 use lngap_pos::ttt::Layout;
-use lngap_v25::{escalate_leaf_with, ladder_leaves, ZkDated};
+use lngap_v25::{escalate_leaf_with, inputs_leaf, ladder_leaves, ZkDated};
 use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::family::ZkFamily;
 use lngap_zk::game::Search;
@@ -46,6 +51,32 @@ pub const GAME_ID: u16 = 1;
 /// The commitment sequence the leaves are built under (a standalone
 /// contract has one).
 pub const SEQ: u64 = 1;
+
+/// What depth `d`'s move key signs, of `m`: the 48-byte head; at depth 1
+/// also the claim block (the claimed last step and hash), at the final
+/// depth the disputed step's record (64 bytes each). The other side needs
+/// both to play and to disprove, so they go on chain under the mover's
+/// signature.
+pub fn move_bytes(d: u32, m: u32) -> u32 {
+    if d == 1 || d == m {
+        48 + 64
+    } else {
+        48
+    }
+}
+
+/// The message move `d` signs: its head, and at depth 1 the claim block,
+/// at the final depth the record.
+pub fn move_message(entry: &lngap_zk::game::Entry) -> Vec<u8> {
+    let mut msg = entry.head.to_vec();
+    if let Some(c) = &entry.claim {
+        msg.extend_from_slice(&c.to_bytes());
+    }
+    if let Some(r) = &entry.record {
+        msg.extend_from_slice(&r.to_bytes());
+    }
+    msg
+}
 
 /// The statement program the dispute runs: BitVMX's program definition
 /// and what the leaves need from it.
@@ -123,6 +154,10 @@ impl Contract {
     pub fn new(spec: Spec, program: &Program) -> Result<Contract> {
         let m = program.depths();
         ensure!(spec.moves.len() as u32 == m, "{} move keys for {m} depths", spec.moves.len());
+        for (i, k) in spec.moves.iter().enumerate() {
+            let d = i as u32 + 1;
+            ensure!(k.params.message_digits == 2 * move_bytes(d, m), "move key {d} signs {} digits, not {}", k.params.message_digits, 2 * move_bytes(d, m));
+        }
         ensure!(spec.inputs.len() == program.info.input_words, "{} input keys for {} words", spec.inputs.len(), program.info.input_words);
         ensure!(spec.b_word < spec.inputs.len() && spec.checks.iter().all(|c| c.word < spec.inputs.len()), "an input word out of range");
         let codes = unused_code_keys(m)?;
@@ -155,6 +190,22 @@ impl Contract {
         w.sort_unstable();
         w.dedup();
         w
+    }
+    /// The input words the `inputs` link publishes: those the claim's
+    /// don't cover.
+    pub fn rest_words(&self) -> Vec<usize> {
+        let claim = self.claim_words();
+        (0..self.spec.inputs.len()).filter(|j| !claim.contains(j)).collect()
+    }
+    /// The output `escalate` creates when there are words left to publish:
+    /// `inputs` (Alice, into the ladder) or, after the window, the hub's
+    /// timeout.
+    pub fn claimed_tree(&self) -> Result<TapTree> {
+        let ctx = self.ctx();
+        let w = self.spec.params.delta + self.spec.params.delta_prime;
+        let words: Vec<WotsPublic> = self.rest_words().iter().map(|&j| self.spec.inputs[j].clone()).collect();
+        let timeout = Leaf::new("split_HubWins".to_string(), ctx.two_of_two_verify(Builder::new().csv(w)).push_int(1).into_script(), Timelock::csv(w));
+        TapTree::new(vec![inputs_leaf(&ctx, &words), timeout])
     }
     /// What the contract output holds: `V_max` and both reserves (it funds
     /// no fees).
@@ -232,12 +283,23 @@ impl Contract {
         let outs = default_outputs(&self.ctx(), &self.spec.terms, c_out.value, Amount::ZERO)?;
         out.push(Presign::new("default", &tree, "default", funding, &c_out, outs, false)?);
         // the chain
+        let anchor = TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_p2a() };
         let (mut prev_tree, mut prev_leaf, mut op, mut prev_out) = (tree, "escalate".to_string(), funding, c_out);
+        if !self.rest_words().is_empty() {
+            // escalate creates the claimed output; `inputs` spends it into the ladder
+            let t = self.claimed_tree()?;
+            let t_out = TxOut { value: prev_out.value, script_pubkey: t.script_pubkey() };
+            let link = Presign::new("escalate", &prev_tree, &prev_leaf, op, &prev_out, vec![t_out.clone(), anchor.clone()], true)?;
+            op = OutPoint { txid: link.tx.compute_txid(), vout: 0 };
+            out.push(link);
+            out.push(Presign::new("timeout_inputs", &t, "split_HubWins", op, &t_out, self.pay_hub(t_out.value), false)?);
+            (prev_tree, prev_leaf, prev_out) = (t, "inputs".to_string(), t_out);
+        }
         for j in 1..=self.m() {
             let t = self.ladder(j)?;
             let t_out = TxOut { value: prev_out.value, script_pubkey: t.script_pubkey() };
-            let anchor = TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_p2a() };
-            let link = Presign::new(&format!("move_{j}"), &prev_tree, &prev_leaf, op, &prev_out, vec![t_out.clone(), anchor], true)?;
+            let name = if j == 1 && prev_leaf == "escalate" { "escalate".to_string() } else if j == 1 { "inputs".to_string() } else { format!("move_{j}") };
+            let link = Presign::new(&name, &prev_tree, &prev_leaf, op, &prev_out, vec![t_out.clone(), anchor.clone()], true)?;
             op = OutPoint { txid: link.tx.compute_txid(), vout: 0 };
             out.push(link);
             // this ladder output's timeout

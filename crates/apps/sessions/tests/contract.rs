@@ -7,7 +7,7 @@ use bitcoin::{Amount, OutPoint, Txid};
 use lngap_btc::keys::Seed;
 use lngap_channel::{ChannelParams, PartyKeys, Role};
 use lngap_lamport::winternitz::{WotsParams, WotsSecret};
-use lngap_sessions::contract::{sign_all, Check, Contract, Program, Signed, Spec};
+use lngap_sessions::contract::{move_bytes, sign_all, Check, Contract, Program, Signed, Spec};
 use lngap_sessions::session::Terms;
 use lngap_sessions::statement::write_program;
 use lngap_zk::final_d60::input_key_params;
@@ -19,7 +19,7 @@ fn the_presigned_set() {
     let program = Program::load(&pdf).unwrap();
     let m = program.depths();
     let (alice, hub) = (PartyKeys::from_seed(Role::User, Seed::from_label("c/alice")), PartyKeys::from_seed(Role::Hub, Seed::from_label("c/hub")));
-    let moves: Vec<WotsSecret> = (1..=m).map(|d| WotsSecret::from_entropy(WotsParams::for_bytes(48), Seed::from_label(&format!("c/move/{d}")).derive_bytes("wots"))).collect();
+    let moves: Vec<WotsSecret> = (1..=m).map(|d| WotsSecret::from_entropy(WotsParams::for_bytes(move_bytes(d, m)), Seed::from_label(&format!("c/move/{d}")).derive_bytes("wots"))).collect();
     let inputs: Vec<WotsSecret> = (0..program.info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x60 + j as u8; 32])).collect();
     let terms = Terms { id: 42, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 1_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(30_000) };
     let spec = Spec {

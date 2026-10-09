@@ -60,7 +60,9 @@ impl OpensFile for WotsPublic {
 }
 
 /// Lean moves (LN-GAP v3): each move is signed alone, under its depth's
-/// key; a leaf re-reveals both signatures, both public once posted. The
+/// key (with, at depth 1 and the final depth, the claim block or the
+/// record after the head); a leaf re-reveals both signatures, both public
+/// once posted. The
 /// new move's verify runs first (its reveal on top), its digits wait on
 /// the altstack while the prior's are verified, then return above them:
 /// the same file as the pair key's. Witness, wire order: the prior move's
@@ -72,16 +74,34 @@ pub struct LeanFile {
     pub new: WotsPublic,
 }
 
+/// A head's digits in a file.
+const HEAD_DIGITS: usize = 2 * HEAD_BYTES;
+
+/// Verify a move's signature and keep only its head's digits: a key may
+/// sign more than the head (move 1 signs its claim block with it, the
+/// final move its record, so that the data the other side needs is on
+/// chain under the mover's signature); the extra digits are on top.
+fn verify_head(mut b: Builder, key: &WotsPublic) -> Builder {
+    b = b.wots_verify(key);
+    let extra = key.params.message_digits as usize - HEAD_DIGITS;
+    for _ in 0..extra / 2 {
+        b = b.push_opcode(OP_2DROP);
+    }
+    if extra % 2 == 1 {
+        b = b.push_opcode(OP_DROP);
+    }
+    b
+}
+
 impl OpensFile for LeanFile {
     fn open_file(&self, mut b: Builder) -> Builder {
-        b = b.wots_verify(&self.new);
+        b = verify_head(b, &self.new);
         if let Some(p) = &self.prior {
-            let n = self.new.params.message_digits;
-            for _ in 0..n {
+            for _ in 0..HEAD_DIGITS {
                 b = b.push_opcode(OP_TOALTSTACK);
             }
-            b = b.wots_verify(p);
-            for _ in 0..n {
+            b = verify_head(b, p);
+            for _ in 0..HEAD_DIGITS {
                 b = b.push_opcode(OP_FROMALTSTACK);
             }
         }
@@ -110,6 +130,10 @@ impl Step {
         b[8..12].copy_from_slice(&self.pc.to_be_bytes());
         b[12] = self.micro;
         b
+    }
+    pub fn from_bytes(b: &[u8; 13]) -> Step {
+        let w = |i: usize| u32::from_be_bytes(b[i..i + 4].try_into().unwrap());
+        Step { write_addr: w(0), write_value: w(4), pc: w(8), micro: b[12] }
     }
 }
 

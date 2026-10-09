@@ -443,6 +443,20 @@ pub fn escalate_leaf_with(g: &dyn Dated, ctx: &CommitCtx, l1: &Layout, keys1: &P
     Leaf::new("escalate", b.push_int(1).into_script(), tl)
 }
 
+/// `inputs` on the output `escalate` creates, when the claim's words
+/// don't cover the whole input: the rest of the prover's signed input
+/// words, published before the verifier must move (it executes the
+/// program on the whole input). 2-of-2 pre-signed into the ladder output
+/// after move 1. Witness, wire order: the words' reveals, LAST word first,
+/// the hub's signature, the user's.
+pub fn inputs_leaf(ctx: &CommitCtx, words: &[WotsPublic]) -> Leaf {
+    let mut b = ctx.two_of_two_verify(Builder::new());
+    for k in words {
+        b = drop_n(b.wots_verify(k), k.params.message_digits as usize);
+    }
+    Leaf::new("inputs", b.push_int(1).into_script(), Timelock::NONE)
+}
+
 /// `pair_continue` on `P_{d,i}`: member `i` opened two different roots for
 /// the period, so the dating cannot be trusted either way, and the game
 /// continues on chain from depth `d` (a member's fault moves no money).
