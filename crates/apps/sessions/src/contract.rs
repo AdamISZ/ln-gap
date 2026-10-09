@@ -2,7 +2,8 @@
 //! as both parties build it: its terms and keys ([`Spec`]), its trees, and
 //! every transaction the two pre-sign when it is opened ([`Presign`]).
 //!
-//! The contract output carries `default` and `escalate`; a dispute is
+//! The contract output carries `fold` (the cooperative close, signed when
+//! it happens), `default` and `escalate`; a dispute is
 //! BitVMX's search over the statement program, played on the ladder from
 //! move 1 with lean moves (lngap-v25, lngap-zk). What is pre-signed:
 //! - the chain's links: `escalate` (move 1) and each move's `post`, TRUC
@@ -38,7 +39,7 @@ use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::family::ZkFamily;
 use lngap_zk::game::Search;
 
-use crate::session::{default_leaf, default_outputs, input_word_leaf, payout, Terms};
+use crate::session::{default_leaf, default_outputs, fold_leaf, input_word_leaf, payout, Terms};
 
 /// The search game's id inside the leaves' layout.
 pub const GAME_ID: u16 = 1;
@@ -160,12 +161,32 @@ impl Contract {
     pub fn value(&self) -> Amount {
         self.spec.terms.v_max() + self.spec.terms.reserves()
     }
-    /// The contract output's tree: `default` and `escalate`.
+    /// The contract output's tree: `fold`, `default` and `escalate`.
     pub fn tree(&self) -> Result<TapTree> {
         let ctx = self.ctx();
         let l1 = Layout::at(1, GAME_ID, mover_at(1));
         let words: Vec<WotsPublic> = self.claim_words().iter().map(|&j| self.spec.inputs[j].clone()).collect();
-        TapTree::new(vec![default_leaf(&ctx, self.spec.terms.t_close), escalate_leaf_with(&self.dated(), &ctx, &l1, &self.keys[0], &words)])
+        TapTree::new(vec![fold_leaf(&ctx), default_leaf(&ctx, self.spec.terms.t_close), escalate_leaf_with(&self.dated(), &ctx, &l1, &self.keys[0], &words)])
+    }
+    /// The cooperative close for a withdrawal of `b` sats, the contract
+    /// output at `funding`: Alice `b + r_A`, the hub the rest less `fee`.
+    /// Both sign it when it happens ([`Presign::sign`], ALL).
+    pub fn fold(&self, funding: OutPoint, b: Amount, fee: Amount) -> Result<Presign> {
+        let t = &self.spec.terms;
+        ensure!(b <= t.v_max(), "{b} is above the cap {}", t.v_max());
+        let tree = self.tree()?;
+        let c_out = TxOut { value: self.value(), script_pubkey: tree.script_pubkey() };
+        let alice = b + t.reserve_alice;
+        let hub = (c_out.value - alice).checked_sub(fee).context("the fee")?;
+        let mut outs = vec![TxOut { value: alice, script_pubkey: self.spec.pubs[0].payout_spk.clone() }];
+        if hub >= self.spec.params.dust {
+            outs.push(TxOut { value: hub, script_pubkey: self.spec.pubs[1].payout_spk.clone() });
+        }
+        // signed like a link (plain ALL: its fee comes from the hub's
+        // output, nothing is added to it), but an ordinary transaction
+        let mut p = Presign::new("fold", &tree, "fold", funding, &c_out, outs, true)?;
+        p.tx.version = Version::TWO;
+        Ok(p)
     }
     /// The ladder output after move `j`; the first also carries the hub's
     /// input-word checks.

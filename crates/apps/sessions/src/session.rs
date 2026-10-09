@@ -201,6 +201,15 @@ pub fn input_word_leaf(ctx: &CommitCtx, name: &str, key: &WotsPublic, expected: 
     Leaf::new(name.to_string(), b.into_script(), Timelock::NONE)
 }
 
+/// `fold` on the contract output: the cooperative close, both parties
+/// signing at the time (nothing pre-signed): Alice `b + r_A`, the hub the
+/// rest, once the hub has seen her return. Witness: the hub's signature,
+/// the user's. (TODO: a MuSig2 key path instead.)
+pub fn fold_leaf(ctx: &CommitCtx) -> Leaf {
+    let b = ctx.two_of_two_verify(Builder::new());
+    Leaf::new("fold", b.push_int(1).into_script(), Timelock::NONE)
+}
+
 /// `default` on the session contract: after `T_close`, 2-of-2 pre-signed
 /// at the session's start, paying [`default_outputs`]. Witness: the hub's
 /// signature, the user's.
