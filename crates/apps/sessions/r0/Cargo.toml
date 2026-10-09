@@ -1,0 +1,25 @@
+# The RISC Zero side of the sessions PoC (V25_POC_PLAN.md): the withdrawal
+# guest and a host tool that proves it, wraps the proof in Groth16 and
+# reads it back. A workspace of its own: RISC Zero's crates are heavy and
+# its guests build with RISC Zero's toolchain (rzup), so the main
+# workspace doesn't depend on any of it.
+#
+# Pinned to RISC Zero 3.0.6: the BitVMX Groth16 verifier ELF carries
+# 3.0's control root (a54dc85a...) and BN254 control id, so receipts from
+# 3.0 verify with it unpatched. See WRAP_ON_LINUX.md.
+
+[workspace]
+resolver = "2"
+members = ["host", "methods"]
+
+[workspace.dependencies]
+risc0-zkvm = { version = "=3.0.6", default-features = false }
+risc0-build = { version = "=3.0.6" }
+
+# RISC Zero's advice: the prover is unusably slow unoptimised
+[profile.dev]
+opt-level = 3
+
+[profile.release]
+debug = 1
+lto = true
