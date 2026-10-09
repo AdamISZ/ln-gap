@@ -703,6 +703,31 @@ a game by refusing to cosign: the only update near a move is the fee
 lock, and it is not routed through the opponent
 (Section~\ref{sec:venue}).
 
+\paragraph{A force-close changes nothing about the game.} Either party
+can publish its latest commitment at any time, and nothing can prevent
+it. In a Lightning channel that settles the balances; here it settles
+nothing, and it is harmless for the same reason as the previous
+paragraph. The commitment carries $C$ unchanged, and everything the game
+needs was fixed when the contract was opened: every depth's one-time
+keys are committed in $C$'s scripts, every depth's dispute transactions
+are pre-signed against $C$'s outpoint on both commitments, the due times
+are absolute, and moves are entries sealed by the venue, which never
+touch the channel. So after a force-close the players go on exchanging
+moves, and the venue goes on sealing them, exactly as before, and the
+game ends as it would have: by an absence claim against a player who
+does not move in time (which is also how a mated or beaten side's game
+ends), by an exhibit, or by \texttt{settle}. Only the cooperative fold
+is lost, replaced by that one resolving transaction. No leaf of $C$ puts
+a move on chain: a move appears there only inside a rebuttal to an
+absence claim, and the claims are timelocked to the moves' due times,
+so while both sides play on schedule nothing in $C$ is spendable at
+all, and $C$, spent once, leaves only by the first valid dispute. A
+force-close therefore costs both sides the channel and some fees, but
+it cannot drag an opponent who is playing properly into on-chain play,
+nor change who is owed what: the on-chain clauses exist for failures,
+never for normal play. The requirement this places on the design is
+that every state the channel signs be safe to publish at any moment.
+
 The game output's tree is
 \begin{align*}
   C:\quad & \texttt{revoke},\ \texttt{settle},\
