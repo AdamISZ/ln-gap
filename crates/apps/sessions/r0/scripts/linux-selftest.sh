@@ -6,6 +6,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.risc0/bin:$HOME/.cargo/bin:$PATH"
 export RUST_LOG=${RUST_LOG:-info}
+# RISC Zero hands the Groth16 step to Docker through a working directory,
+# by default under /tmp, which a snap-installed Docker cannot see (the
+# container then exits 1): keep it under $HOME
+export RISC0_WORK_DIR=${RISC0_WORK_DIR:-$HOME/r0work}
+mkdir -p "$RISC0_WORK_DIR"
 # peak memory via GNU time, if installed (Debian/Ubuntu: apt install time)
 timed() { if [ -x /usr/bin/time ]; then /usr/bin/time -v "$@"; else "$@"; fi; }
 mkdir -p receipts

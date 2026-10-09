@@ -60,7 +60,8 @@ succinct receipt (about 220 KB). Then:
     # Linux -> Mac
     scp linux:ln-gap/crates/apps/sessions/r0/receipts/groth16.bin .
 
-`wrap.sh` also writes `receipts/groth16.log`. The Groth16 receipt is a
+`wrap.sh` also writes `receipts/groth16.log`. Measured on a 12-core,
+38 GB laptop: proving 21 s, the wrap 102 s. The Groth16 receipt is a
 few hundred bytes of seal plus the journal; `lngap-r0 show groth16.bin`
 prints the image id, journal and seal.
 
@@ -98,7 +99,12 @@ memo `c` in a final state) replaces it; the pipeline stays the same.
 
 ## If something goes wrong
 
-- `docker returned failure exit code`: run the image by hand to see why,
+- `docker returned failure exit code: Some(1)`: the container couldn't
+  read its input. RISC Zero passes it through a working directory, by
+  default under `/tmp`, which a snap-installed Docker can't see; the
+  scripts set `RISC0_WORK_DIR=$HOME/r0work` for this reason (set it
+  yourself when running `lngap-r0 wrap` by hand).
+- `docker returned failure exit code` otherwise: run the image by hand to see why,
   `docker run --rm risczero/risc0-groth16-prover:v2025-04-03.1`; out of
   memory is the usual cause (check `dmesg` for the OOM killer). Exit
   code 137 is the kernel's kill: on the Mac, under Colima's default VM
