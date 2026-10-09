@@ -27,12 +27,18 @@ echo "memory: ${mem_gb} GB"
 df -h . | tail -1 | awk '{print "free disk here: " $4 " (the prover image and build need ~15 GB)"}'
 
 say "rzup"
-if ! command -v rzup >/dev/null && [ ! -x "$HOME/.risc0/bin/rzup" ]; then
+# the current rzup lives in ~/.risc0/bin; an older one elsewhere on PATH
+# (e.g. ~/.cargo/bin/rzup) has a different command syntax, so use this one
+if [ ! -x "$HOME/.risc0/bin/rzup" ]; then
     echo "installing rzup (RISC Zero's installer; it adds ~/.risc0/bin to your shell profile)"
     curl -sSfL https://risczero.com/install | bash
 fi
 export PATH="$HOME/.risc0/bin:$HOME/.cargo/bin:$PATH"
+rzup() { "$HOME/.risc0/bin/rzup" "$@"; }
 rzup --version
+if other=$(which -a rzup 2>/dev/null | grep -v "^$HOME/.risc0/bin/rzup$" | head -1) && [ -n "$other" ]; then
+    echo "note: another rzup at $other (older; ignored here, you may want to remove it)"
+fi
 
 say "RISC Zero components ($R0_VERSION)"
 rzup install rust || true
