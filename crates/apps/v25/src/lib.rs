@@ -11,6 +11,9 @@
 //!
 //! - `absent_d`: the claimant's absence claim after the window (a height),
 //!   2-of-2 pre-signed (v1's leaf, with a height for a time);
+//! - `escalate`: either party takes the game onto the on-chain ladder,
+//!   posting move 1 and replaying the moves made off-chain (one ladder per
+//!   contract output, pre-signed once);
 //! - on its output `A_d`: one `rebut_{i}` per member `i` of the window,
 //!   2-of-2 pre-signed, each spending a SECOND input, member `i`'s
 //!   connector leaf for this (contract, depth): valid only if member `i`'s
@@ -378,20 +381,37 @@ pub fn post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys
     Leaf::new(name.to_string(), b.push_int(1).into_script(), Timelock::NONE)
 }
 
-/// `self_post_{d}` on the contract output: a censored mover posts its move
-/// on chain itself, into the ladder at depth `d`. It races the claimant's
-/// `absent_d`, which is valid only after the window. Like every leaf of
-/// the contract output the broadcaster can spend, it waits for
-/// `to_self_delay` when the mover is the broadcaster.
-pub fn self_post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Leaf {
+/// `escalate` on a contract output: either party takes the game from the
+/// venue onto the on-chain ladder, posting move 1 (the first mover's
+/// signed move, which both parties hold) into the ladder at depth 1; the
+/// escalating party then REPLAYS the moves already made off-chain, posting
+/// each with the signatures it holds, up to the current one, and play
+/// continues on the ladder. This is the censored mover's escape (a mover
+/// no member will date escalates and then posts its own move), the
+/// unilateral start of a session, and voluntary escalation.
+///
+/// One leaf, so one ladder per contract output: the ladder is pre-signed
+/// once (linear in the depth), at the price that an escalation always puts
+/// the whole game on chain, however late it happens. (A per-depth entry,
+/// skipping the replay, would need a ladder tail per depth: quadratic.)
+/// Replay is faithful: posting the opponent's move `j + 1` needs its
+/// signature over the heads `(j, j + 1)`, which pins the escalator's move
+/// `j`.
+///
+/// It races the claimants' absence claims, which are valid only after
+/// their windows. Either party can spend it, so like every such leaf of a
+/// contract output it waits `to_self_delay`. Witness, wire order: move 1's
+/// authorship block, its reveal, the hub's signature, the user's.
+pub fn escalate_leaf(g: &dyn Dated, ctx: &CommitCtx, l1: &Layout, keys1: &PosDepthKeys) -> Leaf {
+    assert_eq!(l1.depth, 1, "the ladder is entered at depth 1");
     let mut b = Builder::new();
     let mut tl = Timelock::NONE;
-    if l.mover == ctx.broadcaster && ctx.params.to_self_delay > 0 {
+    if ctx.params.to_self_delay > 0 {
         b = b.csv(ctx.params.to_self_delay);
         tl.csv = Some(ctx.params.to_self_delay);
     }
-    let b = post_body(g, ctx.two_of_two_verify(b), l, keys, keys_prev);
-    Leaf::new(format!("self_post_{}", l.depth), b.push_int(1).into_script(), tl)
+    let b = post_body(g, ctx.two_of_two_verify(b), l1, keys1, None);
+    Leaf::new("escalate", b.push_int(1).into_script(), tl)
 }
 
 /// `pair_continue` on `P_{d,i}`: member `i` opened two different roots for

@@ -6,13 +6,14 @@
 //! Two contracts, because a withdrawal starts when Alice decides and its
 //! deadlines must count from that start:
 //! - the SESSION contract, before any withdrawal, carries only `default`
-//!   (the hub, after `T_close`) and Alice's unilateral start
-//!   (`self_post_1`, into the on-chain ladder): no absence claims, so a
+//!   (the hub, after `T_close`) and Alice's unilateral start (`escalate`,
+//!   her first move into the on-chain ladder): no absence claims, so a
 //!   force-close mid-session gives the hub nothing to spend before `T_close`
 //!   (every signed state must be safe to publish);
 //! - the GAME contract, signed at a cooperative start, carries the dispute
-//!   graph with deadlines counted from that start, the movers' self-posts,
-//!   and `settle` (the claim accepted at the game's end), and no default.
+//!   graph with deadlines counted from that start, `escalate` (either
+//!   party takes the game onto the ladder, replaying the moves so far), and
+//!   `settle` (the claim accepted at the game's end), and no default.
 //!
 //! The dispute itself is lngap-v25's graph over the search game
 //! (`ZkDated` with pre-signed proofs, so that a proved withdrawal pays

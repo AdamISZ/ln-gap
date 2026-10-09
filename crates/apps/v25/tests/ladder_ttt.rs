@@ -8,9 +8,10 @@
 //!   a won game); the hub cannot answer, and the user's checked split pays
 //!   R(terminal) = UserWins. No member action moved the pot: the game did;
 //! - S7, every member censors: no member dates the hub's move; the hub
-//!   posts it on chain itself from the contract output (racing the user's
-//!   claim, which waits for the window), into the ladder; the user then
-//!   stalls at 3, and the hub's checked split pays R = HubWins;
+//!   escalates from the contract output (racing the user's claim, which
+//!   waits for the window): it posts the user's move 1, which it holds, then
+//!   its own move 2, into the ladder; the user then stalls at 3, and the
+//!   hub's checked split pays R = HubWins;
 //! - S8, the waiver: the hub's move went undated, but the user replied to
 //!   it (signed its move at 3); the user claims absence at 2, and the hub
 //!   answers with the user's own signature: the claim pays the hub;
@@ -57,27 +58,36 @@ impl Play {
     }
 }
 
-/// The mover of depth `j` posts move `j` into the ladder: from `(op, out)`
-/// (the ladder output at `j - 1`, through its `post` leaf; or the contract
-/// output, through `self_post_2`, when `from_contract`). Returns the new
-/// ladder output and the pair reveal.
+/// Move `j` is posted into the ladder: from `(op, out)` (the ladder output
+/// at `j - 1`, through its `post` leaf; or, for move 1, the contract
+/// output, through `escalate`, when `from_contract`). Anyone holding the
+/// move's signatures can post it: an escalation replays the moves already
+/// made. Returns the new ladder output and the pair reveal.
 fn post(rt: &Regtest, g: &mut Game, p: &Play, j: u32, op: OutPoint, out: &TxOut, from_contract: Option<&Open>) -> (OutPoint, TxOut, WotsSig) {
     let (tree, name) = match from_contract {
-        Some(o) => (o.c_tree.clone(), "self_post_2".to_string()),
+        Some(o) => {
+            assert_eq!(j, 1, "escalate posts move 1");
+            (o.c_tree.clone(), "escalate".to_string())
+        }
         None => (ladder(g, j - 1), "post".to_string()),
     };
     let leaf = tree.leaf(&name).unwrap();
     let t_out = TxOut { value: out.value - g.params.presign_fee, script_pubkey: ladder(g, j).script_pubkey() };
     let mut tx = build_spend(op, &leaf.timelock, vec![t_out.clone()]);
-    let (mover, prior_mover) = (instance::mover_at(j), instance::mover_at(j - 1));
+    let mover = instance::mover_at(j);
     let id = g.id;
-    let (prev_head, new_head) = (p.heads[(j - 1) as usize], p.heads[j as usize]);
-    let mut msg = prev_head.to_vec();
-    msg.extend_from_slice(&new_head);
-    let pair = g.ks(mover).sign_wots(&instance::rebut_label(id, SEQ, j), &msg).unwrap();
+    let new_head = p.heads[j as usize];
     let new_auth = g.ks(mover).sign_wots(&instance::state_label(id, SEQ, j), &ttt::auth_message(&new_head)).unwrap();
-    let prior_auth = g.ks(prior_mover).sign_wots(&instance::state_label(id, SEQ, j - 1), &ttt::auth_message(&prev_head)).unwrap();
-    let mut w = wots_wire_tied(&prior_auth);
+    let mut w = vec![];
+    let pair = if j == 1 {
+        // no prior: the reveal is of the head alone
+        g.ks(mover).sign_wots(&instance::rebut_label(id, SEQ, j), &new_head).unwrap()
+    } else {
+        let prev_head = p.heads[(j - 1) as usize];
+        let prior_auth = g.ks(instance::mover_at(j - 1)).sign_wots(&instance::state_label(id, SEQ, j - 1), &ttt::auth_message(&prev_head)).unwrap();
+        w.extend(wots_wire_tied(&prior_auth));
+        g.ks(mover).sign_wots(&instance::rebut_label(id, SEQ, j), &[prev_head.as_slice(), new_head.as_slice()].concat()).unwrap()
+    };
     w.extend(wots_wire_tied(&new_auth));
     w.extend(wots_wire(&pair));
     w.push(sig(&g.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
@@ -89,7 +99,7 @@ fn post(rt: &Regtest, g: &mut Game, p: &Play, j: u32, op: OutPoint, out: &TxOut,
 }
 
 #[test]
-fn ladder_self_post_waiver_and_the_residual() {
+fn ladder_escalation_waiver_and_the_residual() {
     let rt = Regtest::start().unwrap();
     let base = rt.height().unwrap() + 12;
     let venue = venue(&rt, base, 3);
@@ -133,10 +143,12 @@ fn ladder_self_post_waiver_and_the_residual() {
     let o8 = open(&rt, &g8, vec![wm(1, 2)], lock);
     let o10 = open(&rt, &g10, vec![wm(2, 0)], lock);
 
-    // ---- S7: the hub self-posts (after to_self_delay, before the window ends) ----
+    // ---- S7: the hub escalates (after to_self_delay, before the window
+    // ends): it posts the user's move 1, which it holds, then its own move 2 ----
     rt.mine(u64::from(g7.params.to_self_delay)).unwrap();
-    let (t2_op, t2_out, pair7) = post(&rt, &mut g7, &p7, 2, o7.c_op, &o7.c_out, Some(&o7));
-    assert!(rt.mine_with(std::slice::from_ref(&o7.claim)).is_err(), "S7: the self-post took the contract output first");
+    let (t1_op, t1_out, _) = post(&rt, &mut g7, &p7, 1, o7.c_op, &o7.c_out, Some(&o7));
+    assert!(rt.mine_with(std::slice::from_ref(&o7.claim)).is_err(), "S7: the escalation took the contract output first");
+    let (t2_op, t2_out, pair7) = post(&rt, &mut g7, &p7, 2, t1_op, &t1_out, None);
 
     // the remaining claims (the user claims absence at 2 in games 21, 23, 24)
     rt.mine_to_height(lock).unwrap();

@@ -45,7 +45,7 @@ use lngap_pos::rebut::{wots_wire, wots_wire_tied};
 use lngap_pos::ttt::Layout;
 use lngap_seal::dating::{Choice, PeriodTree};
 use lngap_tictactoe::TicTacToe;
-use lngap_v25::{carrier_tree, claim_tree, ladder_tree, level_message, rebuttal_tree, self_post_leaf, WindowMember, ZkDated, CARRIER_SAT, LEVEL_BYTES};
+use lngap_v25::{carrier_tree, claim_tree, ladder_tree, level_message, rebuttal_tree, escalate_leaf, WindowMember, ZkDated, CARRIER_SAT, LEVEL_BYTES};
 use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::dispute::{search, Behaviour, Searched};
 use lngap_zk::family::ZkFamily;
@@ -170,7 +170,7 @@ fn level_label(id: u32, d: u32, ell: usize) -> String {
     format!("v25z/level/{id}/{d}/{ell}")
 }
 
-/// Fund the contract output (`absent_d` after `lock`, `self_post_d`) and
+/// Fund the contract output (`absent_d` after `lock`, `escalate`) and
 /// pre-sign the claim.
 fn open(rt: &Regtest, z: &mut Z, d: u32, window: Vec<WindowMember>, lock: u32) -> Open {
     let lk = z.level_keys(d);
@@ -180,7 +180,7 @@ fn open(rt: &Regtest, z: &mut Z, d: u32, window: Vec<WindowMember>, lock: u32) -
     let a_tree = claim_tree(&z.g(), &ctx, &l, kn, kp, z.keys.get(d as usize), &window, &z.outcomes).unwrap();
     let name = format!("absent_{d}");
     let absent = lngap_pos::graph::absent_leaf(&ctx, &name, mover_at(d).other(), lock);
-    let c_tree = TapTree::new(vec![absent, self_post_leaf(&z.g(), &ctx, &l, kn, kp)]).unwrap();
+    let c_tree = TapTree::new(vec![absent, escalate_leaf(&z.g(), &ctx, &Layout::at(1, GAME_ID, mover_at(1)), z.k(1))]).unwrap();
     // enough for a ladder of 59 posts at the pre-sign fee
     let value = Amount::from_sat(6_000_000);
     let (c_op, c_out) = rt.fund(&c_tree.script_pubkey(), value).unwrap();
@@ -274,10 +274,23 @@ fn prove_name(e: &Entry) -> String {
 
 /// The pre-signed transactions of one contract with a window of `wn`
 /// members at every depth, counted from the built trees (every leaf a
-/// party signs ahead: claims, self-posts, rebuttals, waivers, splits,
+/// party signs ahead: claims, escalation, rebuttals, waivers, splits,
 /// continuations, posts; not the disproves and proofs, which carry their
-/// spender's signature at dispute time), and the build time.
-fn presigned(z: &mut Z, venue: &[VenueMember], wn: usize) -> (usize, std::time::Duration) {
+/// spender's signature at dispute time):
+/// - the graph: claims, rebuttals and what hangs off them;
+/// - the escalation ladder: ONE chain, entered by `escalate` and replayed;
+/// - the continuation tails: every ladder entry from a rebuttal output
+///   (`stands`, `pair_continue`, `empty_continue`) is a different
+///   transaction, so each needs its own copy of the rest of the ladder
+///   (quadratic in the depth).
+struct Presigned {
+    graph: usize,
+    chain: usize,
+    tails: usize,
+    took: std::time::Duration,
+}
+
+fn presigned(z: &mut Z, venue: &[VenueMember], wn: usize) -> Presigned {
     let t = Instant::now();
     let m = z.keys.len() as u32;
     // members beyond the venue's reuse its chains with another period's
@@ -292,20 +305,24 @@ fn presigned(z: &mut Z, venue: &[VenueMember], wn: usize) -> (usize, std::time::
         .collect();
     let signed = |t: &TapTree, runtime: &[&str]| t.leaves().iter().filter(|l| !runtime.iter().any(|r| l.name.starts_with(r)) && !l.script.as_bytes().ends_with(&[bitcoin::opcodes::all::OP_RETURN.to_u8()])).count();
     let runtime = ["disprove_", "leaf_hash", "node_", "zk_prove_"];
-    let mut n = 0;
+    // the ladder's steps, and the rest of the ladder from each depth
+    let step: Vec<usize> = (1..=m).map(|j| signed(&z.ladder(j), &runtime)).collect();
+    let rest = |d: u32| -> usize { step[(d - 1) as usize..].iter().sum() };
+    let (mut graph, mut tails) = (1usize, 0usize); // escalate
     for d in 1..=m {
         let ctx = z.ctx();
         let l = Layout::at(d, GAME_ID, mover_at(d));
         let (kp, kn) = ((d >= 2).then(|| z.k(d - 1)), z.k(d));
         let a = claim_tree(&z.g(), &ctx, &l, kn, kp, z.keys.get(d as usize), &window, &z.outcomes).unwrap();
-        n += 2 + signed(&a, &runtime); // absent_d and self_post_d, then A_d's
+        graph += 1 + signed(&a, &runtime); // absent_d, then A_d's
         for w in &window {
             let p = z.p_tree(d, w);
-            n += signed(&p, &runtime);
+            graph += signed(&p, &runtime);
+            let entries = p.leaves().iter().filter(|l| ["stands", "pair_continue", "empty_continue"].contains(&l.name.as_str())).count();
+            tails += entries * rest(d);
         }
-        n += signed(&z.ladder(d), &runtime);
     }
-    (n, t.elapsed())
+    Presigned { graph, chain: rest(1), tails, took: t.elapsed() }
 }
 
 /// The scenarios on one program: the search is run by BitVMX, played as
@@ -344,8 +361,15 @@ fn scenarios(pdf: &str, input: &[u8], tag: &str) {
     let roots: Vec<WotsSig> = venue.iter().map(|vm| vm.member.sign_root(1, &tree.root()).unwrap()).collect();
     let root0_second = venue[0].member.sign_root(1, &second.root()).unwrap();
 
-    let (n, took) = presigned(&mut z1, &venue, 4);
-    println!("V25Z [{tag}] one contract, a window of 4 at every depth: {n} pre-signed transactions; all trees built in {took:.1?}");
+    let ps = presigned(&mut z1, &venue, 4);
+    println!(
+        "V25Z [{tag}] one contract, a window of 4 at every depth: pre-signed {} = graph {} + escalation ladder {} (one chain) + continuation tails {} (one per rebuttal-output entry); trees built in {:.1?}",
+        ps.graph + ps.chain + ps.tails,
+        ps.graph,
+        ps.chain,
+        ps.tails,
+        ps.took
+    );
 
     let lock = base + 4;
     let wm = |i: usize, s: u32| window_member(i, &venue[i], s);

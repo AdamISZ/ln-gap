@@ -17,7 +17,13 @@
 //! - H8, H1: the SESSION contract carries only `default` and Alice's start
 //!   (no absence claim before a withdrawal: a force-close gives the hub
 //!   nothing to spend); with the hub gone, Alice starts unilaterally
-//!   (`self_post_1` into the ladder) and its split pays b after w;
+//!   (`escalate`: her first move into the ladder) and its split pays b
+//!   after w;
+//! - E1, escalation mid-game: in a game contract, after five moves played
+//!   off-chain, the hub escalates: it posts Alice's move 1 and REPLAYS
+//!   moves 2 to 5 from the signatures it holds (one pre-signed ladder per
+//!   contract, at the price of the whole history on chain); then it stops,
+//!   and Alice's ladder split pays b;
 //! - A6: had Alice signed two values of b, the hub takes a bit output of
 //!   hers with `equiv_b` before her delay runs out;
 //! - settle: a game in which the hub never forces the last step settles
@@ -58,7 +64,7 @@ use lngap_sessions::l2::{Op, HUB, L2};
 use lngap_sessions::session::{bit_tree, default_leaf, payout, settle_leaf, Terms};
 use lngap_sessions::statement::{input, write_program};
 use lngap_tictactoe::TicTacToe;
-use lngap_v25::{carrier_tree, claim_tree, ladder_tree, level_message, rebuttal_tree, self_post_leaf, WindowMember, ZkDated, CARRIER_SAT, LEVEL_BYTES};
+use lngap_v25::{carrier_tree, claim_tree, ladder_tree, level_message, rebuttal_tree, escalate_leaf, WindowMember, ZkDated, CARRIER_SAT, LEVEL_BYTES};
 use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::dispute::{search, Behaviour};
 use lngap_zk::family::ZkFamily;
@@ -222,28 +228,29 @@ impl Session {
         rebuttal_tree(&self.g(), &self.ctx(), &l, self.k(d), w, &lk, self.terms.id, &self.outcomes).unwrap()
     }
     /// The SESSION contract, before any withdrawal: only `default` (the
-    /// hub, after `T_close`) and Alice's unilateral start `self_post_1`.
-    /// No absence claims: a force-close mid-session gives the hub nothing
-    /// to spend before `T_close`.
+    /// hub, after `T_close`) and `escalate`, Alice's unilateral start (her
+    /// first move on chain, into the ladder). No absence claims: a
+    /// force-close mid-session gives the hub nothing to spend before
+    /// `T_close`.
     fn fund_session(&mut self, rt: &Regtest) -> Funded {
         let ctx = self.ctx();
         let l = Layout::at(1, GAME_ID, mover_at(1));
-        let leaves = vec![default_leaf(&ctx, self.terms.t_close), self_post_leaf(&self.g(), &ctx, &l, self.k(1), None)];
+        let leaves = vec![default_leaf(&ctx, self.terms.t_close), escalate_leaf(&self.g(), &ctx, &l, self.k(1))];
         let tree = TapTree::new(leaves).unwrap();
         let (op, out) = rt.fund(&tree.script_pubkey(), self.value()).unwrap();
         Funded { tree, op, out }
     }
     /// The GAME contract, signed at a cooperative start at height `h0`
     /// (Alice's first move already sent): `absent_d` for every later depth,
-    /// its deadline counted from the start (`h0 + d`), the movers'
-    /// `self_post_d`, and `settle` after the last deadline; no default.
+    /// its deadline counted from the start (`h0 + d`), `escalate` (either
+    /// party takes the game onto the ladder, replaying the moves so far),
+    /// and `settle` after the last deadline; no default.
     fn fund_game(&mut self, rt: &Regtest, h0: u32) -> Funded {
         let ctx = self.ctx();
-        let mut leaves = vec![settle_leaf(&ctx, self.settle_at(h0))];
+        let l1 = Layout::at(1, GAME_ID, mover_at(1));
+        let mut leaves = vec![settle_leaf(&ctx, self.settle_at(h0)), escalate_leaf(&self.g(), &ctx, &l1, self.k(1))];
         for d in 2..=self.m() {
-            let l = Layout::at(d, GAME_ID, mover_at(d));
             leaves.push(lngap_pos::graph::absent_leaf(&ctx, &format!("absent_{d}"), mover_at(d).other(), h0 + d));
-            leaves.push(self_post_leaf(&self.g(), &ctx, &l, self.k(d), Some(self.k(d - 1))));
         }
         let tree = TapTree::new(leaves).unwrap();
         let (op, out) = rt.fund(&tree.script_pubkey(), self.value()).unwrap();
@@ -298,6 +305,25 @@ impl Session {
         w.extend(wots_wire_tied(&new_auth));
         w.extend(wots_wire(&pair));
         (w, pair)
+    }
+    /// Post move `j` from `(op, out)` (the ladder output at `j - 1`, or for
+    /// move 1 the contract output `c` through `escalate`), with the
+    /// signatures the poster holds: an escalation replays the moves made.
+    fn post(&mut self, rt: &Regtest, j: u32, op: OutPoint, out: &TxOut, c: Option<&Funded>) -> (OutPoint, TxOut) {
+        let (tree, name) = match c {
+            Some(c) => (c.tree.clone(), "escalate"),
+            None => (self.ladder(j - 1), "post"),
+        };
+        let leaf = tree.leaf(name).unwrap();
+        let t_out = TxOut { value: out.value - self.params.presign_fee, script_pubkey: self.ladder(j).script_pubkey() };
+        let mut tx = build_spend(op, &leaf.timelock, vec![t_out.clone()]);
+        let (mut w, _) = self.post_wire(j);
+        w.push(sig(&self.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
+        w.push(sig(&self.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
+        tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(name).unwrap());
+        rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("posting move {j}: {e:#}"));
+        println!("SESS {}: ladder post of move {j}: {} vB", self.terms.id, tx.vsize());
+        (OutPoint { txid: tx.compute_txid(), vout: 0 }, t_out)
     }
     /// The mover's rebuttal of claim `c` through window member `wm`.
     fn rebut(&mut self, rt: &Regtest, c: &Claim, wm: usize, venue: &[VenueMember], tree: &PeriodTree, root_sig: &WotsSig) -> (OutPoint, TxOut, WotsSig) {
@@ -448,12 +474,14 @@ fn sessions_on_regtest() {
         Session::new(terms(45, t_close), &pdf(45), rounds),
     );
     let (mut u, mut t) = (Session::new(terms(46, t_close), &pdf(46), rounds), Session::new(terms(47, t_close), &pdf(47), rounds));
+    let mut e = Session::new(terms(48, t_close), &pdf(48), rounds);
     let m = r.m();
     println!("SESS the statement: {rounds} rounds, {m} depths; V_max {} in {} bits of {}", r.terms.v_max(), r.terms.bits, r.terms.unit);
     assert!(!l2.is_final_return(6, 43));
     r.play(9);
     x.play(6);
     u.play(12);
+    e.play(3);
 
     // the members date Alice's final records (R at slot 0, X at slot 1)
     let tree = PeriodTree::new(vec![zk_leaf(42, m, &r.heads[(m - 1) as usize]), zk_leaf(43, m, &x.heads[(m - 1) as usize]), PAD_LEAF, PAD_LEAF]);
@@ -468,6 +496,7 @@ fn sessions_on_regtest() {
     let (cr, cx, cs) = (r.fund_game(&rt, lock), x.fund_game(&rt, lock), st.fund_game(&rt, lock));
     let (cd, cu) = (df.fund_session(&rt), u.fund_session(&rt));
     let ct = t.fund_game(&rt, lock);
+    let ce = e.fund_game(&rt, lock);
     let claim_r = r.claim(&cr, m, vec![wm(0, 0), wm(1, 0)]);
     let claim_x = x.claim(&cx, m, vec![wm(0, 1), wm(1, 1)]);
     let claim_s = st.claim(&cs, 2, vec![wm(0, 2), wm(1, 2)]);
@@ -537,19 +566,19 @@ fn sessions_on_regtest() {
         // default and Alice's start, so the hub can spend nothing before T_close
         let names: Vec<&str> = cu.tree.leaves().iter().map(|l| l.name.as_str()).collect();
         assert_eq!(names.len(), 2, "H8: {names:?}");
-        assert!(names.contains(&"default") && names.contains(&"self_post_1"), "H8: {names:?}");
+        assert!(names.contains(&"default") && names.contains(&"escalate"), "H8: {names:?}");
         println!("SESS H8: the session output carries only {names:?}: no absence claim exists before a withdrawal starts");
         // H1: Alice starts unilaterally, her first move on chain, into the ladder
-        let leaf = cu.tree.leaf("self_post_1").unwrap();
+        let leaf = cu.tree.leaf("escalate").unwrap();
         let l1 = u.ladder(1);
         let t_out = TxOut { value: cu.out.value - u.params.presign_fee, script_pubkey: l1.script_pubkey() };
         let mut tx = build_spend(cu.op, &leaf.timelock, vec![t_out.clone()]);
         let (mut w, _) = u.post_wire(1);
         w.push(sig(&u.hub.payment, &tx, 0, std::slice::from_ref(&cu.out), &leaf.script));
         w.push(sig(&u.user.payment, &tx, 0, std::slice::from_ref(&cu.out), &leaf.script));
-        tx.input[0].witness = tapscript_witness(&w, &leaf.script, &cu.tree.control_block("self_post_1").unwrap());
+        tx.input[0].witness = tapscript_witness(&w, &leaf.script, &cu.tree.control_block("escalate").unwrap());
         rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("H1: the unilateral start: {e:#}"));
-        println!("SESS H1: Alice's unilateral start (self_post_1, her claim on chain): {} vB", tx.vsize());
+        println!("SESS H1: Alice's unilateral start (escalate: her claim on chain): {} vB", tx.vsize());
         // the hub never posts move 2: after w, Alice's ladder split pays b
         let l1_op = OutPoint { txid: tx.compute_txid(), vout: 0 };
         let split = u.pay_b(&l1, l1_op, &t_out, "split_UserWins", vec![]);
@@ -564,6 +593,25 @@ fn sessions_on_regtest() {
         println!("SESS A6: two signatures on b: the hub takes bit 2 with equiv_b: {} vB", eq.vsize());
         for i in [0, 1, 3] {
             u.spend_bit(&rt, &split, i, 12);
+        }
+    }
+
+    // ===== E1: the hub escalates mid-game; the whole history is replayed =====
+    {
+        // five moves were played off-chain; the hub escalates (after
+        // to_self_delay) and replays them from the signatures it holds
+        let mut at = e.post(&rt, 1, ce.op, &ce.out, Some(&ce));
+        for j in 2..=5 {
+            at = e.post(&rt, j, at.0, &at.1, None);
+        }
+        // the hub, whose move 6 is next, stops: after w, Alice's split pays b
+        let split = e.pay_b(&e.ladder(5), at.0, &at.1, "split_UserWins", vec![]);
+        assert!(rt.test_accept(&split).is_err(), "E1: not before the hub's window ends");
+        rt.mine(u64::from(w_win)).unwrap();
+        rt.mine_with(std::slice::from_ref(&split)).unwrap_or_else(|e| panic!("E1: the ladder split: {e:#}"));
+        println!("SESS E1: the hub escalated after 5 moves and replayed them; then it stopped; Alice's split pays b = 3: {} vB", split.vsize());
+        for i in 0..e.terms.bits {
+            e.spend_bit(&rt, &split, i, 3);
         }
     }
 
