@@ -1257,7 +1257,6 @@ dependencies = [
  "anyhow",
  "bincode",
  "hex",
- "lngap-r0-methods",
  "risc0-zkvm",
 ]
 

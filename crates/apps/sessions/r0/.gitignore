@@ -2,3 +2,4 @@ target/
 *.bin
 receipts/
 *.log
+!guests/*.bin

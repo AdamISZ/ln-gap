@@ -9,3 +9,7 @@ risc0-build = { workspace = true }
 
 [package.metadata.risc0]
 methods = ["guest"]
+
+[[bin]]
+name = "export-guest"
+path = "src/bin/export-guest.rs"

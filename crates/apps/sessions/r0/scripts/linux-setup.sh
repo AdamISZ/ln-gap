@@ -58,7 +58,9 @@ say "the Groth16 prover image"
 docker pull "$IMAGE"
 
 say "building the host tool"
-cargo build --release
+# only the host: it proves the committed guest binary (guests/), so the
+# guest isn't built here (scripts/build-guest.sh builds it reproducibly)
+cargo build --release -p lngap-r0
 ls -la target/release/lngap-r0
 
 say "done"

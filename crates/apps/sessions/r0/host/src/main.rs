@@ -10,14 +10,23 @@
 //! lngap-r0 selftest              prove (9, 42), wrap, verify: the whole pipeline
 //! ```
 //!
-//! Receipts are written with bincode.
+//! Receipts are written with bincode. The guest proved is the COMMITTED
+//! binary `guests/withdraw.bin`, built reproducibly by
+//! `scripts/build-guest.sh`, so every machine proves the same program
+//! (the same image id) without building it.
 
 use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
-use lngap_r0_methods::{WITHDRAW_ELF, WITHDRAW_ID};
-use risc0_zkvm::{default_prover, Digest, ExecutorEnv, InnerReceipt, ProverOpts, Receipt};
+use risc0_zkvm::{compute_image_id, default_prover, Digest, ExecutorEnv, InnerReceipt, ProverOpts, Receipt};
+
+/// The guest, as committed.
+const WITHDRAW_ELF: &[u8] = include_bytes!("../../guests/withdraw.bin");
+
+fn image_id() -> Digest {
+    compute_image_id(WITHDRAW_ELF).expect("the committed guest binary")
+}
 
 fn read(path: &str) -> Result<Receipt> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {path}"))?;
@@ -58,7 +67,7 @@ fn wrap(r: &Receipt) -> Result<Receipt> {
 
 fn show(r: &Receipt) -> Result<()> {
     println!("kind      {}", kind(r));
-    println!("image id  {}", hex::encode(Digest::from(WITHDRAW_ID).as_bytes()));
+    println!("image id  {}", hex::encode(image_id().as_bytes()));
     println!("journal   {}", hex::encode(&r.journal.bytes));
     if let InnerReceipt::Groth16(g) = &r.inner {
         println!("seal      {}", hex::encode(&g.seal));
@@ -73,29 +82,29 @@ fn main() -> Result<()> {
     match a.as_slice() {
         ["prove", b, c, out] => {
             let r = prove(b.parse()?, c.parse()?)?;
-            r.verify(WITHDRAW_ID)?;
+            r.verify(image_id())?;
             write(out, &r)?;
             eprintln!("{out}: {} receipt, {} bytes", kind(&r), std::fs::metadata(out)?.len());
         }
         ["wrap", input, out] => {
             let r = read(input)?;
             let g = wrap(&r)?;
-            g.verify(WITHDRAW_ID)?;
+            g.verify(image_id())?;
             write(out, &g)?;
             eprintln!("{out}: {} receipt, verified", kind(&g));
             show(&g)?;
         }
         ["verify", input] => {
             let r = read(input)?;
-            r.verify(WITHDRAW_ID)?;
+            r.verify(image_id())?;
             println!("{input}: {} receipt verifies against the guest's image id", kind(&r));
         }
         ["show", input] => show(&read(input)?)?,
         ["selftest"] => {
             let r = prove(9, 42)?;
-            r.verify(WITHDRAW_ID)?;
+            r.verify(image_id())?;
             let g = wrap(&r)?;
-            g.verify(WITHDRAW_ID)?;
+            g.verify(image_id())?;
             if !matches!(g.inner, InnerReceipt::Groth16(_)) {
                 bail!("the wrap did not produce a Groth16 receipt");
             }

@@ -5,7 +5,6 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-lngap-r0-methods = { path = "../methods" }
 # client mode: proving runs in r0vm (installed by rzup, GPU kernels prebuilt)
 risc0-zkvm = { workspace = true, features = ["client", "std"] }
 anyhow = "1"

@@ -46,6 +46,27 @@ optional: with it, the logs record peak memory.
    writes `selftest.log`. **Send that log back**: it records the
    machine, the times and (with GNU `time`) the peak memory of each step.
 
+## Building the guest reproducibly
+
+The image id (the hash of the guest's binary) is what the session
+contract pins, so both parties, and anyone auditing, must get the same
+one. RISC Zero's ordinary build embeds machine-specific details (the Mac
+and the laptop got different ids for the same code); its Docker build
+doesn't. So the guest is built canonically on x86 Linux, inside RISC
+Zero's pinned builder image (`risczero/risc0-guest-builder:r0.1.88.0`,
+x86 only), and the resulting binary is committed as
+`guests/withdraw.bin`. The host tool proves that committed binary and
+computes its image id from it, so every machine proves the same program.
+
+    scripts/build-guest.sh
+
+It refuses to run with uncommitted changes under `methods/guest`, builds
+the guest in Docker (a few minutes the first time, pulling the image),
+writes `guests/withdraw.bin` and prints its image id and SHA-256. Bring
+the binary back to be committed. To check reproducibility, run the same
+script on another x86 machine at the same commit: the image id must be
+identical.
+
 ## Wrapping a receipt made on the Mac
 
 On the Mac (see below), `lngap-r0 prove <b> <c> succinct.bin` writes a
@@ -65,9 +86,8 @@ succinct receipt (about 220 KB). Then:
 few hundred bytes of seal plus the journal; `lngap-r0 show groth16.bin`
 prints the image id, journal and seal.
 
-Both sides must run the same guest: the receipt is verified against the
-guest's image id, which changes with any change to the guest or to the
-toolchain. Pull the branch on both machines before proving.
+Both sides must prove the same guest: the committed `guests/withdraw.bin`.
+Pull the branch on both machines before proving.
 
 ## On the Mac
 
