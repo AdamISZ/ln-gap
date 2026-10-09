@@ -19,6 +19,10 @@ export PATH="$HOME/.risc0/bin:$HOME/.cargo/bin:$PATH"
 # a snap-installed Docker can't see /tmp, so keep it under $HOME
 export TMPDIR="${TMPDIR_GUEST:-$HOME/r0work/tmp}"
 mkdir -p "$TMPDIR"
+# export the build's output as a tar unpacked as this user (see shim/docker)
+LNGAP_REAL_DOCKER="$(command -v docker)"
+export LNGAP_REAL_DOCKER
+export PATH="$PWD/scripts/shim:$PATH"
 
 echo "== building the guest at $(git rev-parse --short HEAD) in RISC Zero's builder image"
 LNGAP_GUEST_DOCKER=1 cargo run --release -p lngap-r0-methods --bin export-guest -- guests/withdraw.bin
