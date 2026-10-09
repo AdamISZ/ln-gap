@@ -67,6 +67,19 @@ the binary back to be committed. To check reproducibility, run the same
 script on another x86 machine at the same commit: the image id must be
 identical.
 
+## The withdrawal, end to end
+
+    scripts/linux-withdraw.sh 9 42
+
+builds the guest reproducibly (as below), rebuilds the host tool around
+it, builds the toy L2 with Alice's return of 9 to the hub with memo 42,
+checks the statement natively, proves it (about 5.8 million cycles, six
+segments: minutes), wraps it in Groth16 and encodes it as the BitVMX
+verifier's input. It writes `withdraw.log`. Bring back
+`guests/withdraw.bin` (the reproducible build, to be committed) and the
+log's last lines: the guest's SHA-256, the image id, the journal and the
+input hex.
+
 ## Wrapping a receipt made on the Mac
 
 On the Mac (see below), `lngap-r0 prove <b> <c> succinct.bin` writes a
@@ -112,10 +125,14 @@ labels them) for working on the guest.
     lngap-r0 verify <in>           verify against the guest's image id
     lngap-r0 show <in>             kind, image id, journal, seal
     lngap-r0 selftest              prove (9, 42), wrap, verify
+    lngap-r0 withdraw-demo <b> <c> <out>   the toy L2's withdrawal, checked and proved
+    lngap-r0 bitvmx-input <in> <out.hex>   a Groth16 receipt as the verifier's input
 
-The guest is a PLACEHOLDER for now: it commits `(b, c)` as its journal
-and checks nothing. The withdrawal statement (a return note of `b` with
-memo `c` in a final state) replaces it; the pipeline stays the same.
+The guest is the withdrawal statement (`methods/guest`, the check in
+`core/`): a note owned by the hub, of value `b` and memo `c`, in the
+commitment tree of a state root the L2's sequencer signed (BIP340); it
+commits `b ‖ c`. The toy L2 that builds its input is `host/src/toy.rs`,
+deterministic from fixed seeds, so every machine builds the same input.
 
 ## If something goes wrong
 

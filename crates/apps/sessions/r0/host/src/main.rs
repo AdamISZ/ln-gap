@@ -2,18 +2,27 @@
 //! a receipt back.
 //!
 //! ```text
-//! lngap-r0 prove <b> <c> <out>   a succinct (STARK) receipt of the guest on (b, c)
+//! lngap-r0 prove <b> <c> <out>   a succinct (STARK) receipt of the guest on the toy
+//!                                L2's withdrawal of b, memo c
 //! lngap-r0 wrap <in> <out>       the Groth16 receipt of a succinct receipt
 //!                                (x86 Linux with Docker: RISC Zero's gnark step)
 //! lngap-r0 verify <in>           verify a receipt against the guest's image id
 //! lngap-r0 show <in>             the receipt's kind, image id, journal, seal
 //! lngap-r0 selftest              prove (9, 42), wrap, verify: the whole pipeline
+//! lngap-r0 withdraw-demo <b> <c> <out>
+//!                                the toy L2 (toy.rs) with Alice's return of b,
+//!                                memo c; check it natively; prove the guest
+//! lngap-r0 bitvmx-input <in> <out.hex>
+//!                                a Groth16 receipt as the BitVMX verifier's input
 //! ```
 //!
 //! Receipts are written with bincode. The guest proved is the COMMITTED
 //! binary `guests/withdraw.bin`, built reproducibly by
 //! `scripts/build-guest.sh`, so every machine proves the same program
 //! (the same image id) without building it.
+
+mod bitvmx;
+mod toy;
 
 use std::path::Path;
 use std::time::Instant;
@@ -50,8 +59,10 @@ fn kind(r: &Receipt) -> &'static str {
     }
 }
 
+/// Prove the guest on the toy L2's withdrawal of `b`, memo `c`.
 fn prove(b: u32, c: u32) -> Result<Receipt> {
-    let env = ExecutorEnv::builder().write(&(b, c))?.build()?;
+    let input = toy::withdraw_input(b, c);
+    let env = ExecutorEnv::builder().write(&input)?.build()?;
     let t = Instant::now();
     let info = default_prover().prove_with_opts(env, WITHDRAW_ELF, &ProverOpts::succinct())?;
     eprintln!("proved in {:.1?} ({} user cycles)", t.elapsed(), info.stats.user_cycles);
@@ -111,7 +122,29 @@ fn main() -> Result<()> {
             println!("selftest: OK (a Groth16 receipt of the guest on (9, 42), verified)");
             show(&g)?;
         }
-        _ => bail!("usage: lngap-r0 prove <b> <c> <out> | wrap <in> <out> | verify <in> | show <in> | selftest"),
+        ["withdraw-demo", b, c, out] => {
+            let input = toy::withdraw_input(b.parse()?, c.parse()?);
+            let journal = lngap_r0_core::check(&input, &lngap_r0_core::SEQUENCER_KEY, &lngap_r0_core::HUB_KEY).map_err(|e| anyhow::anyhow!("the statement fails natively: {e:?}"))?;
+            eprintln!("the toy L2: Alice's return of {b} with memo {c} at index {}, root signed at height {}; journal {}", input.index, input.height, hex::encode(journal));
+            let env = ExecutorEnv::builder().write(&input)?.build()?;
+            let t = Instant::now();
+            let info = default_prover().prove_with_opts(env, WITHDRAW_ELF, &ProverOpts::succinct())?;
+            eprintln!("proved in {:.1?} ({} user cycles, {} segments)", t.elapsed(), info.stats.user_cycles, info.stats.segments);
+            info.receipt.verify(image_id())?;
+            write(out, &info.receipt)?;
+            show(&info.receipt)?;
+        }
+        ["bitvmx-input", input, out] => {
+            let r = read(input)?;
+            r.verify(image_id())?;
+            let InnerReceipt::Groth16(g) = &r.inner else { bail!("{input} is a {} receipt, not a Groth16 one", kind(&r)) };
+            let id: [u8; 32] = image_id().as_bytes().try_into()?;
+            let bytes = bitvmx::input(&id, &g.seal, &r.journal.bytes)?;
+            std::fs::write(out, hex::encode(&bytes))?;
+            println!("{out}: {} bytes for the BitVMX verifier", bytes.len());
+            println!("{}", hex::encode(&bytes));
+        }
+        _ => bail!("usage: lngap-r0 prove <b> <c> <out> | wrap <in> <out> | verify <in> | show <in> | selftest | withdraw-demo <b> <c> <out> | bitvmx-input <in> <out.hex>"),
     }
     Ok(())
 }

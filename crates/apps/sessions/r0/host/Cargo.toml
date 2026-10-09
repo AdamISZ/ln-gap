@@ -7,6 +7,12 @@ license = "MIT"
 [dependencies]
 # client mode: proving runs in r0vm (installed by rzup, GPU kernels prebuilt)
 risc0-zkvm = { workspace = true, features = ["client", "std"] }
+lngap-r0-core = { path = "../core" }
+k256 = { version = "0.13", features = ["schnorr"] }
+sha2 = "0.10"
+ark-bn254 = "0.5"
+ark-ff = "0.5"
+ark-serialize = "0.5"
 anyhow = "1"
 bincode = "1.3"
 hex = "0.4"

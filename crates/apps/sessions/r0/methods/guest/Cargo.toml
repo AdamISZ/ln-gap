@@ -7,4 +7,5 @@ license = "MIT"
 [workspace]
 
 [dependencies]
+lngap-r0-core = { path = "../../core" }
 risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }

@@ -1,15 +1,15 @@
-//! The withdrawal statement, PLACEHOLDER: it commits the claimed `(b, c)`
-//! as the journal (two little-endian words) and checks nothing. The
-//! statement proper (a return note of `b` with memo `c` in a final state)
-//! replaces it; this guest exists to set up and test the proving pipeline,
-//! STARK here and the Groth16 wrap on x86 Linux.
+//! The withdrawal statement (docs/planning/WITHDRAW_STATEMENT.md): a note
+//! owned by the hub, of value `b` and memo `c`, is in the commitment tree
+//! of a state root the L2's sequencer signed. Commits `b ‖ c`
+//! (little-endian u32s). The check is `lngap_r0_core::check`, shared with
+//! the host; the sequencer's and the hub's keys are constants of the
+//! image.
 
+use lngap_r0_core::{check, WithdrawInput, HUB_KEY, SEQUENCER_KEY};
 use risc0_zkvm::guest::env;
 
 fn main() {
-    let (b, c): (u32, u32) = env::read();
-    let mut journal = [0u8; 8];
-    journal[..4].copy_from_slice(&b.to_le_bytes());
-    journal[4..].copy_from_slice(&c.to_le_bytes());
+    let input: WithdrawInput = env::read();
+    let journal = check(&input, &SEQUENCER_KEY, &HUB_KEY).expect("the withdrawal statement must hold");
     env::commit_slice(&journal);
 }

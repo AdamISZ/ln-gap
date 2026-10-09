@@ -12,7 +12,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LNGAP_GUEST_DOCKER");
     if std::env::var("LNGAP_GUEST_DOCKER").is_ok() {
         let docker = DockerOptionsBuilder::default()
-            .root_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/guest"))
+            // the build context must hold the guest and the core crate it uses
+            .root_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
             .build()
             .unwrap();
         let guest = GuestOptionsBuilder::default().use_docker(docker).build().unwrap();

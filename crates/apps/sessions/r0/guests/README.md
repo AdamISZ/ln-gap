@@ -12,3 +12,4 @@ development build from a Mac, whose image id is machine-specific.
 | guest | built by | image id |
 |---|---|---|
 | placeholder (commits b, c) | Mac, local build (development only) | `0a89c87936208a4e19b83b3161ea9c992282057e16e39ebc1279c1e85df83695` |
+| withdraw (the statement) | Mac, local build (development only; current file) | `4105d4e1d80ed7f29837491903e5d35291c706b69e58586b138537a6f30e7130` |
