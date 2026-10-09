@@ -28,6 +28,7 @@ use bitcoin_script_stack::stack::StackTracker;
 use lngap_lamport::winternitz::WotsPublic;
 use lngap_pos::ttt::Layout;
 
+use crate::OpensFile;
 use crate::challenges::{ProgramInfo, NEVER};
 use crate::game::*;
 use crate::{FinalStep, Step};
@@ -66,11 +67,11 @@ fn reads() -> Vec<FIn> {
     [fin(FIn::Rec, R_R1A, 4), fin(FIn::Rec, R_R1V, 4), fin(FIn::Rec, R_LS1, 8), fin(FIn::Rec, R_R2A, 4), fin(FIn::Rec, R_R2V, 4), fin(FIn::Rec, R_LS2, 8)].concat()
 }
 
-fn leaf(l: &Layout, key: &WotsPublic, name: String, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> FinalLeaf {
+fn leaf(l: &Layout, key: &impl OpensFile, name: String, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> FinalLeaf {
     FinalLeaf { name, blocks: blocks.to_vec(), wit, script: final_leaf(l, key, blocks, wit, inputs, check) }
 }
 
-pub fn record_step_leaf(l: &Layout, key: &WotsPublic) -> FinalLeaf {
+pub fn record_step_leaf(l: &Layout, key: &impl OpensFile) -> FinalLeaf {
     let inputs = [fin(FIn::St, S_BASE, 4), fin(FIn::Rec, R_STEP, 4)].concat();
     let check = tracked(|st| {
         let a = st.define(8, "base");
@@ -80,7 +81,7 @@ pub fn record_step_leaf(l: &Layout, key: &WotsPublic) -> FinalLeaf {
     leaf(l, key, "zk_record_step".into(), &[Blk::State, Blk::Record], 0, &inputs, &check)
 }
 
-pub fn entry_point_leaf(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> FinalLeaf {
+pub fn entry_point_leaf(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> FinalLeaf {
     let inputs = [fin(FIn::Rec, R_PC, 4), fin(FIn::Rec, R_MICRO, 1), agreed16()].concat();
     let entry = info.entry;
     leaf(l, key, "zk_entry_point".into(), &[Blk::Record], 0, &inputs, &tracked(|st| entry_point_challenge(st, entry)))
@@ -94,28 +95,28 @@ pub fn program_counter_wit(prev_prev_hash: &[u8; 20], prev_write: &Step) -> Vec<
     b
 }
 
-pub fn program_counter_leaf(l: &Layout, key: &WotsPublic) -> FinalLeaf {
+pub fn program_counter_leaf(l: &Layout, key: &impl OpensFile) -> FinalLeaf {
     let inputs = [(0..66).map(FIn::Wit).collect(), fin(FIn::Rec, R_PC, 4), fin(FIn::Rec, R_MICRO, 1), fin(FIn::St, S_LO, 20)].concat();
     leaf(l, key, "zk_program_counter".into(), &[Blk::State, Blk::Record], 66, &inputs, &tracked(program_counter_challenge))
 }
 
-pub fn opcode_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<FinalLeaf> {
+pub fn opcode_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<FinalLeaf> {
     let inputs = [fin(FIn::Rec, R_PC, 4), fin(FIn::Rec, R_OP, 4)].concat();
     info.code_chunks.iter().enumerate().map(|(k, c)| leaf(l, key, format!("zk_opcode_{k}"), &[Blk::Record], 0, &inputs, &tracked(|st| opcode_challenge(st, c)))).collect()
 }
 
-pub fn addresses_leaf(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> FinalLeaf {
+pub fn addresses_leaf(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> FinalLeaf {
     let inputs = [fin(FIn::Rec, R_R1A, 4), fin(FIn::Rec, R_R2A, 4), fin(FIn::Rec, R_WADDR, 4), fin(FIn::Rec, R_MEMW, 1), fin(FIn::Rec, R_PC, 4)].concat();
     let i = info.clone();
     leaf(l, key, "zk_addresses_sections".into(), &[Blk::Record], 0, &inputs, &tracked(|st| addresses_sections_challenge(st, &i.read_write, &i.read_only, &i.registers, &i.code)))
 }
 
-pub fn future_read_leaf(l: &Layout, key: &WotsPublic, r: u8) -> FinalLeaf {
+pub fn future_read_leaf(l: &Layout, key: &impl OpensFile, r: u8) -> FinalLeaf {
     let inputs = [agreed16(), fin(FIn::Rec, R_LS1, 8), fin(FIn::Rec, R_LS2, 8), vec![FIn::K(i64::from(r))]].concat();
     leaf(l, key, format!("zk_future_read_{r}"), &[Blk::Record], 0, &inputs, &tracked(future_read_challenge))
 }
 
-pub fn initialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<FinalLeaf> {
+pub fn initialized_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<FinalLeaf> {
     let mut v = vec![];
     for (k, c) in info.data_chunks.iter().enumerate() {
         for r in [1u8, 2] {
@@ -126,7 +127,7 @@ pub fn initialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> V
     v
 }
 
-pub fn uninitialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<FinalLeaf> {
+pub fn uninitialized_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<FinalLeaf> {
     [1u8, 2]
         .into_iter()
         .map(|r| {
@@ -136,7 +137,7 @@ pub fn uninitialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) ->
         .collect()
 }
 
-pub fn halt_hash_leaf(l: &Layout, key: &WotsPublic) -> FinalLeaf {
+pub fn halt_hash_leaf(l: &Layout, key: &impl OpensFile) -> FinalLeaf {
     // halt_challenge's inputs: claimed last step, agreed step, read 1 and
     // read 2 values, opcode, hash, claimed final hash; a success exit in
     // place of the record's fields
@@ -146,7 +147,7 @@ pub fn halt_hash_leaf(l: &Layout, key: &WotsPublic) -> FinalLeaf {
     leaf(l, key, "zk_halt_hash".into(), &[Blk::State, Blk::Claim], 0, &inputs, &tracked(halt_challenge))
 }
 
-pub fn halt_exit_leaf(l: &Layout, key: &WotsPublic) -> FinalLeaf {
+pub fn halt_exit_leaf(l: &Layout, key: &impl OpensFile) -> FinalLeaf {
     // equal constants in place of the two hashes
     let inputs = [fin(FIn::Cl, C_LAST_STEP, 8), agreed16(), fin(FIn::Rec, R_R1V, 4), fin(FIn::Rec, R_R2V, 4), fin(FIn::Rec, R_OP, 4), zeros(40), zeros(40)].concat();
     leaf(l, key, "zk_halt_exit".into(), &[Blk::Record, Blk::Claim], 0, &inputs, &tracked(halt_challenge))
@@ -179,7 +180,7 @@ pub fn input_signed(keys: &[WotsPublic], words: &[u32], sigs: &[lngap_lamport::w
 /// `zk_input_<j>` (the record, and the prover's signature on input word j
 /// on top of the pair reveal): a read of word j's address that was never
 /// written doesn't return the signed word. BitVMX's `input_challenge`.
-pub fn input_leaves(l: &Layout, key: &WotsPublic, input_keys: &[WotsPublic], info: &ProgramInfo) -> Vec<FinalLeaf> {
+pub fn input_leaves(l: &Layout, key: &impl OpensFile, input_keys: &[WotsPublic], info: &ProgramInfo) -> Vec<FinalLeaf> {
     assert_eq!(input_keys.len(), info.input_words, "one key per input word");
     input_keys
         .iter()
@@ -206,7 +207,7 @@ pub fn input_fires(record: &Record, info: &ProgramInfo, j: usize, word: u32) -> 
 }
 
 /// All of the claimant's final-depth disproves for a program.
-pub fn final_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<FinalLeaf> {
+pub fn final_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<FinalLeaf> {
     let mut v = vec![
         record_step_leaf(l, key),
         entry_point_leaf(l, key, info),

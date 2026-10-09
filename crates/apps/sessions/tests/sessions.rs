@@ -23,6 +23,11 @@
 //! - E1, off-chain play, then Alice disappears: the hub escalates,
 //!   replays the moves made from the signatures it holds, and wins by
 //!   timeout (an honest absentee loses her reserve);
+//! - Q, a cheating replay: the hub escalates after off-chain play and
+//!   posts its own move 2 altered, then Alice's move 3 (which no longer
+//!   follows from it, so the hub could disprove it after delta); Alice
+//!   shows the hub's two signatures at depth 2 with `equiv_d_2` at once
+//!   and takes everything;
 //! - D, the default: no withdrawal by T_close; the pre-signed default
 //!   returns Alice's reserve and pays the hub.
 //!
@@ -39,21 +44,22 @@ use std::time::Instant;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1::SECP256K1;
-use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
+use bitcoin::opcodes::all::OP_CHECKSIG;
+use bitcoin::script::Builder;
+use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut};
 use emulator::decision::challenge::ForceCondition;
 use lngap_btc::keys::Seed;
 use lngap_btc::regtest::Regtest;
-use lngap_btc::sighash::sign_tapscript;
-use lngap_btc::taptree::TapTree;
-use lngap_btc::tx::build_spend;
+use lngap_btc::sighash::{sign_tapscript, sign_tapscript_acp};
+use lngap_btc::taptree::{Leaf, TapTree};
+use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PartyPubKeys, Role};
 use lngap_contract::{Contract, Outcome};
 use lngap_lamport::keystore::KeyStore;
-use lngap_lamport::winternitz::{WotsPublic, WotsSecret, WotsSig};
-use lngap_pos::blackjack::auth_message;
+use lngap_lamport::winternitz::{WotsParams, WotsPublic, WotsSecret, WotsSig};
 use lngap_pos::instance::{self, mover_at, PosDepthKeys};
-use lngap_pos::rebut::{wots_wire, wots_wire_tied};
+use lngap_pos::rebut::wots_wire;
 use lngap_pos::ttt::Layout;
 use lngap_sessions::l2::{Op, HUB, L2};
 use lngap_sessions::session::{bit_tree, default_leaf, default_outputs, input_word_leaf, payout, reserve_tree, Terms};
@@ -74,6 +80,73 @@ fn sig(kp: &Keypair, tx: &Transaction, input: usize, prevouts: &[TxOut], leaf: &
     sign_tapscript(kp, tx, input, prevouts, leaf).unwrap().as_ref().to_vec()
 }
 
+// ----------------------------------------------------------------- fees
+
+/// The feerate the parties pay, sat/vB.
+const FEERATE: u64 = 2;
+/// Fee coins: small for moves and timeouts, large for the final proof.
+const SMALL: Amount = Amount::from_sat(20_000);
+const LARGE: Amount = Amount::from_sat(200_000);
+
+/// A party's fee coins. Every pre-signed transaction is signed
+/// SIGHASH_ALL|ANYONECANPAY at zero fee, so whoever broadcasts it adds one
+/// of its own coins as the fee: each side pays for its own moves. The
+/// signatures fix the outputs, so there is no change; a party keeps coins
+/// of fitting sizes, as Lightning's anchor wallets keep a reserve.
+struct FeeWallet {
+    kp: Keypair,
+    tree: TapTree,
+    coins: Vec<(OutPoint, TxOut)>,
+}
+
+impl FeeWallet {
+    /// `small` small coins and `large` large ones, from one funding coin
+    /// fanned out (two blocks).
+    fn new(rt: &Regtest, kp: &Keypair, small: usize, large: usize) -> FeeWallet {
+        let script = Builder::new().push_x_only_key(&kp.x_only_public_key().0).push_opcode(OP_CHECKSIG).into_script();
+        let tree = TapTree::new(vec![Leaf::new("fee".to_string(), script, Timelock::NONE)]).unwrap();
+        let spk = tree.script_pubkey();
+        let total = SMALL * small as u64 + LARGE * large as u64;
+        let (op, out) = rt.fund(&spk, total + Amount::from_sat(20_000)).unwrap();
+        let outs: Vec<TxOut> = std::iter::repeat_n(SMALL, small).chain(std::iter::repeat_n(LARGE, large)).map(|v| TxOut { value: v, script_pubkey: spk.clone() }).collect();
+        let mut tx = build_spend(op, &Timelock::NONE, outs);
+        let leaf = tree.leaf("fee").unwrap();
+        let w = vec![sig(kp, &tx, 0, std::slice::from_ref(&out), &leaf.script)];
+        tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block("fee").unwrap());
+        rt.mine_with(std::slice::from_ref(&tx)).unwrap();
+        let txid = tx.compute_txid();
+        let coins = tx.output.iter().enumerate().map(|(i, o)| (OutPoint { txid, vout: i as u32 }, o.clone())).collect();
+        FeeWallet { kp: *kp, tree, coins }
+    }
+    /// Add a fee input to `tx` (input 0 spends `prevout`): the smallest coin
+    /// that pays `FEERATE` on the grown transaction.
+    fn pay(&mut self, mut tx: Transaction, prevout: &TxOut) -> Transaction {
+        let need = Amount::from_sat((tx.vsize() as u64 + 110) * FEERATE);
+        let i = self.coins.iter().enumerate().filter(|(_, c)| c.1.value >= need).min_by_key(|(_, c)| c.1.value).map(|(i, _)| i).expect("a fee coin large enough");
+        let (op, coin) = self.coins.remove(i);
+        tx.input.push(TxIn { previous_output: op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Default::default() });
+        let leaf = self.tree.leaf("fee").unwrap();
+        let w = vec![sig(&self.kp, &tx, 1, &[prevout.clone(), coin], &leaf.script)];
+        tx.input[1].witness = tapscript_witness(&w, &leaf.script, &self.tree.control_block("fee").unwrap());
+        tx
+    }
+}
+
+/// Broadcast through the mempool (fee policy applies) and mine it.
+fn confirm(rt: &Regtest, tx: &Transaction) -> std::result::Result<(), String> {
+    rt.send_raw(tx).map_err(|e| format!("{e:#}"))?;
+    rt.mine(1).map_err(|e| format!("{e:#}"))?;
+    match rt.confirmations(&tx.compute_txid()) {
+        Ok(Some(_)) => Ok(()),
+        _ => Err("not mined".into()),
+    }
+}
+
+/// The 2-of-2 signature of a pre-signed transaction: ALL|ANYONECANPAY.
+fn presig(kp: &Keypair, tx: &Transaction, prevout: &TxOut, leaf: &ScriptBuf) -> Vec<u8> {
+    sign_tapscript_acp(kp, tx, 0, prevout, leaf).unwrap()
+}
+
 // -------------------------------------------------------------- session
 
 /// One session contract between Alice (the user, the prover) and the hub.
@@ -87,13 +160,16 @@ struct Session {
     checks: Vec<(String, usize, u32)>,
     user: PartyKeys,
     hub: PartyKeys,
-    ks: [KeyStore; 2],
     params: ChannelParams,
     pubs: [PartyPubKeys; 2],
     keys: Vec<PosDepthKeys>,
     family: Arc<ZkFamily>,
     /// Alice's input-word keys, one per word of the statement's input.
     input_secrets: Vec<WotsSecret>,
+    /// The move keys (lean moves), by depth: depth `d`'s mover signs its
+    /// head with `moves[d - 1]`. Held as secrets so that a test can make a
+    /// party equivocate.
+    moves: Vec<WotsSecret>,
     outcomes: Vec<Outcome>,
     pdf: String,
     /// The claim: the input's words (what Alice signs), the search's heads
@@ -102,6 +178,8 @@ struct Session {
     heads: Vec<[u8; 48]>,
     entries: Vec<Entry>,
     ladders: HashMap<u32, TapTree>,
+    /// Alice's fee coins and the hub's (set when the contract is funded).
+    wallets: Vec<FeeWallet>,
 }
 
 /// The session contract's output: its tree, outpoint, output.
@@ -123,14 +201,21 @@ impl Session {
         let user = PartyKeys::from_seed(Role::User, Seed::from_label(&format!("sess/{id}/alice")));
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label(&format!("sess/{id}/hub")));
         let mut ks = [KeyStore::new(Seed::from_label(&format!("sess/{id}/alice-ks"))), KeyStore::new(Seed::from_label(&format!("sess/{id}/hub-ks")))];
+        // the depth keys' other fields (the venue's); the move keys replace
+        // the rebuttal keys below
         let search = Search { game_id: GAME_ID, rounds };
         let m = search.depths();
         let ou = instance::gen_pos_keys(&mut ks[0], Role::User, id, SEQ, m, instance::Game::Zk).unwrap();
         let oh = instance::gen_pos_keys(&mut ks[1], Role::Hub, id, SEQ, m, instance::Game::Zk).unwrap();
-        let keys = instance::collect_keys(&ou, &oh, m).unwrap();
+        let mut keys = instance::collect_keys(&ou, &oh, m).unwrap();
+        // lean moves: each depth's key signs that move's head alone
+        let moves: Vec<WotsSecret> = (1..=m).map(|d| WotsSecret::from_entropy(WotsParams::for_bytes(48), Seed::from_label(&format!("sess/{id}/move/{d}")).derive_bytes("wots"))).collect();
+        for (k, mv) in keys.iter_mut().zip(&moves) {
+            k.rebut = mv.public();
+        }
         let info = ProgramInfo::load(pdf).unwrap();
         let input_secrets: Vec<WotsSecret> = (0..info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x60u8.wrapping_add(j as u8).wrapping_add(id as u8); 32])).collect();
-        let family = ZkFamily::new(search, info, input_secrets.iter().map(|k| k.public()).collect());
+        let family = ZkFamily::lean(search, info, input_secrets.iter().map(|k| k.public()).collect(), moves.iter().map(|k| k.public()).collect());
         let params = ChannelParams { presign_fee: Amount::from_sat(80_000), ..ChannelParams::regtest(Amount::from_sat(20_000_000)) };
         let pubs = [user.public(), hub.public()];
         Session {
@@ -140,18 +225,19 @@ impl Session {
             checks,
             user,
             hub,
-            ks,
             params,
             pubs,
             keys,
             family,
             input_secrets,
+            moves,
             outcomes: Contract::outcomes(&TicTacToe),
             pdf: pdf.to_string(),
             words: vec![],
             heads: vec![],
             entries: vec![],
             ladders: HashMap::new(),
+            wallets: vec![],
         }
     }
     fn m(&self) -> u32 {
@@ -206,11 +292,13 @@ impl Session {
         let leaves = vec![default_leaf(&ctx, self.terms.t_close), escalate_leaf_with(&self.g(), &ctx, &l1, &self.keys[0], &words)];
         let tree = TapTree::new(leaves).unwrap();
         let (op, out) = rt.fund(&tree.script_pubkey(), self.value()).unwrap();
+        let n = self.m() as usize + 4;
+        self.wallets = vec![FeeWallet::new(rt, &self.user.payment, n, 2), FeeWallet::new(rt, &self.hub.payment, n, 2)];
         Funded { tree, op, out }
     }
-    /// `V_max`, both reserves, and the pre-signed fees of a whole search.
+    /// `V_max` and both reserves: the contract funds no fees.
     fn value(&self) -> Amount {
-        self.terms.v_max() + self.terms.reserves() + self.params.presign_fee * u64::from(self.m() + 3)
+        self.terms.v_max() + self.terms.reserves()
     }
     /// The ladder output after move `j`; the first one also carries the
     /// hub's input-word checks.
@@ -227,23 +315,16 @@ impl Session {
         self.ladders.insert(j, t.clone());
         t
     }
-    /// The pair reveal at `d` and both heads' authorship, wire order.
-    fn post_wire(&mut self, d: u32) -> (Vec<Vec<u8>>, WotsSig) {
-        let id = self.cid;
-        let (new, mv) = (self.heads[(d - 1) as usize], mover_at(d));
-        let new_auth = self.ks[mv.idx()].sign_wots(&instance::state_label(id, SEQ, d), &auth_message(&new)).unwrap();
-        let mut w = vec![];
-        let pair = if d == 1 {
-            self.ks[mv.idx()].sign_wots(&instance::rebut_label(id, SEQ, d), &new).unwrap()
-        } else {
-            let prev = self.heads[(d - 2) as usize];
-            let prior_auth = self.ks[mover_at(d - 1).idx()].sign_wots(&instance::state_label(id, SEQ, d - 1), &auth_message(&prev)).unwrap();
-            w.extend(wots_wire_tied(&prior_auth));
-            self.ks[mv.idx()].sign_wots(&instance::rebut_label(id, SEQ, d), &[prev.as_slice(), new.as_slice()].concat()).unwrap()
-        };
-        w.extend(wots_wire_tied(&new_auth));
-        w.extend(wots_wire(&pair));
-        (w, pair)
+    /// Move `d`: its head signed with depth `d`'s key (lean moves).
+    fn move_sig(&self, d: u32) -> WotsSig {
+        self.moves[(d - 1) as usize].sign(&self.heads[(d - 1) as usize]).unwrap()
+    }
+    /// What the rules at the ladder output after move `d` read: moves
+    /// `d - 1` and `d` re-revealed, wire order.
+    fn file_wire(&self, d: u32) -> Vec<Vec<u8>> {
+        let mut w = if d >= 2 { wots_wire(&self.move_sig(d - 1)) } else { vec![] };
+        w.extend(wots_wire(&self.move_sig(d)));
+        w
     }
     /// Alice's signature on input word `j` (her claim's value).
     fn word_sig(&self, j: usize) -> WotsSig {
@@ -253,13 +334,14 @@ impl Session {
     /// `c`, with the claim words; otherwise `post` from the ladder output
     /// at `j - 1`. An escalation after off-chain play replays the moves
     /// made, each posted with the signatures the poster holds.
-    fn post(&mut self, rt: &Regtest, j: u32, op: OutPoint, out: &TxOut, c: Option<&Funded>) -> (OutPoint, TxOut, Transaction) {
+    /// The poster `by` pays its fee.
+    fn post(&mut self, rt: &Regtest, j: u32, op: OutPoint, out: &TxOut, c: Option<&Funded>, by: Role) -> (OutPoint, TxOut, Transaction) {
         let (tree, name) = match c {
             Some(c) => (c.tree.clone(), "escalate"),
             None => (self.ladder(j - 1), "post"),
         };
         let leaf = tree.leaf(name).unwrap();
-        let t_out = TxOut { value: out.value - self.params.presign_fee, script_pubkey: self.ladder(j).script_pubkey() };
+        let t_out = TxOut { value: out.value, script_pubkey: self.ladder(j).script_pubkey() };
         let mut tx = build_spend(op, &leaf.timelock, vec![t_out.clone()]);
         let mut w = vec![];
         if c.is_some() {
@@ -267,35 +349,41 @@ impl Session {
                 w.extend(wots_wire(&self.word_sig(k)));
             }
         }
-        w.extend(self.post_wire(j).0);
-        w.push(sig(&self.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
-        w.push(sig(&self.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
+        w.extend(wots_wire(&self.move_sig(j)));
+        w.push(presig(&self.hub.payment, &tx, out, &leaf.script));
+        w.push(presig(&self.user.payment, &tx, out, &leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(name).unwrap());
-        rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("{}: posting move {j}: {e:#}", self.cid));
+        let tx = self.wallets[by.idx()].pay(tx, out);
+        confirm(rt, &tx).unwrap_or_else(|e| panic!("{}: posting move {j}: {e}", self.cid));
         (OutPoint { txid: tx.compute_txid(), vout: 0 }, t_out, tx)
     }
-    /// Escalate, after the contract's `to_self_delay`.
-    fn escalate(&mut self, rt: &Regtest, c: &Funded) -> (OutPoint, TxOut, Transaction) {
+    /// Escalate, by `by`, after the contract's `to_self_delay`.
+    fn escalate(&mut self, rt: &Regtest, c: &Funded, by: Role) -> (OutPoint, TxOut, Transaction) {
         rt.mine(u64::from(self.params.to_self_delay)).unwrap();
-        self.post(rt, 1, c.op, &c.out, Some(c))
+        self.post(rt, 1, c.op, &c.out, Some(c), by)
     }
     /// A 2-of-2 spend of `(op, out)` under `tree`'s leaf `name`, `wire`
     /// below the signatures, paying `b` in bits and both reserves to Alice.
-    fn pay_b(&self, tree: &TapTree, op: OutPoint, out: &TxOut, name: &str, wire: Vec<Vec<u8>>) -> Transaction {
-        let outs = payout(&self.ctx(), &self.terms, &self.b_key(), out.value, self.params.presign_fee).unwrap();
-        self.presigned(tree, op, out, name, wire, outs)
+    /// Alice, its beneficiary, pays the fee.
+    fn pay_b(&mut self, tree: &TapTree, op: OutPoint, out: &TxOut, name: &str, wire: Vec<Vec<u8>>) -> Transaction {
+        let outs = payout(&self.ctx(), &self.terms, &self.b_key(), out.value, Amount::ZERO).unwrap();
+        let tx = self.presigned(tree, op, out, name, wire, outs);
+        self.wallets[0].pay(tx, out)
     }
-    /// A 2-of-2 spend paying everything to the hub (Alice lost).
-    fn pay_hub(&self, tree: &TapTree, op: OutPoint, out: &TxOut, name: &str) -> Transaction {
-        let outs = vec![TxOut { value: out.value - self.params.presign_fee, script_pubkey: self.pubs[1].payout_spk.clone() }];
-        self.presigned(tree, op, out, name, vec![], outs)
+    /// A 2-of-2 spend paying everything to the hub (Alice lost); the hub
+    /// pays the fee.
+    fn pay_hub(&mut self, tree: &TapTree, op: OutPoint, out: &TxOut, name: &str) -> Transaction {
+        let outs = vec![TxOut { value: out.value, script_pubkey: self.pubs[1].payout_spk.clone() }];
+        let tx = self.presigned(tree, op, out, name, vec![], outs);
+        self.wallets[1].pay(tx, out)
     }
+    /// A pre-signed 2-of-2 spend at zero fee, signed ALL|ANYONECANPAY.
     fn presigned(&self, tree: &TapTree, op: OutPoint, out: &TxOut, name: &str, wire: Vec<Vec<u8>>, outs: Vec<TxOut>) -> Transaction {
         let leaf = tree.leaf(name).unwrap_or_else(|_| panic!("no leaf {name}"));
         let mut tx = build_spend(op, &leaf.timelock, outs);
         let mut w = wire;
-        w.push(sig(&self.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
-        w.push(sig(&self.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
+        w.push(presig(&self.hub.payment, &tx, out, &leaf.script));
+        w.push(presig(&self.user.payment, &tx, out, &leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(name).unwrap());
         tx
     }
@@ -306,6 +394,15 @@ impl Session {
         let mut tx = build_spend(op, &leaf.timelock, vec![TxOut { value: out.value - self.params.presign_fee, script_pubkey: self.pubs[1].payout_spk.clone() }]);
         let mut w = wire;
         w.push(sig(&self.hub.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
+        tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(name).unwrap());
+        tx
+    }
+    /// A runtime spend by Alice, as `hub_takes`.
+    fn alice_takes(&self, tree: &TapTree, op: OutPoint, out: &TxOut, name: &str, wire: Vec<Vec<u8>>) -> Transaction {
+        let leaf = tree.leaf(name).unwrap_or_else(|_| panic!("no leaf {name}"));
+        let mut tx = build_spend(op, &leaf.timelock, vec![TxOut { value: out.value - self.params.presign_fee, script_pubkey: self.pubs[0].payout_spk.clone() }]);
+        let mut w = wire;
+        w.push(sig(&self.user.payment, &tx, 0, std::slice::from_ref(out), &leaf.script));
         tx.input[0].witness = tapscript_witness(&w, &leaf.script, &tree.control_block(name).unwrap());
         tx
     }
@@ -375,12 +472,12 @@ impl Session {
     /// (Alice's record at depth `m`): the ladder output there and the
     /// dispute's total size so far.
     fn play_on_chain(&mut self, rt: &Regtest, c: &Funded) -> (OutPoint, TxOut, u64) {
-        let (mut op, mut out, tx) = self.escalate(rt, c);
+        let (mut op, mut out, tx) = self.escalate(rt, c, Role::User);
         let mut vb = tx.vsize() as u64;
         println!("SESS {}: escalate (move 1 and {} signed input words): {} vB", self.cid, self.claim_words().len(), tx.vsize());
         let (mut alice, mut hub) = (0u64, 0u64);
         for j in 2..=self.m() {
-            let (o, t, tx) = self.post(rt, j, op, &out, None);
+            let (o, t, tx) = self.post(rt, j, op, &out, None, mover_at(j));
             if mover_at(j) == Role::User {
                 alice += tx.vsize() as u64;
             } else {
@@ -396,21 +493,19 @@ impl Session {
     fn prove_last(&mut self, op: OutPoint, out: &TxOut) -> (Transaction, String) {
         let m = self.m();
         let tree = self.ladder(m);
-        let pair = self.post_wire(m).1;
         let last = self.entries.last().unwrap().clone();
         let rec = last.record.unwrap();
         let class = lngap_zk::guard::key_of(rec.read.opcode, rec.read.micro).unwrap();
         let name = format!("zk_prove_{class}");
-        (self.pay_b(&tree, op, out, &name, [final_witness(&last.state, &rec), wots_wire(&pair)].concat()), name)
+        (self.pay_b(&tree, op, out, &name, [final_witness(&last.state, &rec), self.file_wire(m)].concat()), name)
     }
     /// The hub's `halt_exit` disprove at the last ladder output.
     fn halt_exit(&mut self, op: OutPoint, out: &TxOut) -> Transaction {
         let m = self.m();
         let tree = self.ladder(m);
-        let pair = self.post_wire(m).1;
         let last = self.entries.last().unwrap().clone();
         let (rec, cl) = (last.record.unwrap(), self.entries[0].claim.unwrap());
-        self.hub_takes(&tree, op, out, "disprove_zk_halt_exit", [nibble_witness(&rec.to_bytes()), nibble_witness(&cl.to_bytes()), wots_wire(&pair)].concat())
+        self.hub_takes(&tree, op, out, "disprove_zk_halt_exit", [nibble_witness(&rec.to_bytes()), nibble_witness(&cl.to_bytes()), self.file_wire(m)].concat())
     }
     /// The hub's input-word check `name` on the first ladder output: with
     /// Alice's signature on word `j` as posted.
@@ -460,6 +555,7 @@ fn sessions_on_regtest() {
     let rounds = emulator::loader::program_definition::ProgramDefinition::from_config(&pdf(42)).unwrap().nary_def().total_rounds() as u32;
     let mk = |id: u32| Session::new(terms(id, t_close), &pdf(id), rounds);
     let (mut r, mut x, mut s, mut df, mut p, mut mm, mut e) = (mk(42), mk(43), mk(44), mk(45), mk(46), mk(47), mk(48));
+    let mut q = mk(49);
     let m = r.m();
     println!("SESS the statement: {rounds} rounds, {m} depths; V_max {} in {} bits of {}; reserves {} (Alice) and {} (the hub)", r.terms.v_max(), r.terms.bits, r.terms.unit, r.terms.reserve_alice, r.terms.reserve_hub);
     assert!(!l2.is_final_return(6, 43));
@@ -469,7 +565,9 @@ fn sessions_on_regtest() {
     p.play(6);
     mm.play(5);
     e.play(3);
+    q.play(7);
     let (cr, cx, cs, cd, cp, cm, ce) = (r.fund_session(&rt), x.fund_session(&rt), s.fund_session(&rt), df.fund_session(&rt), p.fund_session(&rt), mm.fund_session(&rt), e.fund_session(&rt));
+    let cq = q.fund_session(&rt);
     let (delta, w) = (r.params.delta, r.params.delta + r.params.delta_prime);
 
     // ===== H8: the session output carries only default and escalate =====
@@ -485,7 +583,7 @@ fn sessions_on_regtest() {
         let (proof, name) = r.prove_last(op, &out);
         assert!(rt.test_accept(&proof).is_err(), "R: the proof waits out the hub's window");
         rt.mine(u64::from(w)).unwrap();
-        rt.mine_with(std::slice::from_ref(&proof)).unwrap_or_else(|e| panic!("R: the pre-signed proof: {e:#}"));
+        confirm(&rt, &proof).unwrap_or_else(|e| panic!("R: the pre-signed proof: {e}"));
         println!("SESS R: {name} (pre-signed) pays b = 9 in {} bit outputs and both reserves: {} vB; the dispute: {} vB", r.terms.bits, proof.vsize(), vb + proof.vsize() as u64);
         for i in 0..r.terms.bits {
             r.spend_bit(&rt, &proof, i, 9);
@@ -506,13 +604,13 @@ fn sessions_on_regtest() {
 
     // ===== S, A6: the hub has disappeared =====
     {
-        let (op, out, tx) = s.escalate(&rt, &cs);
+        let (op, out, tx) = s.escalate(&rt, &cs, Role::User);
         println!("SESS S: Alice escalates: {} vB", tx.vsize());
         let l1 = s.ladder(1);
         let split = s.pay_b(&l1, op, &out, "split_UserWins", vec![]);
         assert!(rt.test_accept(&split).is_err(), "S: not before the hub's window ends");
         rt.mine(u64::from(w)).unwrap();
-        rt.mine_with(std::slice::from_ref(&split)).unwrap_or_else(|e| panic!("S: the timeout: {e:#}"));
+        confirm(&rt, &split).unwrap_or_else(|e| panic!("S: the timeout: {e}"));
         println!("SESS S: the hub never answered; the timeout pays b = 12 and both reserves: {} vB", split.vsize());
         // A6: had Alice also signed b = 13, the hub takes a bit of hers (bit 2
         // is set in 12) and the reserve output before her delay runs out
@@ -526,20 +624,20 @@ fn sessions_on_regtest() {
 
     // ===== P: Alice probes; the hub answers; she abandons =====
     {
-        let (op, out, _) = p.escalate(&rt, &cp);
-        let (op, out, _) = p.post(&rt, 2, op, &out, None);
+        let (op, out, _) = p.escalate(&rt, &cp, Role::User);
+        let (op, out, _) = p.post(&rt, 2, op, &out, None, Role::Hub);
         let l2t = p.ladder(2);
         let split = p.pay_hub(&l2t, op, &out, "split_HubWins");
         assert!(rt.test_accept(&split).is_err(), "P: not before Alice's window ends");
         rt.mine(u64::from(w)).unwrap();
-        rt.mine_with(std::slice::from_ref(&split)).unwrap_or_else(|e| panic!("P: the hub's timeout: {e:#}"));
+        confirm(&rt, &split).unwrap_or_else(|e| panic!("P: the hub's timeout: {e}"));
         println!("SESS P: a false claim of b = 6, abandoned after the hub's answer; the hub's timeout takes everything, her reserve included: {} vB", split.vsize());
     }
 
     // ===== M: Alice's words sign another session's memo =====
     {
         mm.words[1] = 99;
-        let (op, out, _) = mm.escalate(&rt, &cm);
+        let (op, out, _) = mm.escalate(&rt, &cm, Role::User);
         let tx = mm.check(op, &out, "memo", 1);
         rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("M: the memo check: {e:#}"));
         println!("SESS M: Alice's claim signs memo 99 for session 47; the hub's memo check takes everything: {} vB", tx.vsize());
@@ -553,24 +651,52 @@ fn sessions_on_regtest() {
     {
         // four moves were played off-chain; Alice never sends move 5; the
         // hub escalates and replays moves 1 to 4 from the signatures it holds
-        let (mut op, mut out, _) = e.escalate(&rt, &ce);
+        let (mut op, mut out, _) = e.escalate(&rt, &ce, Role::Hub);
         for j in 2..=4 {
-            (op, out, _) = e.post(&rt, j, op, &out, None);
+            (op, out, _) = e.post(&rt, j, op, &out, None, Role::Hub);
         }
         let l4 = e.ladder(4);
         let split = e.pay_hub(&l4, op, &out, "split_HubWins");
         rt.mine(u64::from(w)).unwrap();
-        rt.mine_with(std::slice::from_ref(&split)).unwrap_or_else(|e| panic!("E1: the hub's timeout: {e:#}"));
+        confirm(&rt, &split).unwrap_or_else(|e| panic!("E1: the hub's timeout: {e}"));
         println!("SESS E1: Alice stopped after 4 moves; the hub escalated, replayed them, and its timeout takes everything (her claim was valid; her absence loses it): {} vB", split.vsize());
+    }
+
+    // ===== Q: a cheating replay; equiv_d =====
+    {
+        // moves 1 to 3 were played off-chain; Alice holds the hub's
+        // signature on its true move 2. The hub escalates and replays, but
+        // posts move 2 altered, then Alice's move 3 as she signed it.
+        let honest_2 = q.move_sig(2);
+        let (op, out, _) = q.escalate(&rt, &cq, Role::Hub);
+        let true_2 = q.heads[1];
+        q.heads[1][4 + 3] ^= 1; // the state digest's fourth byte
+        let altered_2 = q.move_sig(2);
+        let (op, out, _) = q.post(&rt, 2, op, &out, None, Role::Hub);
+        let (op, out, _) = q.post(&rt, 3, op, &out, None, Role::Hub);
+        // move 3 no longer copies move 2's state: the hub could disprove it
+        // after delta (the file: the altered move 2, Alice's move 3)
+        let l3 = q.ladder(3);
+        let copied = q.hub_takes(&l3, op, &out, "disprove_zk_copied", q.file_wire(3));
+        q.heads[1] = true_2;
+        // but Alice shows the hub's two signatures at depth 2 first
+        let eq = q.alice_takes(&l3, op, &out, "equiv_d_2", [wots_wire(&honest_2), wots_wire(&altered_2)].concat());
+        rt.mine(u64::from(delta)).unwrap();
+        rt.test_accept(&copied).unwrap_or_else(|e| panic!("Q: the hub's disprove of move 3 would be valid: {e:#}"));
+        rt.mine_with(std::slice::from_ref(&eq)).unwrap_or_else(|e| panic!("Q: equiv_d_2: {e:#}"));
+        println!("SESS Q: the hub replayed an altered move 2 (its disprove of Alice's move 3 would be valid, {} vB); Alice's equiv_d_2 takes everything first: {} vB", copied.vsize(), eq.vsize());
     }
 
     // ===== D: no withdrawal by T_close; the pre-signed default =====
     {
-        let outs = default_outputs(&df.ctx(), &df.terms, cd.out.value, Amount::from_sat(2_000)).unwrap();
-        let tx = df.presigned(&cd.tree, cd.op, &cd.out, "default", vec![], outs);
+        let outs = default_outputs(&df.ctx(), &df.terms, cd.out.value, Amount::ZERO).unwrap();
+        let bare = df.presigned(&cd.tree, cd.op, &cd.out, "default", vec![], outs);
+        let tx = df.wallets[1].pay(bare.clone(), &cd.out);
         assert!(rt.test_accept(&tx).is_err(), "D: not before T_close");
         rt.mine_to_height(t_close).unwrap();
-        rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("D: the default: {e:#}"));
+        let why = rt.test_accept(&bare).expect_err("D: a pre-signed transaction carries no fee of its own");
+        println!("SESS fees: a pre-signed transaction alone is refused ({why}); its broadcaster adds a fee input");
+        confirm(&rt, &tx).unwrap_or_else(|e| panic!("D: the default: {e}"));
         assert_eq!(tx.output[0].value, df.terms.reserve_alice);
         println!("SESS D: the default after T_close returns Alice's reserve and pays the hub: {} vB", tx.vsize());
     }
@@ -661,7 +787,7 @@ fn sessions_on_the_groth16_verifier() {
     // ===== I: a different image id; M: another session's memo =====
     for (s, c, name, j, bad) in [(&mut i, &ci, "image_1", 1usize, id_words[0] ^ 1), (&mut mm, &cm, "memo", c_word, 43)] {
         s.words[j] = bad;
-        let (op, out, esc) = s.escalate(&rt, c);
+        let (op, out, esc) = s.escalate(&rt, c, Role::User);
         let tx = s.check(op, &out, name, j);
         rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("{name}: {e:#}"));
         println!("SESS [real] {}: escalate {} vB; Alice's words sign {name} = {bad:#x}; the hub's check takes everything: {} vB", if name == "memo" { "M" } else { "I" }, esc.vsize(), tx.vsize());
@@ -673,7 +799,7 @@ fn sessions_on_the_groth16_verifier() {
         let (op, out, vb) = r.play_on_chain(&rt, &cr);
         let (proof, name) = r.prove_last(op, &out);
         rt.mine(u64::from(w)).unwrap();
-        rt.mine_with(std::slice::from_ref(&proof)).unwrap_or_else(|e| panic!("R: the proof: {e:#}"));
+        confirm(&rt, &proof).unwrap_or_else(|e| panic!("R: the proof: {e}"));
         println!("SESS [real] R: {name} pays b = 9 (input word 41) in bits and both reserves: {} vB; the whole dispute: {} vB in {} transactions ({:.0?})", proof.vsize(), vb + proof.vsize() as u64, m + 1, t.elapsed());
         for k in 0..r.terms.bits {
             r.spend_bit(&rt, &proof, k, 9);

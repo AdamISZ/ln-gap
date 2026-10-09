@@ -117,6 +117,11 @@ pub trait Dated: Sync {
     fn ends_at(&self, _depth: u32) -> bool {
         false
     }
+    /// Lean moves (LN-GAP v3): a move is its head signed alone under its
+    /// depth's key; the rules re-reveal the prior move's signature.
+    fn lean(&self) -> bool {
+        false
+    }
     /// The choice of a head.
     fn choice(&self, head: &[u8; 48]) -> Vec<u8> {
         let (from, n) = self.choice_region();
@@ -186,6 +191,9 @@ impl Dated for ZkDated<'_> {
     }
     fn ends_at(&self, depth: u32) -> bool {
         self.family.final_depth() == Some(depth)
+    }
+    fn lean(&self) -> bool {
+        self.family.lean_moves()
     }
     fn mover_splits(&self, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Vec<Leaf> {
         let w = ctx.params.delta + ctx.params.delta_prime;
@@ -363,7 +371,14 @@ pub fn node_leaf(ctx: &CommitCtx, l: &Layout, lower: &WotsPublic, upper: &WotsPu
 /// then dropped. At depth 1 there is no prior: the reveal is of the head
 /// alone (`keys_prev` is `None`). The same body serves a ladder step, a self-post and (with
 /// the dating checks after it) a rebuttal.
+///
+/// With lean moves the body is the new head's signature alone, under the
+/// depth's key (`keys.rebut`): the binding to the prior move is left to
+/// the rules, which re-reveal both, and to `equiv_d`.
 fn post_body(g: &dyn Dated, b: Builder, l: &Layout, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>) -> Builder {
+    if g.lean() {
+        return drop_n(b.wots_verify(&keys.rebut), keys.rebut.params.message_digits as usize);
+    }
     let mut b = b.wots_verify(&keys.rebut);
     b = g.authorship(b, l.file, l.new, &keys.state);
     if l.prior.is_some() {
@@ -556,6 +571,39 @@ fn disprove_family(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKe
         .collect()
 }
 
+/// `equiv_d_<d>` on a ladder output (lean moves): two different heads
+/// signed under depth `d`'s key, which only that depth's mover holds; the
+/// `exhibitor` (the other side) takes the output, at once, ahead of any
+/// disprove. This keeps a replay faithful: an escalating party that posts
+/// one of its own moves other than the one its opponent answered has
+/// signed two heads at that depth. A runtime spend (the liar loses).
+/// Witness, wire order: one reveal, the other, the exhibitor's signature.
+pub fn equiv_move_leaf(ctx: &CommitCtx, d: u32, key: &WotsPublic, exhibitor: lngap_channel::Role) -> Leaf {
+    let m = key.params.message_digits as usize;
+    let mut b = Builder::new().checksigverify(&ctx.key(exhibitor).payment).wots_verify(key);
+    for _ in 0..m {
+        b = b.push_opcode(OP_TOALTSTACK);
+    }
+    b = b.wots_verify(key);
+    for _ in 0..m {
+        b = b.push_opcode(OP_FROMALTSTACK);
+    }
+    // the two message vectors must differ somewhere
+    b = b.push_int(0);
+    for j in 0..m {
+        b = b
+            .push_int((m - j) as i64)
+            .push_opcode(OP_PICK)
+            .push_int((2 * m - j + 1) as i64)
+            .push_opcode(OP_PICK)
+            .push_opcode(OP_SUB)
+            .push_opcode(OP_0NOTEQUAL)
+            .push_opcode(OP_ADD);
+    }
+    b = drop_n(b.push_opcode(OP_VERIFY), 2 * m);
+    Leaf::new(format!("equiv_d_{d}"), b.push_int(1).into_script(), Timelock::NONE)
+}
+
 /// The bond that covers the on-chain play a defeated claim can force
 /// (Phase 7): `posts` ladder posts of `post_vb` and the game's end of
 /// `end_vb`, at `feerate` sat/vB.
@@ -583,6 +631,11 @@ pub fn ladder_leaves(g: &dyn Dated, ctx: &CommitCtx, game_id: u16, j: u32, keys:
         leaves.push(post_leaf(g, ctx, &next, &keys[j as usize], Some(&keys[(j - 1) as usize]), "post"));
     }
     leaves.extend(g.mover_splits(ctx, &l, &keys[(j - 1) as usize], outcomes));
+    if g.lean() {
+        for (i, k) in keys.iter().take(j as usize).enumerate() {
+            leaves.push(equiv_move_leaf(ctx, i as u32 + 1, &k.rebut, k.mover.other()));
+        }
+    }
     leaves
 }
 

@@ -19,6 +19,7 @@ use lngap_channel::Role;
 use lngap_lamport::winternitz::{WotsExt, WotsPublic};
 use lngap_pos::ttt::{word0, Layout};
 
+use crate::OpensFile;
 use crate::{blake3_160, nibble_witness, FinalStep, Read, Step, HEAD_BYTES};
 
 /// Bytes in a block (the state, the claim block, the record).
@@ -328,14 +329,14 @@ fn exec_inputs(r: usize, witness: bool) -> Vec<usize> {
 /// state's lo and hi out; park the record; check the state; bring the
 /// record back, copy its fields out, check it; then restore lo and hi
 /// below the record's fields and run the proof.
-pub fn prove_script_d60(l: &Layout, key: &WotsPublic, class: &str, exec: &ScriptBuf, witness: bool) -> ScriptBuf {
+pub fn prove_script_d60(l: &Layout, key: &impl OpensFile, class: &str, exec: &ScriptBuf, witness: bool) -> ScriptBuf {
     let p = l.prior.expect("depth >= 2");
     let n = l.new;
     let (s, file) = (0usize, 4 * BLOCK);
     let len = 4 * BLOCK + l.file;
     let f = |i: usize| file + i;
     let g1: Vec<usize> = block_nibbles(s, S_LO, 40);
-    let mut t = Tracked::new(Builder::new().wots_verify(key), len);
+    let mut t = Tracked::new(key.open_file(Builder::new()), len);
     // lo and hi; the record's digest; the state's (the prior head's)
     t = t.pick_all_alt(&g1);
     t = t.pick_all_alt(&head_nibbles(n, H_SECOND, 20).into_iter().map(f).collect::<Vec<_>>());
@@ -577,10 +578,10 @@ pub enum Dig {
 /// altstack; then A is checked against `dig_a` and B against `dig_b`, each
 /// alone on the main stack (BitVMX's gadget), the other parked; then the
 /// verdict. Fires iff both blocks open and the verdict is true.
-pub fn two_block_leaf(l: &Layout, key: &WotsPublic, verdict: impl FnOnce(Tracked) -> Tracked, dig_a: Dig, dig_b: Dig) -> ScriptBuf {
+pub fn two_block_leaf(l: &Layout, key: &impl OpensFile, verdict: impl FnOnce(Tracked) -> Tracked, dig_a: Dig, dig_b: Dig) -> ScriptBuf {
     let file = l.file;
     let len = 4 * BLOCK + file;
-    let t = Tracked::new(Builder::new().wots_verify(key), len);
+    let t = Tracked::new(key.open_file(Builder::new()), len);
     let mut t = verdict(t);
     t.b = t.b.push_opcode(OP_TOALTSTACK);
     t.len -= 1;
@@ -631,7 +632,7 @@ impl Search {
     /// `zk_choice` at verifier depth `d = 2r`. Witness below the reveal: the
     /// prior state, then the new state. The midpoint is read from the prior
     /// head.
-    pub fn choice_leaf(&self, key: &WotsPublic, d: u32) -> ScriptBuf {
+    pub fn choice_leaf(&self, key: &impl OpensFile, d: u32) -> ScriptBuf {
         let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
         let p = l.prior.expect("a choice is at depth >= 2");
         let r = self.choice_round(d);
@@ -674,7 +675,7 @@ impl Search {
 
     /// `zk_claim` at depth 1. Witness below the reveal: the state, then the
     /// claim block (opened against the state's `claim`).
-    pub fn claim_leaf(&self, key: &WotsPublic) -> ScriptBuf {
+    pub fn claim_leaf(&self, key: &impl OpensFile) -> ScriptBuf {
         let l = Layout::at(1, self.game_id, lngap_pos::instance::mover_at(1));
         let (s, c) = (0usize, 2 * BLOCK);
         let h0 = nibbles_of(&initial_hash());
@@ -692,10 +693,10 @@ impl Search {
 
     /// `zk_copied` at prover depth `d >= 3`: the head's state digest isn't
     /// the prior head's. No witness below the reveal.
-    pub fn copied_leaf(&self, key: &WotsPublic, d: u32) -> ScriptBuf {
+    pub fn copied_leaf(&self, key: &impl OpensFile, d: u32) -> ScriptBuf {
         let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
         let p = l.prior.expect("depth >= 2");
-        let mut t = Tracked::new(Builder::new().wots_verify(key), l.file);
+        let mut t = Tracked::new(key.open_file(Builder::new()), l.file);
         t.b = t.b.push_opcode(OP_PUSHNUM_1);
         t.len += 1;
         t = and_eq_range(t, head_nibbles(l.new, H_STATE, 20)[0], head_nibbles(p, H_STATE, 20)[0], 40);
@@ -754,7 +755,7 @@ pub fn fin(f: fn(usize) -> FIn, off: usize, len: usize) -> Vec<FIn> {
 /// alone on the main stack (BitVMX's gadget), its inputs copied out just
 /// before; then the inputs are arranged in `inputs`' order (constants
 /// pushed) and `check` runs; then 1.
-pub fn final_leaf(l: &Layout, key: &WotsPublic, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> ScriptBuf {
+pub fn final_leaf(l: &Layout, key: &impl OpensFile, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> ScriptBuf {
     final_leaf_pre(l, key, None, blocks, wit, inputs, check)
 }
 
@@ -762,7 +763,7 @@ pub fn final_leaf(l: &Layout, key: &WotsPublic, blocks: &[Blk], wit: usize, inpu
 /// whose elements sit on top of the pair reveal (D61: the prover's
 /// signature on an input word); its message digits are the `FIn::Pre`
 /// inputs.
-pub fn final_leaf_pre(l: &Layout, key: &WotsPublic, pre: Option<&WotsPublic>, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> ScriptBuf {
+pub fn final_leaf_pre(l: &Layout, key: &impl OpensFile, pre: Option<&WotsPublic>, blocks: &[Blk], wit: usize, inputs: &[FIn], check: &ScriptBuf) -> ScriptBuf {
     assert!(matches!(blocks.len(), 1 | 2), "one or two blocks: three don't fit under the stack limit");
     let p = l.prior.expect("the final depth reads a prior head");
     let n = blocks.len();
@@ -808,7 +809,7 @@ pub fn final_leaf_pre(l: &Layout, key: &WotsPublic, pre: Option<&WotsPublic>, bl
         None => 0,
     };
     assert!(inputs.iter().all(|x| !matches!(x, FIn::Pre(i) if *i >= pre_n)), "a Pre input beyond the signed message");
-    let mut t = Tracked::new(b0.wots_verify(key), n * 2 * BLOCK + wit + file);
+    let mut t = Tracked::new(key.open_file(b0), n * 2 * BLOCK + wit + file);
     let early_idx: Vec<usize> = early
         .iter()
         .map(|&j| match inputs[j] {
@@ -939,7 +940,7 @@ impl Search {
 
     /// `zk_open` in Script: the new head's state (one block) against the
     /// file's link fields.
-    pub fn open_leaf(&self, key: &WotsPublic) -> ScriptBuf {
+    pub fn open_leaf(&self, key: &impl OpensFile) -> ScriptBuf {
         let d = self.open_depth();
         let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
         let p = l.prior.expect("depth >= 2");
@@ -962,7 +963,7 @@ impl Search {
     /// prior head), and the verifier's write W at the step after the
     /// state's base (26 nibbles: address, value, pc, micro byte). BitVMX's
     /// `read_value_challenge` unchanged.
-    pub fn read_value_leaf(&self, key: &WotsPublic, r: u8) -> ScriptBuf {
+    pub fn read_value_leaf(&self, key: &impl OpensFile, r: u8) -> ScriptBuf {
         let d = self.total();
         let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
         let inputs = [
@@ -990,7 +991,7 @@ impl Search {
     /// `zk_correct_hash` at the terminal depth: phase 2's final state, and
     /// the verifier's hash at the base and write W after it (66 nibbles).
     /// BitVMX's `correct_hash_challenge` unchanged.
-    pub fn correct_hash_leaf(&self, key: &WotsPublic) -> ScriptBuf {
+    pub fn correct_hash_leaf(&self, key: &impl OpensFile) -> ScriptBuf {
         let d = self.total();
         let l = Layout::at(d, self.game_id, lngap_pos::instance::mover_at(d));
         let inputs = [fin(FIn::St, S_LO, 20), (0..66).map(FIn::Wit).collect(), fin(FIn::St, S_HI, 20)].concat();

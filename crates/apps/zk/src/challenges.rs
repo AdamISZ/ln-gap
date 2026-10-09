@@ -37,9 +37,9 @@ use bitcoin_script_stack::stack::StackTracker;
 use bitvmx_cpu_definitions::constants::CHUNK_SIZE;
 use bitvmx_cpu_definitions::memory::{Chunk, SectionDefinition};
 use emulator::loader::program_definition::ProgramDefinition;
-use lngap_lamport::winternitz::WotsPublic;
 use lngap_pos::ttt::{Layout, PosLeaf};
 
+use crate::OpensFile;
 use crate::*;
 
 /// The program's constants the challenges bake in.
@@ -137,7 +137,7 @@ pub fn entry_point_fires(f: &FinalStep, entry: u32) -> bool {
     f.agreed_step == 0 && (f.read.pc != entry || f.read.micro != 0)
 }
 
-pub fn entry_point_leaf(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> PosLeaf {
+pub fn entry_point_leaf(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> PosLeaf {
     let (p, n) = offsets(l);
     let mut src: Vec<Src> = digs(word_digits(p, P_PC)).chain(digs(byte_digits(p, P_MICRO))).collect();
     // the agreed step as 16 nibbles: the head holds its low 32 bits
@@ -169,7 +169,7 @@ pub fn program_counter_fires(f: &FinalStep, prev_prev_hash: &[u8; 20], prev_writ
     step_hash(prev_prev_hash, prev_write) == f.prev_hash && (prev_write.pc, prev_write.micro) != (f.read.pc, f.read.micro)
 }
 
-pub fn program_counter_leaf(l: &Layout, key: &WotsPublic) -> PosLeaf {
+pub fn program_counter_leaf(l: &Layout, key: &impl OpensFile) -> PosLeaf {
     let (p, _) = offsets(l);
     let src: Vec<Src> = digs(word_digits(p, P_PC)).chain(digs(byte_digits(p, P_MICRO))).chain(digs(p + 8 + 2 * P_PREV..p + 8 + 2 * P_PREV + 40)).collect();
     PosLeaf {
@@ -189,7 +189,7 @@ pub fn opcode_fires(f: &FinalStep, c: &Chunk) -> bool {
     pc >= c.base_addr && ((pc - c.base_addr) / 4) < c.data.len() as u32 && pc % 4 == 0 && c.data[((pc - c.base_addr) / 4) as usize] != f.read.opcode
 }
 
-pub fn opcode_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+pub fn opcode_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<PosLeaf> {
     let (p, n) = offsets(l);
     let src: Vec<Src> = digs(word_digits(p, P_PC)).chain(opcode_digits(p, n)).collect();
     info.code_chunks
@@ -228,7 +228,7 @@ pub fn addresses_fire(f: &FinalStep, info: &ProgramInfo) -> bool {
     bad_read(r1, f.read.read_1_addr) || bad_read(r2, f.read.read_2_addr) || bad_write(wr, f.write.write_addr) || bad_pc(f.read.pc)
 }
 
-pub fn addresses_leaf(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> PosLeaf {
+pub fn addresses_leaf(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> PosLeaf {
     let (p, n) = offsets(l);
     let src: Vec<Src> = digs(word_digits(p, P_R1A))
         .chain(digs(word_digits(p, P_R2A)))
@@ -246,7 +246,7 @@ pub fn addresses_leaf(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> PosLe
 }
 
 /// All of S1's leaves for a program.
-pub fn s1_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+pub fn s1_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<PosLeaf> {
     let mut v = vec![entry_point_leaf(l, key, info), program_counter_leaf(l, key), addresses_leaf(l, key, info)];
     v.extend(opcode_leaves(l, key, info));
     v
@@ -294,7 +294,7 @@ pub fn future_read_fires(f: &FinalStep, r: u8) -> bool {
     ls != NEVER && u64::from(f.agreed_step) < ls
 }
 
-pub fn future_read_leaf(l: &Layout, key: &WotsPublic, r: u8) -> PosLeaf {
+pub fn future_read_leaf(l: &Layout, key: &impl OpensFile, r: u8) -> PosLeaf {
     let (_, n) = offsets(l);
     let mut src = agreed16(n);
     src.extend(x_word64(X_LS1));
@@ -310,7 +310,7 @@ pub fn initialized_fires(f: &FinalStep, r: u8, c: &Chunk) -> bool {
     ls == NEVER && a >= c.base_addr && a % 4 == 0 && ((a - c.base_addr) / 4) < c.data.len() as u32 && c.data[((a - c.base_addr) / 4) as usize] != v
 }
 
-pub fn initialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+pub fn initialized_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<PosLeaf> {
     let (p, _) = offsets(l);
     let mut v = vec![];
     for (k, c) in info.data_chunks.iter().enumerate() {
@@ -331,7 +331,7 @@ pub fn uninitialized_fires(f: &FinalStep, r: u8, info: &ProgramInfo) -> bool {
     ls == NEVER && in_sections(a, &info.uninitialized) && v != 0
 }
 
-pub fn uninitialized_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+pub fn uninitialized_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<PosLeaf> {
     let (p, _) = offsets(l);
     [1u8, 2]
         .into_iter()
@@ -351,7 +351,7 @@ pub fn halt_fires(f: &FinalStep) -> bool {
     u64::from(f.agreed_step) + 1 == f.claim_last_step && (f.read.read_1_value != 93 || f.read.read_2_value != 0 || f.read.opcode != 0x73 || f.hash != f.claim_last_hash)
 }
 
-pub fn halt_leaf(l: &Layout, key: &WotsPublic) -> PosLeaf {
+pub fn halt_leaf(l: &Layout, key: &impl OpensFile) -> PosLeaf {
     let (p, n) = offsets(l);
     let mut src = x_word64(X_CLS);
     src.extend(agreed16(n));
@@ -364,7 +364,7 @@ pub fn halt_leaf(l: &Layout, key: &WotsPublic) -> PosLeaf {
 }
 
 /// All of S2's leaves for a program.
-pub fn s2_leaves(l: &Layout, key: &WotsPublic, info: &ProgramInfo) -> Vec<PosLeaf> {
+pub fn s2_leaves(l: &Layout, key: &impl OpensFile, info: &ProgramInfo) -> Vec<PosLeaf> {
     let mut v = vec![future_read_leaf(l, key, 1), future_read_leaf(l, key, 2), halt_leaf(l, key)];
     v.extend(uninitialized_leaves(l, key, info));
     v.extend(initialized_leaves(l, key, info));
