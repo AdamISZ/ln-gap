@@ -69,6 +69,27 @@ fn prove(b: u32, c: u32) -> Result<Receipt> {
     Ok(info.receipt)
 }
 
+/// Prove the guest on a given withdrawal input (JSON, as a wallet prints
+/// it: `lichen withdraw-input <memo>`), checked natively first.
+fn prove_input(path: &str) -> Result<Receipt> {
+    let input: lngap_r0_core::WithdrawInput = serde_json::from_slice(&std::fs::read(path)?).with_context(|| format!("{path}: a withdrawal input"))?;
+    let journal = lngap_r0_core::check(&input, &lngap_r0_core::SEQUENCER_KEY, &lngap_r0_core::HUB_KEY).map_err(|e| anyhow::anyhow!("the statement fails natively: {e:?}"))?;
+    eprintln!("{path}: the return of {} with memo {} at index {}, root signed at height {}; journal {}", input.note.value, input.note.memo, input.index, input.height, hex::encode(journal));
+    let env = ExecutorEnv::builder().write(&input)?.build()?;
+    let t = Instant::now();
+    let info = default_prover().prove_with_opts(env, WITHDRAW_ELF, &ProverOpts::succinct())?;
+    eprintln!("proved in {:.1?} ({} user cycles, {} segments)", t.elapsed(), info.stats.user_cycles, info.stats.segments);
+    info.receipt.verify(image_id())?;
+    Ok(info.receipt)
+}
+
+/// The BitVMX verifier's input for a Groth16 receipt.
+fn bitvmx_input(r: &Receipt) -> Result<Vec<u8>> {
+    let InnerReceipt::Groth16(g) = &r.inner else { bail!("a {} receipt, not a Groth16 one", kind(r)) };
+    let id: [u8; 32] = image_id().as_bytes().try_into()?;
+    bitvmx::input(&id, &g.seal, &r.journal.bytes)
+}
+
 fn wrap(r: &Receipt) -> Result<Receipt> {
     let t = Instant::now();
     let g = default_prover().compress(&ProverOpts::groth16(), r)?;
@@ -134,17 +155,28 @@ fn main() -> Result<()> {
             write(out, &info.receipt)?;
             show(&info.receipt)?;
         }
+        ["prove-input", json, out] => {
+            let r = prove_input(json)?;
+            write(out, &r)?;
+            show(&r)?;
+        }
+        ["claim", json, out] => {
+            // a wallet's claim, whole: prove, wrap (x86 Linux), encode
+            let g = wrap(&prove_input(json)?)?;
+            g.verify(image_id())?;
+            let bytes = bitvmx_input(&g)?;
+            std::fs::write(out, hex::encode(&bytes))?;
+            println!("{out}: the claim's input for the BitVMX verifier, {} bytes", bytes.len());
+        }
         ["bitvmx-input", input, out] => {
             let r = read(input)?;
             r.verify(image_id())?;
-            let InnerReceipt::Groth16(g) = &r.inner else { bail!("{input} is a {} receipt, not a Groth16 one", kind(&r)) };
-            let id: [u8; 32] = image_id().as_bytes().try_into()?;
-            let bytes = bitvmx::input(&id, &g.seal, &r.journal.bytes)?;
+            let bytes = bitvmx_input(&r)?;
             std::fs::write(out, hex::encode(&bytes))?;
             println!("{out}: {} bytes for the BitVMX verifier", bytes.len());
             println!("{}", hex::encode(&bytes));
         }
-        _ => bail!("usage: lngap-r0 prove <b> <c> <out> | wrap <in> <out> | verify <in> | show <in> | selftest | withdraw-demo <b> <c> <out> | bitvmx-input <in> <out.hex>"),
+        _ => bail!("usage: lngap-r0 prove <b> <c> <out> | wrap <in> <out> | verify <in> | show <in> | selftest | withdraw-demo <b> <c> <out> | bitvmx-input <in> <out.hex> | prove-input <withdraw-input.json> <out> | claim <withdraw-input.json> <out.hex>"),
     }
     Ok(())
 }
