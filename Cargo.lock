@@ -1098,6 +1098,7 @@ dependencies = [
  "lngap-zk",
  "rand 0.8.8",
  "riscv-decode",
+ "serde",
 ]
 
 [[package]]

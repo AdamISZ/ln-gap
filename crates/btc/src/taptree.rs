@@ -80,6 +80,19 @@ impl TapTree {
             .control_block(&(leaf.script.clone(), LeafVersion::TapScript))
             .ok_or_else(|| anyhow!("no control block for leaf {name}"))
     }
+    /// The bytes a spend of leaf `name` saves against one of the deepest
+    /// leaf (its control block's shorter path). The deepest a leaf can be
+    /// depends only on how many leaves there are, but which ones are that
+    /// deep depends on their hashes: a pre-signed fee sized with this
+    /// added doesn't depend on the keys in the scripts.
+    pub fn depth_slack(&self, name: &str) -> Result<usize> {
+        let len = |n: &str| self.control_block(n).map(|c| c.serialize().len());
+        let mut deepest = 0;
+        for l in &self.leaves {
+            deepest = deepest.max(len(&l.name)?);
+        }
+        Ok(deepest - len(name)?)
+    }
     /// Sizes for SCRIPTS.md: (script bytes, control block bytes) per leaf.
     pub fn sizes(&self) -> Vec<(String, usize, usize)> {
         self.leaves

@@ -61,7 +61,14 @@ pub const ANCHOR: Amount = Amount::from_sat(330);
 /// The output only `role`'s payment key can spend: a link's anchor, the
 /// same script as that party's fee coins.
 pub fn anchor_tree(ctx: &CommitCtx, role: Role) -> Result<TapTree> {
-    let script = Builder::new().push_x_only_key(&ctx.key(role).payment).push_opcode(bitcoin::opcodes::all::OP_CHECKSIG).into_script();
+    anchor_tree_for(&ctx.key(role).payment)
+}
+
+/// The anchor's tree for a payment key: one leaf, `fee`, the key's
+/// signature (its poster signs it when it spends the anchor in its fee
+/// child).
+pub fn anchor_tree_for(key: &XOnlyPublicKey) -> Result<TapTree> {
+    let script = Builder::new().push_x_only_key(key).push_opcode(bitcoin::opcodes::all::OP_CHECKSIG).into_script();
     TapTree::new(vec![Leaf::new("fee".to_string(), script, Timelock::NONE)])
 }
 
@@ -284,7 +291,7 @@ impl Contract {
     fn link(&self, name: &str, prev_tree: &TapTree, prev_leaf: &str, op: OutPoint, prev_out: &TxOut, next: ScriptBuf) -> Result<Presign> {
         let anchor = TxOut { value: ANCHOR, script_pubkey: anchor_tree(&self.ctx(), self.poster(name))?.script_pubkey() };
         let mut p = Presign::new(name, prev_tree, prev_leaf, op, prev_out, vec![TxOut { value: prev_out.value, script_pubkey: next.clone() }, anchor.clone()], true)?;
-        let vsize = p.finish(self.link_wire_shape(name), &[0u8; 64], &[0u8; 64]).vsize() as u64;
+        let vsize = p.finish(self.link_wire_shape(name), &[0u8; 64], &[0u8; 64]).vsize() as u64 + slack_vbytes(prev_tree, prev_leaf)?;
         let floor = Amount::from_sat(vsize * FLOOR_RATE);
         let carried = prev_out.value.checked_sub(floor + ANCHOR).context("the contract can't carry the floors")?;
         p.tx.output[0].value = carried;
@@ -357,7 +364,7 @@ impl Contract {
         let mut outs: Vec<TxOut> = trees.iter().map(|t| TxOut { value: dust, script_pubkey: t.script_pubkey() }).collect();
         outs.push(hub_anchor.clone());
         let mut split = Presign::new("path_split", last, "path", op, out, outs, true)?;
-        let vsize = split.finish(vec![], &[0u8; 64], &[0u8; 64]).vsize() as u64;
+        let vsize = split.finish(vec![], &[0u8; 64], &[0u8; 64]).vsize() as u64 + slack_vbytes(last, "path")?;
         split.tx.output[0].value = out.value.checked_sub(Amount::from_sat(vsize * FLOOR_RATE) + dust * (CHUNKS as u64 - 1) + ANCHOR).context("the split's floor")?;
         let split_txid = split.tx.compute_txid();
         let carriers: Vec<(OutPoint, TxOut)> = (0..CHUNKS).map(|c| (OutPoint { txid: split_txid, vout: c as u32 }, split.tx.output[c].clone())).collect();
@@ -371,7 +378,7 @@ impl Contract {
             let mut comb = Presign::new_multi(&format!("combine_{k}"), &ins, vec![TxOut { value: total, script_pubkey: p_tree.script_pubkey() }, hub_anchor.clone()])?;
             let shape: Vec<Vec<Vec<u8>>> = (0..k).map(|c| chunk_fields(c).iter().flat_map(|n| (0..lngap_lamport::winternitz::WotsParams::for_bytes(*n as u32).total_digits()).flat_map(|_| [vec![0u8; 20], vec![15u8]])).collect()).collect();
             let sigs = vec![vec![0u8; 64]; k];
-            let vsize = comb.finish_multi(shape, &sigs, &sigs).vsize() as u64;
+            let vsize = comb.finish_multi(shape, &sigs, &sigs).vsize() as u64 + trees[..k].iter().map(|t| slack_vbytes(t, "chunk")).sum::<Result<u64>>()?;
             comb.tx.output[0].value = total.checked_sub(Amount::from_sat(vsize * FLOOR_RATE) + ANCHOR).context("the combine's floor")?;
             let p_op = OutPoint { txid: comb.tx.compute_txid(), vout: 0 };
             let p_out = comb.tx.output[0].clone();
@@ -404,6 +411,14 @@ impl Contract {
         let ctx = self.ctx();
         self.ladder_spec(&ctx).tail_rule(at, name).with_context(|| format!("no tail rule {name} at {at:?}"))
     }
+}
+
+/// The vbytes to add to a link's size for its floor, spending `tree`'s
+/// leaf `leaf`: what a leaf at the tree's greatest depth would add, so the
+/// floors (and the hub's reserve that covers them) are the statement's,
+/// not the keys'.
+fn slack_vbytes(tree: &TapTree, leaf: &str) -> Result<u64> {
+    Ok((tree.depth_slack(leaf)? as u64).div_ceil(4))
 }
 
 /// One pre-signed transaction: unsigned, with what its signatures cover.

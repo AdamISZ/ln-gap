@@ -17,6 +17,7 @@ lngap-zk = { path = "../zk" }
 lngap-script32 = { path = "../../script32" }
 bitcoin.workspace = true
 anyhow.workspace = true
+serde.workspace = true
 hex.workspace = true
 blake3 = "1"
 riscv-decode = "0.2.3"

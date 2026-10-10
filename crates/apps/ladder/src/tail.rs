@@ -354,7 +354,7 @@ pub fn hop_range_script() -> ScriptBuf {
 
 /// The tail's keys: the hub's, one per field of each chunk; Alice's, one
 /// per choice (after each `combine_<K>`, `hop[K - 1]`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TailKeys {
     pub path: Vec<Vec<lngap_lamport::winternitz::WotsPublic>>,
     pub hop: Vec<lngap_lamport::winternitz::WotsPublic>,

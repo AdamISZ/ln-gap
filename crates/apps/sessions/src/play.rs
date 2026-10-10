@@ -38,7 +38,6 @@ use lngap_zk::dispute::final_step;
 use lngap_zk::game::Record;
 
 use crate::contract::Program;
-use anyhow::Context as _;
 
 fn h20(s: &str) -> Result<[u8; 20]> {
     hex::decode(s)?.try_into().map_err(|_| anyhow!("a step hash is 20 bytes: {s}"))
