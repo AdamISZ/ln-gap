@@ -356,10 +356,12 @@ fn s2_disproves() {
     assert!(peak <= 1000);
 }
 
-/// BitVMX's get_uninitialized_ranges (rev 299009c6) lists the register
-/// section as uninitialised, but the loader sets the stack pointer: with
-/// BitVMX's ranges, its UninitializedData challenge fires on hello-world's
-/// honest step 3 (a first read of sp). With ours it does not.
+/// BitVMX's get_uninitialized_ranges (upstream rev 299009c6) listed the
+/// register section as uninitialised, but the loader sets the stack
+/// pointer: with those ranges, its UninitializedData challenge fired on
+/// hello-world's honest step 3 (a first read of sp). Ours never did; the
+/// fork LN-GAP builds (AdamISZ/BitVMX-CPU, branch lngap, commit 99a867b)
+/// fixes BitVMX's, and now neither fires.
 #[test]
 fn bitvmx_uninitialized_register_bug() {
     let sk = pair_key([6; 32]);
@@ -372,7 +374,7 @@ fn bitvmx_uninitialized_register_bug() {
     assert_eq!((f.read.read_1_addr, f.last_step_1), (0xf000_0008, NEVER), "step 3 reads sp, never written");
     let fired = |info: &ProgramInfo| run(&uninitialized_leaves(&l, &sk.public(), info)[0], &sk, &f, f.extra_witness()).0;
     println!("sp = {:#x}: BitVMX's ranges fire {}, ours {}", f.read.read_1_value, fired(&theirs), fired(&ours));
-    assert!(fired(&theirs) && uninitialized_fires(&f, 1, &theirs));
+    assert!(!fired(&theirs) && !uninitialized_fires(&f, 1, &theirs), "the fork's fix: BitVMX's ranges no longer fire on the honest step");
     assert!(!fired(&ours) && !uninitialized_fires(&f, 1, &ours));
 }
 

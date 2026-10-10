@@ -648,12 +648,12 @@ fn groth16_verifier_elf() -> std::path::PathBuf {
         }
         for rev in std::fs::read_dir(d.path()).unwrap().flatten() {
             let elf = rev.path().join("docker-riscv32/verifier/build/zkverifier-new-mul.elf");
-            if rev.file_name().to_string_lossy().starts_with("299009c") && elf.exists() {
+            if elf.exists() {
                 return elf;
             }
         }
     }
-    panic!("BitVMX-CPU 299009c not found under {}", checkouts.display());
+    panic!("no BitVMX-CPU checkout with the verifier ELF under {}", checkouts.display());
 }
 
 /// The pinned guest's image id (r0/guests/README.md), as the input's

@@ -203,6 +203,7 @@ dependencies = [
 [[package]]
 name = "bitcoin-script-riscv"
 version = "0.8.6"
+source = "git+https://github.com/AdamISZ/BitVMX-CPU?rev=0b7d285fc5c7795d16fd58d380ff6ef25f2f0423#0b7d285fc5c7795d16fd58d380ff6ef25f2f0423"
 dependencies = [
  "bitcoin",
  "bitcoin-script",
@@ -307,6 +308,7 @@ dependencies = [
 [[package]]
 name = "bitvmx-cpu-definitions"
 version = "0.8.6"
+source = "git+https://github.com/AdamISZ/BitVMX-CPU?rev=0b7d285fc5c7795d16fd58d380ff6ef25f2f0423#0b7d285fc5c7795d16fd58d380ff6ef25f2f0423"
 dependencies = [
  "blake3",
  "config",
@@ -583,6 +585,7 @@ checksum = "55dd888a213fc57e957abf2aa305ee3e8a28dbe05687a251f33b637cd46b0070"
 [[package]]
 name = "emulator"
 version = "0.8.6"
+source = "git+https://github.com/AdamISZ/BitVMX-CPU?rev=0b7d285fc5c7795d16fd58d380ff6ef25f2f0423#0b7d285fc5c7795d16fd58d380ff6ef25f2f0423"
 dependencies = [
  "bitcoin-script-riscv",
  "bitvmx-cpu-definitions",

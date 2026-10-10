@@ -30,9 +30,10 @@ tiny_http = "0.12"
 [profile.dev.package."*"]
 opt-level = 2
 
-# BitVMX-CPU with LN-GAP's patches (third_party/bitvmx-cpu; create the tree
-# with tools/setup-bitvmx-cpu.sh): bug fixes, and the opt-in jump list.
+# BitVMX-CPU with LN-GAP's patches: the `lngap` branch of a public fork,
+# upstream 299009c plus bug fixes, the opt-in authenticated jump list and
+# its fault injection.
 [patch."https://github.com/FairgateLabs/BitVMX-CPU"]
-emulator = { path = "upstream/bitvmx-cpu/BitVMX-CPU/emulator" }
-bitvmx-cpu-definitions = { path = "upstream/bitvmx-cpu/BitVMX-CPU/definitions" }
-bitcoin-script-riscv = { path = "upstream/bitvmx-cpu/BitVMX-CPU/bitcoin-script-riscv" }
+emulator = { git = "https://github.com/AdamISZ/BitVMX-CPU", rev = "0b7d285fc5c7795d16fd58d380ff6ef25f2f0423" }
+bitvmx-cpu-definitions = { git = "https://github.com/AdamISZ/BitVMX-CPU", rev = "0b7d285fc5c7795d16fd58d380ff6ef25f2f0423" }
+bitcoin-script-riscv = { git = "https://github.com/AdamISZ/BitVMX-CPU", rev = "0b7d285fc5c7795d16fd58d380ff6ef25f2f0423" }

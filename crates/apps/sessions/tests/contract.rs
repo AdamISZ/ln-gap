@@ -82,7 +82,7 @@ fn link_sizes_on_the_groth16_verifier() {
         .filter(|d| d.file_name().to_string_lossy().starts_with("bitvmx-cpu-"))
         .flat_map(|d| std::fs::read_dir(d.path()).unwrap().flatten())
         .map(|r| r.path().join("docker-riscv32/verifier/build/zkverifier-new-mul.elf"))
-        .find(|p| p.exists() && p.to_string_lossy().contains("299009c"))
+        .find(|p| p.exists())
         .expect("the verifier ELF");
     let dir = std::env::temp_dir().join(format!("lngap-sizes-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
