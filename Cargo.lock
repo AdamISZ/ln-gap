@@ -203,7 +203,6 @@ dependencies = [
 [[package]]
 name = "bitcoin-script-riscv"
 version = "0.8.6"
-source = "git+https://github.com/FairgateLabs/BitVMX-CPU?rev=299009c65e635327025ee13ffe1e1f1671bd0615#299009c65e635327025ee13ffe1e1f1671bd0615"
 dependencies = [
  "bitcoin",
  "bitcoin-script",
@@ -308,7 +307,6 @@ dependencies = [
 [[package]]
 name = "bitvmx-cpu-definitions"
 version = "0.8.6"
-source = "git+https://github.com/FairgateLabs/BitVMX-CPU?rev=299009c65e635327025ee13ffe1e1f1671bd0615#299009c65e635327025ee13ffe1e1f1671bd0615"
 dependencies = [
  "blake3",
  "config",
@@ -585,7 +583,6 @@ checksum = "55dd888a213fc57e957abf2aa305ee3e8a28dbe05687a251f33b637cd46b0070"
 [[package]]
 name = "emulator"
 version = "0.8.6"
-source = "git+https://github.com/FairgateLabs/BitVMX-CPU?rev=299009c65e635327025ee13ffe1e1f1671bd0615#299009c65e635327025ee13ffe1e1f1671bd0615"
 dependencies = [
  "bitcoin-script-riscv",
  "bitvmx-cpu-definitions",
@@ -1079,6 +1076,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "lngap-ladder"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "bitcoin-script-functions",
+ "bitcoin-script-riscv",
+ "bitcoin-script-stack",
+ "bitvmx-cpu-definitions",
+ "blake3",
+ "emulator",
+ "hex",
+ "lngap-btc",
+ "lngap-channel",
+ "lngap-lamport",
+ "lngap-script32",
+ "lngap-zk",
+ "rand 0.8.8",
+ "riscv-decode",
+]
+
+[[package]]
 name = "lngap-lamport"
 version = "0.1.0"
 dependencies = [
@@ -1209,12 +1228,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "bitvmx-cpu-definitions",
  "blake3",
  "emulator",
  "hex",
  "lngap-btc",
  "lngap-channel",
  "lngap-contract",
+ "lngap-ladder",
  "lngap-lamport",
  "lngap-pos",
  "lngap-seal",

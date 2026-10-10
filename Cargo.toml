@@ -29,3 +29,10 @@ tiny_http = "0.12"
 # the profile's opt level. Our own crates stay at debug for fast rebuilds.
 [profile.dev.package."*"]
 opt-level = 2
+
+# BitVMX-CPU with LN-GAP's patches (third_party/bitvmx-cpu; create the tree
+# with tools/setup-bitvmx-cpu.sh): bug fixes, and the opt-in jump list.
+[patch."https://github.com/FairgateLabs/BitVMX-CPU"]
+emulator = { path = "upstream/bitvmx-cpu/BitVMX-CPU/emulator" }
+bitvmx-cpu-definitions = { path = "upstream/bitvmx-cpu/BitVMX-CPU/definitions" }
+bitcoin-script-riscv = { path = "upstream/bitvmx-cpu/BitVMX-CPU/bitcoin-script-riscv" }

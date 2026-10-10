@@ -49,12 +49,18 @@ pub fn input(b: u32, c: u32) -> Vec<u8> {
 /// Write the patched ELF and its BitVMX definition (binary search) under
 /// `dir`; returns the definition's path.
 pub fn write_program(dir: &Path, session: u32, returns: &[(u32, u32)]) -> Result<String> {
+    write_program_with(dir, session, returns, 2, false)
+}
+
+/// [`write_program`] with an `nary`-ary search, its trace hashed as a jump
+/// list if `jump`.
+pub fn write_program_with(dir: &Path, session: u32, returns: &[(u32, u32)], nary: u8, jump: bool) -> Result<String> {
     std::fs::create_dir_all(dir)?;
     std::fs::write(dir.join("withdraw.elf"), patched(session, returns)?)?;
     let yaml = dir.join("withdraw.yaml");
     std::fs::write(
         &yaml,
-        format!("elf: withdraw.elf\nnary_search: 2\nmax_steps: {MAX_STEPS}\ninput_section_name: .input\ninputs:\n  - size: 8\n    owner: prover\n"),
+        format!("elf: withdraw.elf\nnary_search: {nary}\nmax_steps: {MAX_STEPS}\ninput_section_name: .input\njump_list: {jump}\ninputs:\n  - size: 8\n    owner: prover\n"),
     )?;
     Ok(yaml.display().to_string())
 }

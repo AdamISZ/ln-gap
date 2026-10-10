@@ -24,10 +24,9 @@
 //!   replays the moves made from the signatures it holds, and wins by
 //!   timeout (an honest absentee loses her reserve);
 //! - Q, a cheating replay: the hub escalates after off-chain play and
-//!   posts its own move 2 altered, then Alice's move 3 (which no longer
-//!   follows from it, so the hub could disprove it after delta); Alice
-//!   shows the hub's two signatures at depth 2 with `equiv_d_2` at once
-//!   and takes everything;
+//!   posts its own move 2 altered (another choice than the one Alice
+//!   answered), then Alice's move 3; Alice shows the hub's two signatures
+//!   at depth 2 with `equiv_d_2_0` and takes everything;
 //! - D, the default: no withdrawal by T_close; the pre-signed default
 //!   returns Alice's reserve and pays the hub.
 //!
@@ -51,17 +50,16 @@ use lngap_btc::taptree::TapTree;
 use lngap_btc::tx::build_spend;
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyKeys, PartyPubKeys, Role};
+use lngap_ladder::moves::{from_search, View};
+use lngap_ladder::mover_at;
+use lngap_ladder::script::{rule_wire, wots_wire, Msg};
 use lngap_lamport::winternitz::{WotsParams, WotsPublic, WotsSecret, WotsSig};
-use lngap_pos::instance::mover_at;
-use lngap_pos::rebut::wots_wire;
-use lngap_sessions::contract::{move_bytes, move_message, Check, Contract, Presign, Program, Spec, GAME_ID};
+use lngap_sessions::contract::{Check, Contract, Presign, Program, Spec};
 use lngap_sessions::l2::{Op, HUB, L2};
 use lngap_sessions::session::{bit_tree, reserve_tree, Terms};
 use lngap_sessions::statement::{input, write_program};
 use lngap_zk::dispute::{search, Behaviour};
 use lngap_zk::final_d60::{input_key_params, input_message, input_words};
-use lngap_zk::game::{final_witness, play, Entry, Search};
-use lngap_zk::nibble_witness;
 
 
 mod common;
@@ -81,16 +79,15 @@ struct Session {
     contract: Contract,
     /// Alice's input-word keys, one per word of the statement's input.
     input_secrets: Vec<WotsSecret>,
-    /// The move keys (lean moves), by depth: depth `d`'s mover signs its
-    /// head with `moves[d - 1]`. Held as secrets so that a test can make a
-    /// party equivocate.
-    moves: Vec<WotsSecret>,
+    /// The move keys, by depth and field: depth `d`'s mover signs field `f`
+    /// of its move with `moves[d - 1][f]`. Held as secrets so that a test
+    /// can make a party equivocate.
+    moves: Vec<Vec<WotsSecret>>,
     pdf: String,
-    /// The claim: the input's words (what Alice signs), the search's heads
-    /// and entries.
+    /// The claim: the input's words (what Alice signs), and the search's
+    /// moves, depth 1 first.
     words: Vec<u32>,
-    heads: Vec<[u8; 48]>,
-    entries: Vec<Entry>,
+    msgs: Vec<Vec<u8>>,
     /// The pre-signed set (once funded), by name.
     set: HashMap<String, Presign>,
     /// Alice's fee coins and the hub's (set when the contract is funded).
@@ -110,7 +107,9 @@ impl Session {
         let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label(&format!("sess/{id}/hub")));
         let program = Program::load(pdf).unwrap();
         let m = program.depths();
-        let moves: Vec<WotsSecret> = (1..=m).map(|d| WotsSecret::from_entropy(WotsParams::for_bytes(move_bytes(d, m)), Seed::from_label(&format!("sess/{id}/move/{d}")).derive_bytes("wots"))).collect();
+        let moves: Vec<Vec<WotsSecret>> = (1..=m)
+            .map(|d| program.field_bytes(d).into_iter().enumerate().map(|(f, n)| WotsSecret::from_entropy(WotsParams::for_bytes(n), Seed::from_label(&format!("sess/{id}/move/{d}/{f}")).derive_bytes("wots"))).collect())
+            .collect();
         let input_secrets: Vec<WotsSecret> = (0..program.info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x60u8.wrapping_add(j as u8).wrapping_add(id as u8); 32])).collect();
         // the runtime spends' fee comes from the output they take
         let params = ChannelParams { presign_fee: Amount::from_sat(80_000), ..ChannelParams::regtest(Amount::from_sat(20_000_000)) };
@@ -121,11 +120,12 @@ impl Session {
             pubs: [user.public(), hub.public()],
             b_word,
             checks,
-            moves: moves.iter().map(|k| k.public()).collect(),
+            moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
             inputs: input_secrets.iter().map(|k| k.public()).collect(),
+            tail: None,
         };
         let contract = Contract::new(spec, &program).unwrap();
-        Session { terms, cid, user, hub, contract, input_secrets, moves, pdf: pdf.to_string(), words: vec![], heads: vec![], entries: vec![], set: HashMap::new(), wallets: vec![] }
+        Session { terms, cid, user, hub, contract, input_secrets, moves, pdf: pdf.to_string(), words: vec![], msgs: vec![], set: HashMap::new(), wallets: vec![] }
     }
     fn m(&self) -> u32 {
         self.contract.m()
@@ -151,15 +151,13 @@ impl Session {
         self.play_input(&input(b, self.terms.id), &format!("b = {b}"));
     }
     /// Play the search on the statement program run on `inp`: BitVMX's
-    /// parties, the hub challenging; the game's entries.
+    /// parties, the hub challenging; the moves.
     fn play_input(&mut self, inp: &[u8], what: &str) {
         let dir = std::env::temp_dir().join(format!("lngap-sess-{}-{}", std::process::id(), self.cid));
         let _ = std::fs::remove_dir_all(&dir);
         let s = search(&self.pdf, inp, &dir, &Behaviour::default(), &Behaviour::default(), ForceCondition::ValidInputStepAndHash).unwrap().expect("the hub challenges");
         let _ = std::fs::remove_dir_all(&dir);
-        let rounds = self.m().div_ceil(2) - 1;
-        self.entries = play(&s, &Search { game_id: GAME_ID, rounds }).unwrap();
-        self.heads = self.entries.iter().map(|e| e.head).collect();
+        self.msgs = from_search(&self.contract.program.schedule, &s, None).unwrap();
         self.words = input_words(inp);
         println!("SESS {}: Alice claims {what}: the program {:?} at step {}", self.cid, s.claim.0, s.claim.1);
     }
@@ -177,19 +175,29 @@ impl Session {
     fn ladder(&self, j: u32) -> TapTree {
         self.contract.ladder(j).unwrap()
     }
-    /// Move `d`: its head (and at depth 1 the claim block, at the last the
-    /// record) signed with depth `d`'s key (lean moves).
-    fn move_sig(&self, d: u32) -> WotsSig {
-        let mut e = self.entries[(d - 1) as usize].clone();
-        e.head = self.heads[(d - 1) as usize];
-        self.moves[(d - 1) as usize].sign(&move_message(&e)).unwrap()
+    /// Field `f` of move `d`, signed with its key.
+    fn field_sig(&self, d: u32, f: usize) -> WotsSig {
+        let (o, l) = self.contract.program.schedule.fields(d)[f];
+        self.moves[(d - 1) as usize][f].sign(&self.msgs[(d - 1) as usize][o..o + l]).unwrap()
     }
-    /// What the rules at the ladder output after move `d` read: moves
-    /// `d - 1` and `d` re-revealed, wire order.
-    fn file_wire(&self, d: u32) -> Vec<Vec<u8>> {
-        let mut w = if d >= 2 { wots_wire(&self.move_sig(d - 1)) } else { vec![] };
-        w.extend(wots_wire(&self.move_sig(d)));
-        w
+    /// Move `d`'s signatures as a link carries them: its last field first.
+    fn move_wire(&self, d: u32) -> Vec<Vec<u8>> {
+        (0..self.moves[(d - 1) as usize].len()).rev().flat_map(|f| wots_wire(&self.field_sig(d, f))).collect()
+    }
+    /// The witness of rule `name` on the output after move `j` (or Alice's
+    /// proof): `wit`, then the signatures it re-reveals.
+    fn rule_wire(&self, j: u32, name: &str, wit: &[u8]) -> Vec<Vec<u8>> {
+        let rule = self.contract.rule(j, name).unwrap();
+        let reveals: Vec<Vec<Vec<u8>>> = rule
+            .msgs
+            .iter()
+            .map(|m| match m {
+                Msg::Field(d, f) => wots_wire(&self.field_sig(*d, *f)),
+                Msg::Word(k) => wots_wire(&self.word_sig(*k)),
+                Msg::Path(..) | Msg::Hop(_) => unreachable!("no jump list here"),
+            })
+            .collect();
+        rule_wire(wit, &reveals)
     }
     /// Alice's signature on input word `j` (her claim's value).
     fn word_sig(&self, j: usize) -> WotsSig {
@@ -204,9 +212,9 @@ impl Session {
     /// `move_<j>`, move `j`.
     fn link_wire(&self, name: &str) -> Vec<Vec<u8>> {
         match name {
-            "escalate" => [self.words_wire(&self.contract.claim_words()), wots_wire(&self.move_sig(1))].concat(),
+            "escalate" => [self.words_wire(&self.contract.claim_words()), self.move_wire(1)].concat(),
             "inputs" => self.words_wire(&self.contract.rest_words()),
-            _ => wots_wire(&self.move_sig(name.trim_start_matches("move_").parse().unwrap())),
+            _ => self.move_wire(name.trim_start_matches("move_").parse().unwrap()),
         }
     }
     /// A pre-signed transaction of the set, both signatures made now, `wire`
@@ -256,7 +264,7 @@ impl Session {
             "escalate" | "inputs" => 1,
             _ => name.trim_start_matches("move_").parse().unwrap(),
         };
-        (j < self.m() && (j as usize) < self.entries.len()).then(|| format!("move_{}", j + 1))
+        (j < self.m() && (j as usize) < self.msgs.len()).then(|| format!("move_{}", j + 1))
     }
     /// Post the link `name`, by `by`: its output, and the link with its
     /// child's size.
@@ -406,18 +414,15 @@ impl Session {
     }
     /// The final step at the last ladder output: Alice's pre-signed proof.
     fn prove_last(&mut self) -> (Transaction, String) {
-        let last = self.entries.last().unwrap().clone();
-        let rec = last.record.unwrap();
-        let class = lngap_zk::guard::key_of(rec.read.opcode, rec.read.micro).unwrap();
-        let wire = [final_witness(&last.state, &rec), self.file_wire(self.m())].concat();
-        (self.terminal(&format!("prove_{class}"), wire, Role::User), format!("zk_prove_{class}"))
+        let rec = View { s: &self.contract.program.schedule, msgs: &self.msgs }.record();
+        let name = format!("prove_{}", lngap_zk::guard::key_of(rec.read.opcode, rec.read.micro).unwrap());
+        let wire = self.rule_wire(self.m(), &name, &[]);
+        (self.terminal(&name, wire, Role::User), name)
     }
     /// The hub's `halt_exit` disprove at the last ladder output.
     fn halt_exit(&self, op: OutPoint, out: &TxOut) -> Transaction {
         let m = self.m();
-        let last = self.entries.last().unwrap().clone();
-        let (rec, cl) = (last.record.unwrap(), self.entries[0].claim.unwrap());
-        self.hub_takes(&self.ladder(m), op, out, "disprove_zk_halt_exit", [nibble_witness(&rec.to_bytes()), nibble_witness(&cl.to_bytes()), self.file_wire(m)].concat())
+        self.hub_takes(&self.ladder(m), op, out, "disprove_halt_exit", self.rule_wire(m, "halt_exit", &[]))
     }
     /// The hub's input-word check `name` on the first ladder output: with
     /// Alice's signature on word `j` as posted.
@@ -464,7 +469,7 @@ fn sessions_on_regtest() {
     l2.seal();
     let returns = l2.final_returns();
     let pdf = |id: u32| write_program(&dir.join(id.to_string()), id, &returns).unwrap();
-    let rounds = Program::load(&pdf(42)).unwrap().rounds;
+    let rounds = Program::load(&pdf(42)).unwrap().schedule.rounds();
     let mk = |id: u32| Session::new(terms(id, t_close), &pdf(id));
     let (mut r, mut x, mut s, mut df, mut p, mut mm, mut e) = (mk(42), mk(43), mk(44), mk(45), mk(46), mk(47), mk(48));
     let mut q = mk(49);
@@ -513,7 +518,7 @@ fn sessions_on_regtest() {
         rt.mine(u64::from(delta)).unwrap();
         rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("X: halt_exit must fire: {e:#}"));
         assert_eq!(tx.output.len(), 1, "X: everything to the hub");
-        println!("SESS X: the execution halted with exit 1; disprove_zk_halt_exit: {} vB; the hub takes everything, both reserves included; the dispute: {} vB", tx.vsize(), vb + tx.vsize() as u64);
+        println!("SESS X: the execution halted with exit 1; disprove_halt_exit: {} vB; the hub takes everything, both reserves included; the dispute: {} vB", tx.vsize(), vb + tx.vsize() as u64);
     }
 
     // ===== S, A6: the hub has disappeared =====
@@ -576,26 +581,22 @@ fn sessions_on_regtest() {
     // ===== Q: a cheating replay; equiv_d =====
     {
         // moves 1 to 3 were played off-chain; Alice holds the hub's
-        // signature on its true move 2. The hub escalates and replays, but
-        // posts move 2 altered, then Alice's move 3 as she signed it.
-        let honest_2 = q.move_sig(2);
+        // signature on its true move 2 (its choice). The hub escalates and
+        // replays, but posts move 2 with the other choice, then Alice's move
+        // 3 as she signed it (her hashes for the true choice).
+        let honest_2 = q.field_sig(2, 0);
         q.escalate(&rt, Role::Hub);
-        let true_2 = q.heads[1];
-        q.heads[1][4 + 3] ^= 1; // the state digest's fourth byte
-        let altered_2 = q.move_sig(2);
+        let true_2 = q.msgs[1].clone();
+        q.msgs[1][0] ^= 1;
+        let altered_2 = q.field_sig(2, 0);
         q.post(&rt, 2, Role::Hub);
         let (op, out, _) = q.post(&rt, 3, Role::Hub);
-        // move 3 no longer copies move 2's state: the hub could disprove it
-        // after delta (the file: the altered move 2, Alice's move 3)
+        q.msgs[1] = true_2;
+        // Alice shows the hub's two signatures at depth 2: everything is hers
         let l3 = q.ladder(3);
-        let copied = q.hub_takes(&l3, op, &out, "disprove_zk_copied", q.file_wire(3));
-        q.heads[1] = true_2;
-        // but Alice shows the hub's two signatures at depth 2 first
-        let eq = q.alice_takes(&l3, op, &out, "equiv_d_2", [wots_wire(&honest_2), wots_wire(&altered_2)].concat());
-        rt.mine(u64::from(delta)).unwrap();
-        rt.test_accept(&copied).unwrap_or_else(|e| panic!("Q: the hub's disprove of move 3 would be valid: {e:#}"));
-        rt.mine_with(std::slice::from_ref(&eq)).unwrap_or_else(|e| panic!("Q: equiv_d_2: {e:#}"));
-        println!("SESS Q: the hub replayed an altered move 2 (its disprove of Alice's move 3 would be valid, {} vB); Alice's equiv_d_2 takes everything first: {} vB", copied.vsize(), eq.vsize());
+        let eq = q.alice_takes(&l3, op, &out, "equiv_d_2_0", [wots_wire(&honest_2), wots_wire(&altered_2)].concat());
+        rt.mine_with(std::slice::from_ref(&eq)).unwrap_or_else(|e| panic!("Q: equiv_d_2_0: {e:#}"));
+        println!("SESS Q: the hub replayed move 2 with another choice; Alice's equiv_d_2_0 takes everything: {} vB", eq.vsize());
     }
 
     // ===== D: no withdrawal by T_close; the pre-signed default =====
@@ -656,10 +657,12 @@ const IMAGE_ID: &str = "4beda75466ff0db4aa6c6fe9512140368ad287c695f0ff162775db93
 #[ignore]
 fn sessions_on_the_groth16_verifier() {
     let rt = Regtest::start_standard().unwrap();
-    let dir = std::env::temp_dir().join(format!("lngap-sess-real-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lngap-sess-real-{}-{}", std::process::id(), std::env::var("LNGAP_NARY").unwrap_or_default()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(groth16_verifier_elf(), dir.join("zkverifier.elf")).unwrap();
-    std::fs::write(dir.join("groth16.yaml"), "elf: zkverifier.elf\nnary_search: 2\nmax_steps: 536870912\ninput_section_name: .input\ninputs:\n  - size: 172\n    owner: prover\n").unwrap();
+    // the search's arity: LNGAP_NARY (2 or 8; default 8)
+    let nary: u8 = std::env::var("LNGAP_NARY").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    std::fs::write(dir.join("groth16.yaml"), format!("elf: zkverifier.elf\nnary_search: {nary}\nmax_steps: 536870912\ninput_section_name: .input\ninputs:\n  - size: 172\n    owner: prover\n")).unwrap();
     let pdf = dir.join("groth16.yaml").display().to_string();
     let valid = hex::decode(include_str!("data/withdraw-9-42.hex").trim()).unwrap();
     let words = input_words(&valid);
@@ -670,7 +673,7 @@ fn sessions_on_the_groth16_verifier() {
     assert_eq!(&words[1..9], id_words.as_slice(), "the proof is of the pinned guest");
     let mut tampered = valid.clone();
     tampered[164] = 10; // b, word 41's low byte
-    let rounds = Program::load(&pdf).unwrap().rounds;
+    let rounds = Program::load(&pdf).unwrap().schedule.rounds();
 
     let t_close = rt.height().unwrap() + 2_000;
     let check = |name: &str, word: usize, value: u32| Check { name: name.into(), word, value };
@@ -679,14 +682,14 @@ fn sessions_on_the_groth16_verifier() {
     let mk = |cid| Session::with(terms(42, t_close), cid, &pdf, b_word, checks.clone());
     let (mut r, mut x, mut i, mut mm) = (mk(61), mk(62), mk(63), mk(64));
     let m = r.m();
-    println!("SESS [real] the Groth16 verifier: {rounds} rounds, {m} depths; four sessions' keys and families in {:.1?}", t.elapsed());
+    println!("SESS [real] the Groth16 verifier, {nary}-ary search: {rounds} rounds, {m} depths; four sessions' keys and families in {:.1?}", t.elapsed());
     let t = Instant::now();
     r.play_input(&valid, "b = 9 (a valid proof)");
     x.play_input(&tampered, "b = 10 (the proof is for 9)");
     println!("SESS [real] both searches in {:.0?}", t.elapsed());
     // I and M claim on the valid proof's search, with one word changed
     for s in [&mut i, &mut mm] {
-        (s.heads, s.entries, s.words) = (r.heads.clone(), r.entries.clone(), r.words.clone());
+        (s.msgs, s.words) = (r.msgs.clone(), r.words.clone());
     }
     let t = Instant::now();
     for sess in [&mut r, &mut x, &mut i, &mut mm] {
@@ -724,7 +727,7 @@ fn sessions_on_the_groth16_verifier() {
         let tx = x.halt_exit(op, &out);
         rt.mine(u64::from(delta)).unwrap();
         rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("X: halt_exit must fire: {e:#}"));
-        println!("SESS [real] X: the verifier halted with failure; disprove_zk_halt_exit: {} vB. The hub wins; the whole dispute: {} vB", tx.vsize(), vb + tx.vsize() as u64);
+        println!("SESS [real] X: the verifier halted with failure; disprove_halt_exit: {} vB. The hub wins; the whole dispute: {} vB", tx.vsize(), vb + tx.vsize() as u64);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

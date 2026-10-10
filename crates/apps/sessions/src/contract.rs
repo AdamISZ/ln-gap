@@ -3,9 +3,10 @@
 //! every transaction the two pre-sign when it is opened ([`Presign`]).
 //!
 //! The contract output carries `fold` (the cooperative close, signed when
-//! it happens), `default` and `escalate`; a dispute is
-//! BitVMX's search over the statement program, played on the ladder from
-//! move 1 with lean moves (lngap-v25, lngap-zk). What is pre-signed:
+//! it happens), `default` and `escalate`; a dispute is BitVMX's n-ary
+//! search over the statement program, played on the ladder from move 1 in
+//! BitVMX's own shape (lngap-ladder: each move signs only what it posts).
+//! What is pre-signed:
 //! - the chain's links: `escalate` (move 1 and the claim's input words),
 //!   then, if the claim's words don't cover the input, `inputs` (the
 //!   rest of it: the verifier executes the program on the whole input
@@ -25,7 +26,7 @@
 //!   ALL|ANYONECANPAY at zero fee, so their broadcaster adds a fee input.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use anyhow::{bail, ensure, Context, Result};
 use bitcoin::key::{Keypair, XOnlyPublicKey};
@@ -33,7 +34,6 @@ use bitcoin::secp256k1::{schnorr, SECP256K1};
 use bitcoin::taproot::ControlBlock;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
-use lngap_btc::keys::Seed;
 use lngap_btc::sighash::{sign_tapscript, sign_tapscript_acp, tapscript_sighash};
 use bitcoin::script::Builder;
 use lngap_btc::script::BuilderExt;
@@ -41,20 +41,13 @@ use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyPubKeys, Role};
-use lngap_contract::{Outcome, Payout};
-use lngap_lamport::keystore::KeyStore;
+use lngap_ladder::rules::Rule;
+use lngap_ladder::{mover_at, Schedule};
 use lngap_lamport::winternitz::WotsPublic;
-use lngap_pos::instance::{mover_at, PosDepthKeys};
-use lngap_pos::ttt::Layout;
-use lngap_v25::{escalate_leaf_with, inputs_leaf, ladder_leaves, ZkDated};
 use lngap_zk::challenges::ProgramInfo;
-use lngap_zk::family::ZkFamily;
-use lngap_zk::game::Search;
 
 use crate::session::{default_leaf, default_outputs, fold_leaf, input_word_leaf, payout_less, Terms};
 
-/// The search game's id inside the leaves' layout.
-pub const GAME_ID: u16 = 1;
 /// The commitment sequence the leaves are built under (a standalone
 /// contract has one).
 pub const SEQ: u64 = 1;
@@ -72,52 +65,26 @@ pub fn anchor_tree(ctx: &CommitCtx, role: Role) -> Result<TapTree> {
     TapTree::new(vec![Leaf::new("fee".to_string(), script, Timelock::NONE)])
 }
 
-/// What depth `d`'s move key signs, of `m`: the 48-byte head; at depth 1
-/// also the claim block (the claimed last step and hash), at the final
-/// depth the disputed step's record (64 bytes each). The other side needs
-/// both to play and to disprove, so they go on chain under the mover's
-/// signature.
-pub fn move_bytes(d: u32, m: u32) -> u32 {
-    if d == 1 || d == m {
-        48 + 64
-    } else {
-        48
-    }
-}
-
-/// The message move `d` signs: its head, and at depth 1 the claim block,
-/// at the final depth the record.
-pub fn move_message(entry: &lngap_zk::game::Entry) -> Vec<u8> {
-    let mut msg = entry.head.to_vec();
-    if let Some(c) = &entry.claim {
-        msg.extend_from_slice(&c.to_bytes());
-    }
-    if let Some(r) = &entry.record {
-        msg.extend_from_slice(&r.to_bytes());
-    }
-    msg
-}
-
-/// The statement program the dispute runs: BitVMX's program definition
-/// and what the leaves need from it.
+/// The statement program the dispute runs: BitVMX's program definition,
+/// its search's shape, and what the leaves need from it.
+#[derive(Clone)]
 pub struct Program {
     pub pdf: String,
     pub info: ProgramInfo,
-    pub rounds: u32,
+    pub schedule: Schedule,
 }
 
 impl Program {
     pub fn load(pdf: &str) -> Result<Program> {
-        let info = ProgramInfo::load(pdf)?;
-        let def = emulator::loader::program_definition::ProgramDefinition::from_config(pdf).map_err(|e| anyhow::anyhow!("{pdf}: {e:?}"))?;
-        Ok(Program { pdf: pdf.to_string(), info, rounds: u32::from(def.nary_def().total_rounds()) })
-    }
-    pub fn search(&self) -> Search {
-        Search { game_id: GAME_ID, rounds: self.rounds }
+        Ok(Program { pdf: pdf.to_string(), info: ProgramInfo::load(pdf)?, schedule: Schedule::load(pdf)? })
     }
     /// The search's depths (moves).
     pub fn depths(&self) -> u32 {
-        self.search().depths()
+        self.schedule.depths()
+    }
+    /// The bytes each of move `d`'s keys signs: one key per field.
+    pub fn field_bytes(&self, d: u32) -> Vec<u32> {
+        self.schedule.fields(d).into_iter().map(|(_, l)| l as u32).collect()
     }
 }
 
@@ -142,64 +109,65 @@ pub struct Spec {
     /// The input word carrying `b`, and the input-word checks.
     pub b_word: usize,
     pub checks: Vec<Check>,
-    /// The move keys by depth (`moves[d - 1]`, generated by depth `d`'s
-    /// mover), each signing its move's 48-byte head.
-    pub moves: Vec<WotsPublic>,
+    /// The move keys by depth and field (`moves[d - 1][f]`, generated by
+    /// depth `d`'s mover), each signing one field of what its move posts
+    /// ([`Program::field_bytes`]).
+    pub moves: Vec<Vec<WotsPublic>>,
     /// Alice's input-word keys, one per word of the statement's input.
     pub inputs: Vec<WotsPublic>,
-}
-
-/// The two outcomes a dispute ends in.
-pub fn outcomes() -> Vec<Outcome> {
-    vec![Outcome::new(0, "UserWins", Payout::UserAll), Outcome::new(1, "HubWins", Payout::HubAll)]
-}
-
-/// Lamport keys the venue-era fields of a depth's key set want (the move
-/// code, the claimant code); a v3 contract's leaves never use them.
-fn unused_code_keys(m: u32) -> Result<Vec<lngap_lamport::PublicKey>> {
-    let mut ks = KeyStore::new(Seed::from_label("lngap-v3/unused-code-keys"));
-    (1..=m).map(|d| ks.generate(&format!("code/{d}"), lngap_contract::CODE_BITS)).collect()
+    /// Under a jump list: the read and jump challenges' keys (the hub's
+    /// path links', Alice's choices').
+    pub tail: Option<lngap_ladder::tail::TailKeys>,
 }
 
 /// A contract, its trees built once.
 pub struct Contract {
     pub spec: Spec,
-    keys: Vec<PosDepthKeys>,
-    family: Arc<ZkFamily>,
-    outcomes: Vec<Outcome>,
+    pub program: Program,
     ladders: Mutex<HashMap<u32, TapTree>>,
+    tails: Mutex<HashMap<String, TapTree>>,
 }
 
 impl Contract {
     pub fn new(spec: Spec, program: &Program) -> Result<Contract> {
         let m = program.depths();
         ensure!(spec.moves.len() as u32 == m, "{} move keys for {m} depths", spec.moves.len());
-        for (i, k) in spec.moves.iter().enumerate() {
+        for (i, ks) in spec.moves.iter().enumerate() {
             let d = i as u32 + 1;
-            ensure!(k.params.message_digits == 2 * move_bytes(d, m), "move key {d} signs {} digits, not {}", k.params.message_digits, 2 * move_bytes(d, m));
+            let want = program.field_bytes(d);
+            ensure!(ks.len() == want.len(), "move {d} has {} keys for {} fields", ks.len(), want.len());
+            for (f, (k, n)) in ks.iter().zip(want).enumerate() {
+                ensure!(k.params.message_digits == 2 * n, "move {d}'s key {f} signs {} digits, not {}", k.params.message_digits, 2 * n);
+            }
         }
         ensure!(spec.inputs.len() == program.info.input_words, "{} input keys for {} words", spec.inputs.len(), program.info.input_words);
         ensure!(spec.b_word < spec.inputs.len() && spec.checks.iter().all(|c| c.word < spec.inputs.len()), "an input word out of range");
-        let codes = unused_code_keys(m)?;
-        let keys = spec
-            .moves
-            .iter()
-            .zip(codes)
-            .enumerate()
-            .map(|(i, (k, code))| PosDepthKeys { mover: mover_at(i as u32 + 1), rebut: k.clone(), mover_code: code.clone(), claimant_code: code, state: k.clone() })
-            .collect();
-        let family = ZkFamily::lean(program.search(), program.info.clone(), spec.inputs.clone(), spec.moves.clone());
-        Ok(Contract { spec, keys, family, outcomes: outcomes(), ladders: Mutex::new(HashMap::new()) })
+        ensure!(spec.tail.is_some() == program.schedule.jump.is_some(), "a jump list's contract has the tail's keys, and only it");
+        if let Some(t) = &spec.tail {
+            let ok = |keys: &[WotsPublic], sizes: &[usize]| keys.len() == sizes.len() && keys.iter().zip(sizes).all(|(k, n)| k.params.message_digits as usize == 2 * n);
+            ensure!(ok(&t.path[0], &lngap_ladder::tail::first_fields()) && ok(&t.path[1], &lngap_ladder::tail::second_fields()), "the path links' keys");
+            ensure!(t.hop.iter().all(|k| k.params.message_digits == 2), "a hop choice is a byte");
+        }
+        Ok(Contract { spec, program: program.clone(), ladders: Mutex::new(HashMap::new()), tails: Mutex::new(HashMap::new()) })
     }
     /// The search's depths.
     pub fn m(&self) -> u32 {
-        self.keys.len() as u32
+        self.program.depths()
     }
     pub fn ctx(&self) -> CommitCtx<'_> {
         CommitCtx { params: &self.spec.params, keys: &self.spec.pubs, broadcaster: Role::Hub, seq: SEQ, rev_hash: [0u8; 20] }
     }
-    pub fn dated(&self) -> ZkDated<'_> {
-        ZkDated { family: self.family.as_ref(), prove_presigned: true, post_csv: 1 }
+    /// The ladder's builder over `ctx` (a dispute's leaves, lngap-ladder).
+    pub fn ladder_spec<'a>(&'a self, ctx: &'a CommitCtx<'a>) -> lngap_ladder::ladder::Spec<'a> {
+        lngap_ladder::ladder::Spec { ctx, s: &self.program.schedule, info: &self.program.info, moves: &self.spec.moves, words: &self.spec.inputs, post_csv: 1, tail: self.spec.tail.as_ref() }
+    }
+    /// The rule `name` (without `disprove_`) on the output after move `j`,
+    /// or Alice's proof `prove_<class>` at the last: for its witness.
+    pub fn rule(&self, j: u32, name: &str) -> Result<Rule> {
+        let ctx = self.ctx();
+        let l = self.ladder_spec(&ctx);
+        let rules = if name.starts_with("prove_") { lngap_ladder::rules::prove_rules(l.s, l.info) } else { l.rules_on(j) };
+        rules.into_iter().find(|r| r.name == name).with_context(|| format!("no rule {name} after move {j}"))
     }
     pub fn b_key(&self) -> &WotsPublic {
         &self.spec.inputs[self.spec.b_word]
@@ -223,9 +191,8 @@ impl Contract {
     pub fn claimed_tree(&self) -> Result<TapTree> {
         let ctx = self.ctx();
         let w = self.spec.params.delta + self.spec.params.delta_prime;
-        let words: Vec<WotsPublic> = self.rest_words().iter().map(|&j| self.spec.inputs[j].clone()).collect();
         let timeout = Leaf::new("split_HubWins".to_string(), ctx.two_of_two_verify(Builder::new().csv(w)).push_int(1).into_script(), Timelock::csv(w));
-        TapTree::new(vec![inputs_leaf(&ctx, &words), timeout])
+        TapTree::new(vec![self.ladder_spec(&ctx).inputs_leaf(&self.rest_words()), timeout])
     }
     /// What the contract output holds: `V_max` and both reserves (it funds
     /// no fees).
@@ -235,9 +202,7 @@ impl Contract {
     /// The contract output's tree: `fold`, `default` and `escalate`.
     pub fn tree(&self) -> Result<TapTree> {
         let ctx = self.ctx();
-        let l1 = Layout::at(1, GAME_ID, mover_at(1));
-        let words: Vec<WotsPublic> = self.claim_words().iter().map(|&j| self.spec.inputs[j].clone()).collect();
-        TapTree::new(vec![fold_leaf(&ctx), default_leaf(&ctx, self.spec.terms.t_close), escalate_leaf_with(&self.dated(), &ctx, &l1, &self.keys[0], &words)])
+        TapTree::new(vec![fold_leaf(&ctx), default_leaf(&ctx, self.spec.terms.t_close), self.ladder_spec(&ctx).escalate_leaf(&self.claim_words())])
     }
     /// The cooperative close for a withdrawal of `b` sats, the contract
     /// output at `funding`: Alice `b + r_A`, the hub the rest less `fee`.
@@ -266,7 +231,7 @@ impl Contract {
             return Ok(t.clone());
         }
         let ctx = self.ctx();
-        let mut leaves = ladder_leaves(&self.dated(), &ctx, GAME_ID, j, &self.keys, &self.outcomes);
+        let mut leaves = self.ladder_spec(&ctx).leaves(j);
         if j == 1 {
             leaves.extend(self.spec.checks.iter().map(|c| input_word_leaf(&ctx, &c.name, &self.spec.inputs[c.word], c.value)));
         }
@@ -277,11 +242,8 @@ impl Contract {
     /// Who is paid if the ladder output after move `j` times out: the mover
     /// of `j`, except at the last depth, where Alice must prove the step.
     pub fn timeout_payee(&self, j: u32) -> Role {
-        if j == self.m() {
-            mover_at(j).other()
-        } else {
-            mover_at(j)
-        }
+        let ctx = self.ctx();
+        self.ladder_spec(&ctx).timeout_payee(j)
     }
     /// The outputs paying `b` in bits and both reserves to Alice, the rest
     /// to the hub; `available` is what the output carries, the contract's
@@ -296,7 +258,8 @@ impl Contract {
     /// off-chain play can't bump them: they confirm at the floor.)
     pub fn poster(&self, name: &str) -> Role {
         match name {
-            "escalate" | "inputs" => Role::User,
+            "escalate" | "inputs" | "hop_0" | "hop_1" => Role::User,
+            "path_0" | "path_1" => Role::Hub,
             _ => mover_at(name.trim_start_matches("move_").parse().expect("a link is escalate, inputs or move_<j>")),
         }
     }
@@ -304,9 +267,11 @@ impl Contract {
     /// one-time signature's elements (20 bytes, and a digit of one byte).
     fn link_wire_shape(&self, name: &str) -> Vec<Vec<u8>> {
         let keys: Vec<&WotsPublic> = match name {
-            "escalate" => self.claim_words().iter().map(|&j| &self.spec.inputs[j]).chain([&self.spec.moves[0]]).collect(),
+            "escalate" => self.claim_words().iter().map(|&j| &self.spec.inputs[j]).chain(self.spec.moves[0].iter()).collect(),
             "inputs" => self.rest_words().iter().map(|&j| &self.spec.inputs[j]).collect(),
-            _ => vec![&self.spec.moves[name.trim_start_matches("move_").parse::<usize>().expect("move_<j>") - 1]],
+            "path_0" | "path_1" => self.spec.tail.as_ref().expect("a tail").path[usize::from(name == "path_1")].iter().collect(),
+            "hop_0" | "hop_1" => vec![&self.spec.tail.as_ref().expect("a tail").hop[usize::from(name == "hop_1")]],
+            _ => self.spec.moves[name.trim_start_matches("move_").parse::<usize>().expect("move_<j>") - 1].iter().collect(),
         };
         keys.iter().flat_map(|k| (0..k.params.total_digits()).flat_map(|_| [vec![0u8; 20], vec![15u8]])).collect()
     }
@@ -365,11 +330,51 @@ impl Contract {
         }
         // the final step's proofs, one per instruction class
         let last = self.ladder(self.m())?;
-        for leaf in last.leaves().iter().filter(|l| l.name.starts_with("zk_prove_")) {
+        for leaf in last.leaves().iter().filter(|l| l.name.starts_with("prove_")) {
             let outs = self.pay_alice(prev_out.value)?;
-            out.push(Presign::new(&format!("prove_{}", &leaf.name["zk_prove_".len()..]), &last, &leaf.name, op, &prev_out, outs, false)?);
+            out.push(Presign::new(&leaf.name, &last, &leaf.name, op, &prev_out, outs, false)?);
+        }
+        // under a jump list, the tail: the hub's path links, Alice's
+        // choices, her timeouts
+        if self.spec.tail.is_some() {
+            use lngap_ladder::ladder::TailOut;
+            let mut from = (last, "path".to_string(), op, prev_out);
+            for l in 0..2 {
+                let (t, leaf, o, po) = from;
+                let p_tree = self.tail_tree(TailOut::Path(l))?;
+                let link = self.link(&format!("path_{l}"), &t, &leaf, o, &po, p_tree.script_pubkey())?;
+                let p_out = link.tx.output[0].clone();
+                let p_op = OutPoint { txid: link.tx.compute_txid(), vout: 0 };
+                out.push(link);
+                out.push(Presign::new(&format!("timeout_path_{l}"), &p_tree, "split_UserWins", p_op, &p_out, self.pay_alice(p_out.value)?, false)?);
+                // Alice's choice of hop, and its timeout
+                let h_tree = self.tail_tree(TailOut::Hop(l))?;
+                let hop = self.link(&format!("hop_{l}"), &p_tree, "hop", p_op, &p_out, h_tree.script_pubkey())?;
+                let h_out = hop.tx.output[0].clone();
+                let h_op = OutPoint { txid: hop.tx.compute_txid(), vout: 0 };
+                out.push(hop);
+                out.push(Presign::new(&format!("timeout_hop_{l}"), &h_tree, "split_UserWins", h_op, &h_out, self.pay_alice(h_out.value)?, false)?);
+                from = (p_tree, "post".to_string(), p_op, p_out);
+            }
         }
         Ok(out)
+    }
+    /// An output's tree in the tail (a jump list's read and jump
+    /// challenges).
+    pub fn tail_tree(&self, at: lngap_ladder::ladder::TailOut) -> Result<TapTree> {
+        let k = format!("{at:?}");
+        if let Some(t) = self.tails.lock().unwrap().get(&k) {
+            return Ok(t.clone());
+        }
+        let ctx = self.ctx();
+        let t = TapTree::new(self.ladder_spec(&ctx).tail_leaves(at))?;
+        self.tails.lock().unwrap().insert(k, t.clone());
+        Ok(t)
+    }
+    /// A tail rule (without `disprove_`), for its witness.
+    pub fn tail_rule(&self, at: lngap_ladder::ladder::TailOut, name: &str) -> Result<Rule> {
+        let ctx = self.ctx();
+        self.ladder_spec(&ctx).tail_rule(at, name).with_context(|| format!("no tail rule {name} at {at:?}"))
     }
 }
 
