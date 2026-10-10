@@ -65,7 +65,7 @@ fn open(rt: &Regtest, dir: &Path, cid: u32, returns: &[(u32, u32)]) -> Opened {
     let hub_moves: HashMap<u32, WotsSecret> = (1..=m).filter(|d| mover_at(*d) == Role::Hub).map(|d| (d, key("hub", d))).collect();
     let inputs: Vec<WotsSecret> = (0..program.info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), Seed::from_label(&format!("2p/{cid}/input/{j}")).derive_bytes("wots"))).collect();
     let moves = (1..=m).map(|d| alice_moves.get(&d).or(hub_moves.get(&d)).unwrap().public()).collect();
-    let terms = Terms { id: cid, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 5_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(30_000) };
+    let terms = Terms { id: cid, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 5_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(100_000) };
     let params = ChannelParams { presign_fee: Amount::from_sat(80_000), ..ChannelParams::regtest(Amount::ZERO) };
     let spec = Spec { terms, cid, params, pubs: [alice.public(), hub.public()], b_word: 0, checks: vec![Check { name: "memo".into(), word: 1, value: cid }], moves, inputs: inputs.iter().map(|k| k.public()).collect() };
     let contract = Contract::new(spec, &program).unwrap();
@@ -84,8 +84,9 @@ impl Opened {
     /// Post a link, its poster paying with a child; the link as mined.
     fn post(&mut self, rt: &Regtest, name: &str, wire: Vec<Vec<u8>>, by: Role) -> Transaction {
         let tx = self.finish(name, wire);
+        rt.send_raw(&tx).unwrap_or_else(|e| panic!("{name} at its floor: {e:#}"));
         let child = self.wallets[by.idx()].bump(&tx, 1);
-        rt.submit_package(&[tx.clone(), child]).unwrap_or_else(|e| panic!("{name}: {e:#}"));
+        rt.send_raw(&child).unwrap_or_else(|e| panic!("{name}'s child: {e:#}"));
         rt.mine(1).unwrap();
         rt.get_tx(&tx.compute_txid()).unwrap()
     }
@@ -198,7 +199,7 @@ fn dispute(rt: &Regtest, dir: &Path, o: &mut Opened, claim: &[u8], force: ForceC
 
 #[test]
 fn two_parties_play_from_the_chain() {
-    let rt = Regtest::start().unwrap();
+    let rt = Regtest::start_standard().unwrap();
     let dir = std::env::temp_dir().join(format!("lngap-2p-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let b = 40_000u32;

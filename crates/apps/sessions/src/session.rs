@@ -151,12 +151,21 @@ pub fn reserve_tree(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic) -> Result<Ta
 /// both reserves, Alice's; the rest of `available` (less `fee`) to the
 /// hub.
 pub fn payout(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount, fee: Amount) -> Result<Vec<TxOut>> {
+    payout_less(ctx, t, b_key, available, fee, Amount::ZERO)
+}
+
+/// [`payout`] after a dispute whose links carried fee floors totalling
+/// `floors` out of the contract: the hub, the loser, forfeits its reserve
+/// less them (Alice receives `r_A + r_H - floors` with her bits; the hub
+/// still `V_max - b`).
+pub fn payout_less(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount, fee: Amount, floors: Amount) -> Result<Vec<TxOut>> {
     let total = available.checked_sub(fee).ok_or_else(|| anyhow::anyhow!("the fee exceeds the output"))?;
-    ensure!(total >= t.v_max() + t.reserves(), "{total} cannot pay V_max {} and the reserves", t.v_max());
+    let reserves = t.reserves().checked_sub(floors).filter(|r| *r >= t.reserve_alice).ok_or_else(|| anyhow::anyhow!("the floors {floors} exceed the hub's reserve"))?;
+    ensure!(total >= t.v_max() + reserves, "{total} cannot pay V_max {} and the reserves less the floors", t.v_max());
     let mut outs: Vec<TxOut> = (t.low_bits..t.bits).map(|i| Ok(TxOut { value: t.unit * (1u64 << i), script_pubkey: bit_tree(ctx, i, b_key)?.script_pubkey() })).collect::<Result<_>>()?;
     let paid: Amount = outs.iter().map(|o| o.value).sum();
-    outs.push(TxOut { value: t.reserves(), script_pubkey: reserve_tree(ctx, t, b_key)?.script_pubkey() });
-    let rest = total - paid - t.reserves();
+    outs.push(TxOut { value: reserves, script_pubkey: reserve_tree(ctx, t, b_key)?.script_pubkey() });
+    let rest = total - paid - reserves;
     if rest >= ctx.params.dust {
         outs.push(TxOut { value: rest, script_pubkey: ctx.key(Role::Hub).payout_spk.clone() });
     }

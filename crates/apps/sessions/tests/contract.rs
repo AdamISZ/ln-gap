@@ -21,7 +21,7 @@ fn the_presigned_set() {
     let (alice, hub) = (PartyKeys::from_seed(Role::User, Seed::from_label("c/alice")), PartyKeys::from_seed(Role::Hub, Seed::from_label("c/hub")));
     let moves: Vec<WotsSecret> = (1..=m).map(|d| WotsSecret::from_entropy(WotsParams::for_bytes(move_bytes(d, m)), Seed::from_label(&format!("c/move/{d}")).derive_bytes("wots"))).collect();
     let inputs: Vec<WotsSecret> = (0..program.info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x60 + j as u8; 32])).collect();
-    let terms = Terms { id: 42, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 1_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(30_000) };
+    let terms = Terms { id: 42, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 1_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(100_000) };
     let spec = Spec {
         terms,
         cid: 42,
@@ -43,8 +43,15 @@ fn the_presigned_set() {
     let links: Vec<_> = set.iter().filter(|p| p.link).collect();
     for w in links.windows(2) {
         assert_eq!(w[1].tx.input[0].previous_output, OutPoint { txid: w[0].tx.compute_txid(), vout: 0 }, "{} spends {}", w[1].name, w[0].name);
-        assert_eq!(w[1].tx.version.0, 3);
+        assert_eq!(w[1].tx.version.0, 2, "an ordinary transaction, not TRUC");
     }
+    // each link pays its floor out of the contract and carries the poster's
+    // anchor; the floors must fit in the hub's reserve (D-J2)
+    let last = links.last().unwrap();
+    let floors = c.value() - last.tx.output[0].value;
+    println!("CONTRACT the chain's floors and anchors: {floors} (the hub's reserve: {})", c.spec.terms.reserve_hub);
+    assert!(floors < c.spec.terms.reserve_hub);
+    assert!(links.iter().all(|p| p.tx.output[1].value == lngap_sessions::contract::ANCHOR));
     // the dispute path's payout: bits 9..21 and the reserves, no dust
     let pay = c.pay_alice(c.value()).unwrap();
     assert_eq!(pay.len(), 12 + 1 + 1, "12 bit outputs, the reserves, the rest");

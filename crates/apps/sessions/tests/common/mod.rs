@@ -23,13 +23,13 @@ pub const FEERATE: u64 = 2;
 pub const SMALL: Amount = Amount::from_sat(20_000);
 pub const LARGE: Amount = Amount::from_sat(200_000);
 
-/// A party's fee coins. No pre-signed transaction pays a fee of its own;
-/// whoever broadcasts one pays, so each side pays for its own moves:
+/// A party's fee coins. Whoever broadcasts a pre-signed transaction pays
+/// its fee, so each side pays for its own moves:
 /// - a link of the ladder's chain (escalate, a move) must keep its txid,
-///   since the next link is signed against it: it is a TRUC (v3)
-///   transaction with a zero-value pay-to-anchor output, and its poster
-///   bumps it with a child spending the anchor and a coin of its own
-///   (one-parent-one-child package relay);
+///   since the next link is signed against it: it pays a floor of 1 sat/vB
+///   out of the contract (so it relays alone), and its poster bumps it
+///   with a child spending the link's anchor, an output only the poster
+///   can spend (the same script as its fee coins), and a coin of its own;
 /// - a transaction that ends the chain (a timeout, a proof, the default),
 ///   whose outputs only runtime spends use, is signed ALL|ANYONECANPAY and
 ///   its broadcaster adds a coin as an input; it may be large (the proof
@@ -61,19 +61,25 @@ impl FeeWallet {
         let coins = tx.output.iter().enumerate().map(|(i, o)| (OutPoint { txid, vout: i as u32 }, o.clone())).collect();
         FeeWallet { kp: *kp, tree, coins }
     }
-    /// A TRUC child of `parent` (whose output `anchor` is its pay-to-anchor)
-    /// paying `FEERATE` on the pair, its change back to this wallet.
+    /// A child of `parent` (whose output `anchor` is this party's anchor)
+    /// paying `FEERATE` on the pair (the parent's floor not credited), its
+    /// change back to this wallet.
     pub fn bump(&mut self, parent: &Transaction, anchor: u32) -> Transaction {
-        let need = Amount::from_sat((parent.vsize() as u64 + 200) * FEERATE);
-        let i = self.coins.iter().enumerate().filter(|(_, c)| c.1.value >= need + Amount::from_sat(1_000)).min_by_key(|(_, c)| c.1.value).map(|(i, _)| i).expect("a fee coin large enough");
+        let need = Amount::from_sat((parent.vsize() as u64 + 220) * FEERATE);
+        let a_out = parent.output[anchor as usize].clone();
+        assert_eq!(a_out.script_pubkey, self.tree.script_pubkey(), "the anchor is this party's");
+        let i = self.coins.iter().enumerate().filter(|(_, c)| c.1.value + a_out.value >= need + Amount::from_sat(1_000)).min_by_key(|(_, c)| c.1.value).map(|(i, _)| i).expect("a fee coin large enough");
         let (op, coin) = self.coins.remove(i);
         let a_op = OutPoint { txid: parent.compute_txid(), vout: anchor };
-        let change = TxOut { value: coin.value - need, script_pubkey: coin.script_pubkey.clone() };
+        let change = TxOut { value: coin.value + a_out.value - need, script_pubkey: coin.script_pubkey.clone() };
         let mut tx = lngap_btc::tx::build_tx(&[(a_op, Sequence::ENABLE_RBF_NO_LOCKTIME), (op, Sequence::ENABLE_RBF_NO_LOCKTIME)], vec![change.clone()], bitcoin::absolute::LockTime::ZERO);
-        tx.version = bitcoin::transaction::Version(3);
         let leaf = self.tree.leaf("fee").unwrap();
-        let w = vec![sig(&self.kp, &tx, 1, &[parent.output[anchor as usize].clone(), coin], &leaf.script)];
-        tx.input[1].witness = tapscript_witness(&w, &leaf.script, &self.tree.control_block("fee").unwrap());
+        let control = self.tree.control_block("fee").unwrap();
+        let prevouts = [a_out, coin];
+        for i in 0..2 {
+            let w = vec![sig(&self.kp, &tx, i, &prevouts, &leaf.script)];
+            tx.input[i].witness = tapscript_witness(&w, &leaf.script, &control);
+        }
         self.coins.push((OutPoint { txid: tx.compute_txid(), vout: 0 }, change));
         tx
     }

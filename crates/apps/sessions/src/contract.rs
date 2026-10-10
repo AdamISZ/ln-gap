@@ -9,10 +9,17 @@
 //! - the chain's links: `escalate` (move 1 and the claim's input words),
 //!   then, if the claim's words don't cover the input, `inputs` (the
 //!   rest of it: the verifier executes the program on the whole input
-//!   before its first move), and each move's `post`, TRUC
-//!   (v3) transactions at zero fee with a zero-value anchor, each signed
-//!   against the previous link's txid (fixed, since nothing can be added
-//!   to a link: its poster pays with a child spending the anchor);
+//!   before its first move), and each move's `post`, each signed against
+//!   the previous link's txid (fixed, since nothing can be added to a
+//!   link). A link is an ordinary (v2) transaction paying a floor of
+//!   [`FLOOR_RATE`] out of the contract, with an anchor output only its
+//!   poster can spend; the poster tops the fee up with a child spending
+//!   it. The opponent's next move waits a block after the link confirms
+//!   (`post` carries `1 OP_CSV`), so nothing but the poster's child can
+//!   sit on an unconfirmed link: pinning is closed by the protocol, not by
+//!   TRUC's mempool rules, and a link may be as large as relay policy
+//!   allows (JUMPLIST_PLAN.md, D-J1). The floors come out of the loser's
+//!   reserve (D-J2);
 //! - the transactions that end the chain: the default, each ladder
 //!   output's timeout (`split`), the final step's proofs; signed
 //!   ALL|ANYONECANPAY at zero fee, so their broadcaster adds a fee input.
@@ -44,13 +51,26 @@ use lngap_zk::challenges::ProgramInfo;
 use lngap_zk::family::ZkFamily;
 use lngap_zk::game::Search;
 
-use crate::session::{default_leaf, default_outputs, fold_leaf, input_word_leaf, payout, Terms};
+use crate::session::{default_leaf, default_outputs, fold_leaf, input_word_leaf, payout_less, Terms};
 
 /// The search game's id inside the leaves' layout.
 pub const GAME_ID: u16 = 1;
 /// The commitment sequence the leaves are built under (a standalone
 /// contract has one).
 pub const SEQ: u64 = 1;
+/// The fee a link pays of its own, sat/vB, out of the contract: enough to
+/// relay alone; its poster's child pays the rest.
+pub const FLOOR_RATE: u64 = 1;
+/// A link's anchor output (the dust limit of a taproot output). It goes
+/// to the poster, who spends it in the fee child.
+pub const ANCHOR: Amount = Amount::from_sat(330);
+
+/// The output only `role`'s payment key can spend: a link's anchor, the
+/// same script as that party's fee coins.
+pub fn anchor_tree(ctx: &CommitCtx, role: Role) -> Result<TapTree> {
+    let script = Builder::new().push_x_only_key(&ctx.key(role).payment).push_opcode(bitcoin::opcodes::all::OP_CHECKSIG).into_script();
+    TapTree::new(vec![Leaf::new("fee".to_string(), script, Timelock::NONE)])
+}
 
 /// What depth `d`'s move key signs, of `m`: the 48-byte head; at depth 1
 /// also the claim block (the claimed last step and hash), at the final
@@ -179,7 +199,7 @@ impl Contract {
         CommitCtx { params: &self.spec.params, keys: &self.spec.pubs, broadcaster: Role::Hub, seq: SEQ, rev_hash: [0u8; 20] }
     }
     pub fn dated(&self) -> ZkDated<'_> {
-        ZkDated { family: self.family.as_ref(), prove_presigned: true }
+        ZkDated { family: self.family.as_ref(), prove_presigned: true, post_csv: 1 }
     }
     pub fn b_key(&self) -> &WotsPublic {
         &self.spec.inputs[self.spec.b_word]
@@ -264,9 +284,44 @@ impl Contract {
         }
     }
     /// The outputs paying `b` in bits and both reserves to Alice, the rest
-    /// to the hub.
+    /// to the hub; `available` is what the output carries, the contract's
+    /// value less the floors and anchors of the links played, which come
+    /// out of the hub's forfeited reserve (D-J2).
     pub fn pay_alice(&self, available: Amount) -> Result<Vec<TxOut>> {
-        payout(&self.ctx(), &self.spec.terms, self.b_key(), available, Amount::ZERO)
+        let floors = self.value().checked_sub(available).context("an output carries more than the contract")?;
+        payout_less(&self.ctx(), &self.spec.terms, self.b_key(), available, Amount::ZERO, floors)
+    }
+    /// Who posts link `name`: Alice escalates and publishes her input; a
+    /// move is its mover's. (A party replaying the other's moves after
+    /// off-chain play can't bump them: they confirm at the floor.)
+    pub fn poster(&self, name: &str) -> Role {
+        match name {
+            "escalate" | "inputs" => Role::User,
+            _ => mover_at(name.trim_start_matches("move_").parse().expect("a link is escalate, inputs or move_<j>")),
+        }
+    }
+    /// A witness of the shape link `name` carries, for its size: each
+    /// one-time signature's elements (20 bytes, and a digit of one byte).
+    fn link_wire_shape(&self, name: &str) -> Vec<Vec<u8>> {
+        let keys: Vec<&WotsPublic> = match name {
+            "escalate" => self.claim_words().iter().map(|&j| &self.spec.inputs[j]).chain([&self.spec.moves[0]]).collect(),
+            "inputs" => self.rest_words().iter().map(|&j| &self.spec.inputs[j]).collect(),
+            _ => vec![&self.spec.moves[name.trim_start_matches("move_").parse::<usize>().expect("move_<j>") - 1]],
+        };
+        keys.iter().flat_map(|k| (0..k.params.total_digits()).flat_map(|_| [vec![0u8; 20], vec![15u8]])).collect()
+    }
+    /// A link of the chain spending `(op, prev_out)` under `prev_tree`'s
+    /// leaf `prev_leaf` into `next` (the next output's script): its output
+    /// carries the input less its floor and the poster's anchor.
+    #[allow(clippy::too_many_arguments)]
+    fn link(&self, name: &str, prev_tree: &TapTree, prev_leaf: &str, op: OutPoint, prev_out: &TxOut, next: ScriptBuf) -> Result<Presign> {
+        let anchor = TxOut { value: ANCHOR, script_pubkey: anchor_tree(&self.ctx(), self.poster(name))?.script_pubkey() };
+        let mut p = Presign::new(name, prev_tree, prev_leaf, op, prev_out, vec![TxOut { value: prev_out.value, script_pubkey: next.clone() }, anchor.clone()], true)?;
+        let vsize = p.finish(self.link_wire_shape(name), &[0u8; 64], &[0u8; 64]).vsize() as u64;
+        let floor = Amount::from_sat(vsize * FLOOR_RATE);
+        let carried = prev_out.value.checked_sub(floor + ANCHOR).context("the contract can't carry the floors")?;
+        p.tx.output[0].value = carried;
+        Ok(p)
     }
     /// Everything to the hub.
     pub fn pay_hub(&self, available: Amount) -> Vec<TxOut> {
@@ -283,13 +338,12 @@ impl Contract {
         let outs = default_outputs(&self.ctx(), &self.spec.terms, c_out.value, Amount::ZERO)?;
         out.push(Presign::new("default", &tree, "default", funding, &c_out, outs, false)?);
         // the chain
-        let anchor = TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_p2a() };
         let (mut prev_tree, mut prev_leaf, mut op, mut prev_out) = (tree, "escalate".to_string(), funding, c_out);
         if !self.rest_words().is_empty() {
             // escalate creates the claimed output; `inputs` spends it into the ladder
             let t = self.claimed_tree()?;
-            let t_out = TxOut { value: prev_out.value, script_pubkey: t.script_pubkey() };
-            let link = Presign::new("escalate", &prev_tree, &prev_leaf, op, &prev_out, vec![t_out.clone(), anchor.clone()], true)?;
+            let link = self.link("escalate", &prev_tree, &prev_leaf, op, &prev_out, t.script_pubkey())?;
+            let t_out = link.tx.output[0].clone();
             op = OutPoint { txid: link.tx.compute_txid(), vout: 0 };
             out.push(link);
             out.push(Presign::new("timeout_inputs", &t, "split_HubWins", op, &t_out, self.pay_hub(t_out.value), false)?);
@@ -297,9 +351,9 @@ impl Contract {
         }
         for j in 1..=self.m() {
             let t = self.ladder(j)?;
-            let t_out = TxOut { value: prev_out.value, script_pubkey: t.script_pubkey() };
             let name = if j == 1 && prev_leaf == "escalate" { "escalate".to_string() } else if j == 1 { "inputs".to_string() } else { format!("move_{j}") };
-            let link = Presign::new(&name, &prev_tree, &prev_leaf, op, &prev_out, vec![t_out.clone(), anchor.clone()], true)?;
+            let link = self.link(&name, &prev_tree, &prev_leaf, op, &prev_out, t.script_pubkey())?;
+            let t_out = link.tx.output[0].clone();
             op = OutPoint { txid: link.tx.compute_txid(), vout: 0 };
             out.push(link);
             // this ladder output's timeout
@@ -327,18 +381,15 @@ pub struct Presign {
     pub prevout: TxOut,
     pub leaf: ScriptBuf,
     pub control: ControlBlock,
-    /// A link of the chain (TRUC, plain ALL signatures, an anchor at output
-    /// 1); otherwise a terminal transaction (ALL|ANYONECANPAY).
+    /// A link of the chain (plain ALL signatures, its poster's anchor at
+    /// output 1); otherwise a terminal transaction (ALL|ANYONECANPAY).
     pub link: bool,
 }
 
 impl Presign {
     fn new(name: &str, tree: &TapTree, leaf: &str, op: OutPoint, prevout: &TxOut, outputs: Vec<TxOut>, link: bool) -> Result<Presign> {
         let l = tree.leaf(leaf).with_context(|| format!("{name}: no leaf {leaf}"))?;
-        let mut tx = build_spend(op, &l.timelock, outputs);
-        if link {
-            tx.version = Version(3);
-        }
+        let tx = build_spend(op, &l.timelock, outputs);
         Ok(Presign { name: name.to_string(), tx, prevout: prevout.clone(), leaf: l.script.clone(), control: tree.control_block(leaf)?, link })
     }
     /// This party's signature.

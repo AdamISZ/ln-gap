@@ -122,6 +122,14 @@ pub trait Dated: Sync {
     fn lean(&self) -> bool {
         false
     }
+    /// A relative timelock on the ladder's `post` (blocks; 0 for none).
+    /// With 1, the next move can't spend a link before it confirms, so no
+    /// move of the opponent's can sit in the mempool on top of an
+    /// unconfirmed link and crowd out its poster's fee-bump (LN-GAP v3
+    /// without TRUC: the game is played on chain, not in the mempool).
+    fn post_csv(&self) -> u16 {
+        0
+    }
     /// The choice of a head.
     fn choice(&self, head: &[u8; 48]) -> Vec<u8> {
         let (from, n) = self.choice_region();
@@ -165,12 +173,14 @@ pub struct ZkDated<'a> {
     /// contract whose winner must be paid an exact amount (a session's
     /// withdrawal), one transaction per proof class.
     pub prove_presigned: bool,
+    /// See [`Dated::post_csv`].
+    pub post_csv: u16,
 }
 
 impl<'a> ZkDated<'a> {
     /// The mover's runtime proofs (v1's D59).
     pub fn new(family: &'a dyn lngap_pos::ext::Family) -> ZkDated<'a> {
-        ZkDated { family, prove_presigned: false }
+        ZkDated { family, prove_presigned: false, post_csv: 0 }
     }
 
     /// The search's choice of a head (no family needed).
@@ -194,6 +204,9 @@ impl Dated for ZkDated<'_> {
     }
     fn lean(&self) -> bool {
         self.family.lean_moves()
+    }
+    fn post_csv(&self) -> u16 {
+        self.post_csv
     }
     fn mover_splits(&self, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, outcomes: &[Outcome]) -> Vec<Leaf> {
         let w = ctx.params.delta + ctx.params.delta_prime;
@@ -392,8 +405,14 @@ fn post_body(g: &dyn Dated, b: Builder, l: &Layout, keys: &PosDepthKeys, keys_pr
 /// output. Witness, wire order: the prior head's tied authorship block,
 /// the new head's, the pair reveal, the hub's signature, the user's.
 pub fn post_leaf(g: &dyn Dated, ctx: &CommitCtx, l: &Layout, keys: &PosDepthKeys, keys_prev: Option<&PosDepthKeys>, name: &str) -> Leaf {
-    let b = post_body(g, ctx.two_of_two_verify(Builder::new()), l, keys, keys_prev);
-    Leaf::new(name.to_string(), b.push_int(1).into_script(), Timelock::NONE)
+    let csv = g.post_csv();
+    let (mut b, mut tl) = (Builder::new(), Timelock::NONE);
+    if csv > 0 {
+        b = b.csv(csv);
+        tl.csv = Some(csv);
+    }
+    let b = post_body(g, ctx.two_of_two_verify(b), l, keys, keys_prev);
+    Leaf::new(name.to_string(), b.push_int(1).into_script(), tl)
 }
 
 /// `escalate` on a contract output: either party takes the game from the

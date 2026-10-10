@@ -215,22 +215,57 @@ impl Session {
         let p = &self.set[name];
         p.finish(wire, &p.sign(&self.hub.payment).unwrap(), &p.sign(&self.user.payment).unwrap())
     }
-    /// Broadcast a link of the chain: its poster `by` bumps it with a
-    /// child (one-parent-one-child package); the child.
-    fn broadcast_link(&mut self, rt: &Regtest, tx: &Transaction, by: Role) -> Transaction {
-        assert!(rt.test_accept(tx).is_err(), "a link carries no fee of its own");
-        let child = self.wallets[by.idx()].bump(tx, 1);
-        rt.submit_package(&[tx.clone(), child.clone()]).unwrap_or_else(|e| panic!("{}: the package: {e:#}", self.cid));
+    /// Broadcast a link of the chain: it relays alone at its floor, then
+    /// its poster `by` bumps it with a child spending its anchor. While it
+    /// is unconfirmed, the opponent's next link (`next`, if any) can't
+    /// enter the mempool on top of it (`1 OP_CSV` on `post`). A party
+    /// replaying the other's move (after off-chain play) can't spend its
+    /// anchor: that link confirms at its floor. Mined; the child, if any.
+    fn broadcast_link(&mut self, rt: &Regtest, tx: &Transaction, by: Role, next: Option<&Transaction>) -> Option<Transaction> {
+        let name = self.link_name(tx);
+        let fee = self.set[&name].prevout.value - tx.output.iter().map(|o| o.value).sum::<Amount>();
+        assert!(fee.to_sat() >= tx.vsize() as u64, "{}: a link pays its floor: {fee} for {} vB", self.cid, tx.vsize());
+        rt.send_raw(tx).unwrap_or_else(|e| panic!("{}: the link alone, at its floor: {e:#}", self.cid));
+        let child = (self.contract.poster(&name) == by).then(|| {
+            let child = self.wallets[by.idx()].bump(tx, 1);
+            rt.send_raw(&child).unwrap_or_else(|e| panic!("{}: the poster's child: {e:#}", self.cid));
+            child
+        });
+        if let Some(n) = next {
+            let r = rt.test_accept(n);
+            assert!(r.as_ref().is_err_and(|e| e.contains("non-BIP68-final")), "{}: the next move must wait for the link to confirm: {r:?}", self.cid);
+        }
         rt.mine(1).unwrap();
         assert!(rt.confirmations(&tx.compute_txid()).unwrap().is_some(), "the link is mined");
         child
+    }
+    /// The name of the pre-signed transaction spending what `tx` spends.
+    fn link_name_of_input(&self, tx: &Transaction) -> String {
+        let op = tx.input[0].previous_output;
+        self.set.iter().find(|(_, p)| p.tx.input[0].previous_output == op).map(|(n, _)| n.clone()).expect("a pre-signed spend")
+    }
+    /// The name of the link `tx` in the pre-signed set.
+    fn link_name(&self, tx: &Transaction) -> String {
+        let txid = tx.compute_txid();
+        self.set.iter().find(|(_, p)| p.tx.compute_txid() == txid).map(|(n, _)| n.clone()).expect("a link of the set")
+    }
+    /// The link after `name` in the chain, if any.
+    fn next_link(&self, name: &str) -> Option<String> {
+        let j: u32 = match name {
+            "escalate" if self.set.contains_key("inputs") => return Some("inputs".to_string()),
+            "escalate" | "inputs" => 1,
+            _ => name.trim_start_matches("move_").parse().unwrap(),
+        };
+        (j < self.m() && (j as usize) < self.entries.len()).then(|| format!("move_{}", j + 1))
     }
     /// Post the link `name`, by `by`: its output, and the link with its
     /// child's size.
     fn post_link(&mut self, rt: &Regtest, name: &str, by: Role) -> (OutPoint, TxOut, Transaction, usize) {
         let tx = self.finish(name, self.link_wire(name));
-        let child = self.broadcast_link(rt, &tx, by);
-        (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone(), tx, child.vsize())
+        // the opponent's next move (inputs is Alice's own, after her escalation)
+        let next = self.next_link(name).filter(|n| n != "inputs").map(|n| self.finish(&n, self.link_wire(&n)));
+        let child = self.broadcast_link(rt, &tx, by, next.as_ref());
+        (OutPoint { txid: tx.compute_txid(), vout: 0 }, tx.output[0].clone(), tx, child.map_or(0, |c| c.vsize()))
     }
     /// Post move `j >= 2`, by `by`.
     fn post(&mut self, rt: &Regtest, j: u32, by: Role) -> (OutPoint, TxOut, Transaction) {
@@ -310,7 +345,12 @@ impl Session {
         let leaf = tree.leaf("alice_reserve").unwrap();
         let i = self.terms.bits;
         let prev = tx.output[i as usize].clone();
-        assert_eq!(prev.value, self.terms.reserves(), "the reserve output holds both reserves");
+        // both reserves, less the floors and anchors the links carried out
+        // of the contract (the hub's forfeited reserve bears them, D-J2)
+        let floors = self.contract.value() - self.set[&self.link_name_of_input(tx)].prevout.value;
+        assert!(floors < self.terms.reserve_hub, "the floors fit in the hub's reserve");
+        assert_eq!(prev.value, self.terms.reserves() - floors, "the reserve output holds both reserves less the floors");
+        println!("SESS {}: the links' floors and anchors, out of the hub's reserve: {floors}", self.cid);
         let op = OutPoint { txid: tx.compute_txid(), vout: i };
         let mut s = build_spend(op, &leaf.timelock, vec![TxOut { value: prev.value - Amount::from_sat(1_000), script_pubkey: self.pubs()[0].payout_spk.clone() }]);
         let w = vec![sig(&self.user.payment, &s, 0, std::slice::from_ref(&prev), &leaf.script)];
@@ -392,7 +432,8 @@ fn terms(id: u32, t_close: u32) -> Terms {
 
 #[test]
 fn sessions_on_regtest() {
-    let rt = Regtest::start().unwrap();
+    // mainnet's relay policy: the links must relay as they would there
+    let rt = Regtest::start_standard().unwrap();
     let mut l2 = L2::new(Keypair::from_seckey_slice(SECP256K1, &[0x5e; 32]).unwrap());
     l2.submit(Op::Mint { amount: 1_000 }).unwrap();
     let dir = std::env::temp_dir().join(format!("lngap-sess-prog-{}", std::process::id()));
@@ -614,7 +655,7 @@ const IMAGE_ID: &str = "4beda75466ff0db4aa6c6fe9512140368ad287c695f0ff162775db93
 #[test]
 #[ignore]
 fn sessions_on_the_groth16_verifier() {
-    let rt = Regtest::start().unwrap();
+    let rt = Regtest::start_standard().unwrap();
     let dir = std::env::temp_dir().join(format!("lngap-sess-real-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(groth16_verifier_elf(), dir.join("zkverifier.elf")).unwrap();

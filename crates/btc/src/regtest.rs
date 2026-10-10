@@ -75,7 +75,13 @@ impl Regtest {
     }
 
     pub fn start_with(initial_blocks: u64) -> Result<Regtest> {
-        Regtest::start_inner(initial_blocks, None)
+        Regtest::start_inner(initial_blocks, None, false)
+    }
+
+    /// Start a node that enforces mainnet's relay policy (no
+    /// `-acceptnonstdtxn`): for tests whose point is what relays.
+    pub fn start_standard() -> Result<Regtest> {
+        Regtest::start_inner(201, None, true)
     }
 
     /// Start a node on a FIXED datadir (wiped first, kept afterwards): the
@@ -84,7 +90,7 @@ impl Regtest {
     ///
     /// [`attach`]: Regtest::attach
     pub fn start_in(datadir: PathBuf, initial_blocks: u64) -> Result<Regtest> {
-        Regtest::start_inner(initial_blocks, Some(datadir))
+        Regtest::start_inner(initial_blocks, Some(datadir), false)
     }
 
     /// Attach to a running node started with [`Regtest::start_in`] (or by
@@ -104,7 +110,7 @@ impl Regtest {
         Ok(Regtest { child: None, rpc, datadir: datadir.to_path_buf(), keep: true, _tmp: None, mine_to, url, cookie })
     }
 
-    fn start_inner(initial_blocks: u64, fixed: Option<PathBuf>) -> Result<Regtest> {
+    fn start_inner(initial_blocks: u64, fixed: Option<PathBuf>, standard: bool) -> Result<Regtest> {
         let bin = std::env::var("LNGAP_BITCOIND").unwrap_or_else(|_| "bitcoind".into());
         let keep = fixed.is_some() || std::env::var("LNGAP_KEEP_DATADIR").map(|v| v == "1").unwrap_or(false);
         let (datadir, tmp) = if let Some(d) = fixed {
@@ -146,7 +152,7 @@ impl Regtest {
                 "-server=1",
                 "-listen=0",
                 "-txindex=1",
-                "-acceptnonstdtxn=1",
+                if standard { "-acceptnonstdtxn=0" } else { "-acceptnonstdtxn=1" },
                 "-fallbackfee=0.0001",
                 "-debuglogfile=debug.log",
                 &format!("-datadir={}", datadir.display()),
