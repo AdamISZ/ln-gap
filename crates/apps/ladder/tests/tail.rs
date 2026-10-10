@@ -55,8 +55,8 @@ impl Chain {
 /// The parties' keys for the messages the tail's rules read.
 struct Keys {
     final_: Vec<WotsSecret>,
-    path: [Vec<WotsSecret>; 2],
-    hop: [WotsSecret; 2],
+    path: Vec<Vec<WotsSecret>>,
+    hop: Vec<WotsSecret>,
 }
 
 impl Keys {
@@ -67,8 +67,8 @@ impl Keys {
             x
         };
         let final_ = s.fields(s.depths()).iter().enumerate().map(|(f, (_, l))| WotsSecret::from_entropy(WotsParams::for_bytes(*l as u32), e(1, f))).collect();
-        let path = [first_fields().iter().enumerate().map(|(f, l)| WotsSecret::from_entropy(WotsParams::for_bytes(*l as u32), e(2, f))).collect(), second_fields().iter().enumerate().map(|(f, l)| WotsSecret::from_entropy(WotsParams::for_bytes(*l as u32), e(3, f))).collect()];
-        let hop = [WotsSecret::from_entropy(WotsParams::for_bytes(1), e(4, 0)), WotsSecret::from_entropy(WotsParams::for_bytes(1), e(4, 1))];
+        let path = (0..CHUNKS).map(|c| chunk_fields(c).iter().enumerate().map(|(f, l)| WotsSecret::from_entropy(WotsParams::for_bytes(*l as u32), e(10 + c as u8, f))).collect()).collect();
+        let hop = (0..CHUNKS).map(|k| WotsSecret::from_entropy(WotsParams::for_bytes(1), e(4, k))).collect();
         Keys { final_, path, hop }
     }
 }
@@ -77,8 +77,8 @@ impl Keys {
 /// choice.
 struct Posted {
     final_: Vec<Vec<u8>>,
-    path: [Vec<u8>; 2],
-    choice: [u8; 2],
+    path: Vec<Vec<u8>>,
+    choice: u8,
 }
 
 fn field(msg: &[u8], sizes: &[usize], f: usize) -> Vec<u8> {
@@ -94,14 +94,14 @@ fn fires(s: &Schedule, rule: &Rule, keys: &Keys, p: &Posted, wit: &[u8]) -> (boo
         Msg::Word(_) => unreachable!(),
     };
     let script = rule.script(Builder::new(), &pk);
-    let sizes = [first_fields(), second_fields()];
+    let sizes: Vec<Vec<usize>> = (0..CHUNKS).map(chunk_fields).collect();
     let reveals: Vec<Vec<Vec<u8>>> = rule
         .msgs
         .iter()
         .map(|m| match *m {
             Msg::Field(_, f) => wots_wire(&keys.final_[f].sign(&p.final_[f]).unwrap()),
             Msg::Path(l, f) => wots_wire(&keys.path[l][f].sign(&field(&p.path[l], &sizes[l], f)).unwrap()),
-            Msg::Hop(l) => wots_wire(&keys.hop[l].sign(&[p.choice[l]]).unwrap()),
+            Msg::Hop(l) => wots_wire(&keys.hop[l].sign(&[p.choice]).unwrap()),
             Msg::Word(_) => unreachable!(),
         })
         .collect();
@@ -145,12 +145,15 @@ fn the_tail_over_a_chain() {
         let sx = u64::from(t) + 1;
         let y = j.jump(sx);
         let path = Path::build(&j, u64::from(t), y, &|x| c.hashes[x as usize]);
-        let (a, b) = path.messages(&c.hashes[t as usize]);
-        let link = usize::from(path.n() > CHUNK);
+        let m = path.messages(&c.hashes[t as usize]);
+        let k = path.chunks();
         let pre_y = c.pre(y);
         for (jh, want) in [(c.hashes[y as usize], false), ([5u8; 20], true)] {
-            let p = Posted { final_: final_move(&c, t, (0x1000, 7, 1200), jh), path: [a.clone(), b.clone()], choice: [0, 0] };
-            check(&format!("jump at t = {t} (y = {y}, n = {}), J {}", path.n(), if want { "wrong" } else { "right" }), fires(&s, &jump_verdict(&s, link), &keys, &p, &pre_y), want);
+            let p = Posted { final_: final_move(&c, t, (0x1000, 7, 1200), jh), path: m.clone(), choice: 0 };
+            check(&format!("jump at t = {t} (y = {y}, n = {}), J {}", path.n(), if want { "wrong" } else { "right" }), fires(&s, &jump_verdict(&s, k), &keys, &p, &pre_y), want);
+            if k > 1 {
+                check(&format!("jump at t = {t}: the verdict for {} chunks", k - 1), fires(&s, &jump_verdict(&s, k - 1), &keys, &p, &pre_y), false);
+            }
         }
         println!("TAIL jump: t = {t}, y = jump({sx}) = {y}, a path of {} hops", path.n());
     }
@@ -159,7 +162,8 @@ fn the_tail_over_a_chain() {
     let t = 1500u32;
     let y = 1200u64;
     let path = Path::build(&j, u64::from(t), y, &|x| c.hashes[x as usize]);
-    let (a, b) = path.messages(&c.hashes[t as usize]);
+    let m = path.messages(&c.hashes[t as usize]);
+    let kc = path.chunks();
     let pre_y = c.pre(y);
     for ((addr, value, ls), want, what) in [
         ((0x1000, 7, 1200), false, "an honest read"),
@@ -168,53 +172,59 @@ fn the_tail_over_a_chain() {
         ((0x1000, 7, NEVER), true, "never written, but step 1200 wrote it"),
         ((0x1004, 7, 1100), false, "another address, written earlier"),
     ] {
-        let p = Posted { final_: final_move(&c, t, (addr, value, ls), [0; 20]), path: [a.clone(), b.clone()], choice: [0, 0] };
-        check(&format!("read: {what}"), fires(&s, &read_verdict(&s, 0, 1), &keys, &p, &pre_y), want);
+        let p = Posted { final_: final_move(&c, t, (addr, value, ls), [0; 20]), path: m.clone(), choice: 0 };
+        check(&format!("read: {what}"), fires(&s, &read_verdict(&s, kc, 1), &keys, &p, &pre_y), want);
         assert_eq!(read_contradicts(addr, value, ls, t, y as u32, 0x1000, 7), want, "the mirror: {what}");
     }
-    println!("TAIL read: t = {t}, y = {y}, a path of {} hops", path.n());
+    println!("TAIL read: t = {t}, y = {y}, a path of {} hops in {kc} chunks", path.n());
 
     // ----- the hops: each revealed honestly; a forged hash fails -----
-    let p = Posted { final_: final_move(&c, t, (0x1000, 7, 1200), [0; 20]), path: [a.clone(), b.clone()], choice: [0, 0] };
+    let p = Posted { final_: final_move(&c, t, (0x1000, 7, 1200), [0; 20]), path: m.clone(), choice: 0 };
     let mut x = u64::from(t);
     let hops = j.path(u64::from(t), y);
-    for (k, (_, next)) in hops.iter().enumerate() {
-        let link = usize::from(k >= CHUNK);
-        let mut pk = Posted { final_: p.final_.clone(), path: p.path.clone(), choice: [k as u8, k as u8] };
-        check(&format!("hop {k} honest"), fires(&s, &hop_rule(&s, link, k), &keys, &pk, &c.pre(x)), true);
+    for (i, (_, next)) in hops.iter().enumerate() {
+        let mut pk = Posted { final_: p.final_.clone(), path: p.path.clone(), choice: i as u8 };
+        check(&format!("hop {i} honest"), fires(&s, &hop_rule(&s, kc, i), &keys, &pk, &c.pre(x)), true);
         let mut bad = c.pre(x);
         bad[45] ^= 1;
-        check(&format!("hop {k}, a wrong preimage"), fires(&s, &hop_rule(&s, link, k), &keys, &pk, &bad), false);
-        pk.choice = [(k + 1) as u8; 2];
-        check(&format!("hop {k}, another choice"), fires(&s, &hop_rule(&s, link, k), &keys, &pk, &c.pre(x)), false);
+        check(&format!("hop {i}, a wrong preimage"), fires(&s, &hop_rule(&s, kc, i), &keys, &pk, &bad), false);
+        pk.choice = (i + 1) as u8;
+        check(&format!("hop {i}, another choice"), fires(&s, &hop_rule(&s, kc, i), &keys, &pk, &c.pre(x)), false);
         x = *next;
     }
     // a forged hash along the path: the hop before it no longer reveals
     let mut forged = path.clone();
-    let k = path.n() / 2;
-    forged.hashes[k][0] ^= 1;
-    let (fa, fb) = forged.messages(&c.hashes[t as usize]);
-    let xk = hops[k - 1].1.max(0);
-    let pf = Posted { final_: p.final_.clone(), path: [fa, fb], choice: [k as u8; 2] };
-    check("a forged hop hash", fires(&s, &hop_rule(&s, 0, k), &keys, &pf, &c.pre(xk)), false);
+    let i = path.n() / 2;
+    forged.hashes[i][0] ^= 1;
+    let xi = hops[i - 1].1;
+    let pf = Posted { final_: p.final_.clone(), path: forged.messages(&c.hashes[t as usize]), choice: i as u8 };
+    check("a forged hop hash", fires(&s, &hop_rule(&s, kc, i), &keys, &pf, &c.pre(xi)), false);
     // her choice beyond the path
-    let pr = Posted { final_: p.final_.clone(), path: p.path.clone(), choice: [path.n() as u8; 2] };
-    let range = hop_rules(&s, 0).into_iter().find(|r| r.name == "hop_range").unwrap();
+    let pr = Posted { final_: p.final_.clone(), path: p.path.clone(), choice: path.n() as u8 };
+    let range = hop_rules(&s, kc).into_iter().find(|r| r.name == "hop_range").unwrap();
     check("a choice beyond the path", fires(&s, &range, &keys, &pr, &[]), true);
-    let pr = Posted { final_: p.final_.clone(), path: p.path.clone(), choice: [0; 2] };
+    let pr = Posted { final_: p.final_.clone(), path: p.path.clone(), choice: 0 };
     check("a choice on the path", fires(&s, &range, &keys, &pr, &[]), false);
 
     // ----- no hops: the end must be h(t) -----
     let t0 = (1..1990u32).find(|t| j.jump(u64::from(*t) + 1) == u64::from(*t)).unwrap();
     let empty = Path::build(&j, u64::from(t0), u64::from(t0), &|x| c.hashes[x as usize]);
     assert_eq!(empty.n(), 0);
-    let (ea, eb) = empty.messages(&c.hashes[t0 as usize]);
-    let pe = Posted { final_: final_move(&c, t0, (0, 0, NEVER), [5; 20]), path: [ea.clone(), eb.clone()], choice: [0, 0] };
-    check("no hops, the end h(t), J wrong", fires(&s, &jump_verdict(&s, 0), &keys, &pe, &c.pre(u64::from(t0))), true);
-    let mut ea2 = ea.clone();
-    ea2[1 + TYPES_BYTES] ^= 1; // the end, not h(t)
-    let pe2 = Posted { final_: pe.final_.clone(), path: [ea2, eb], choice: [0, 0] };
-    check("no hops, an end that isn't h(t)", fires(&s, &jump_verdict(&s, 0), &keys, &pe2, &c.pre(u64::from(t0))), false);
+    let em = empty.messages(&c.hashes[t0 as usize]);
+    let pe = Posted { final_: final_move(&c, t0, (0, 0, NEVER), [5; 20]), path: em.clone(), choice: 0 };
+    check("no hops, the end h(t), J wrong", fires(&s, &jump_verdict(&s, 1), &keys, &pe, &c.pre(u64::from(t0))), true);
+    let mut em2 = em.clone();
+    em2[0][1 + TYPES_BYTES] ^= 1; // the end, not h(t)
+    let pe2 = Posted { final_: pe.final_.clone(), path: em2, choice: 0 };
+    check("no hops, an end that isn't h(t)", fires(&s, &jump_verdict(&s, 1), &keys, &pe2, &c.pre(u64::from(t0))), false);
+
+    // ----- the longest path: 86 hops in 8 chunks, and its last hop -----
+    let long = Chain::new(JumpList::new(29), 2);
+    let _ = long;
+    assert_eq!(MAX_HOPS, 86);
+    assert_eq!(chunks_for(86), 8);
+    assert_eq!(chunks_for(9), 1);
+    assert_eq!(chunks_for(10), 2);
 
     println!("TAIL every rule within the stack limit: peak {peak}");
 }

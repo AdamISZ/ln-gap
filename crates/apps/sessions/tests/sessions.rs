@@ -122,7 +122,7 @@ impl Session {
             checks,
             moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
             inputs: input_secrets.iter().map(|k| k.public()).collect(),
-            tail: None,
+            tail: program.schedule.jump.map(|_| tail_keys(id)),
         };
         let contract = Contract::new(spec, &program).unwrap();
         Session { terms, cid, user, hub, contract, input_secrets, moves, pdf: pdf.to_string(), words: vec![], msgs: vec![], set: HashMap::new(), wallets: vec![] }
@@ -156,8 +156,23 @@ impl Session {
         let dir = std::env::temp_dir().join(format!("lngap-sess-{}-{}", std::process::id(), self.cid));
         let _ = std::fs::remove_dir_all(&dir);
         let s = search(&self.pdf, inp, &dir, &Behaviour::default(), &Behaviour::default(), ForceCondition::ValidInputStepAndHash).unwrap().expect("the hub challenges");
+        // under a jump list, the long jump's hash Alice's disputed step
+        // commits to, from her checkpoints
+        let jh = self.contract.program.schedule.jump.map(|j| {
+            let t = u64::from(s.final_step.agreed_step);
+            let y = j.jump(t + 1);
+            if y == t {
+                s.final_step.prev_hash
+            } else {
+                let pd = emulator::loader::program_definition::ProgramDefinition::from_config(&self.pdf).unwrap();
+                let d = format!("{}/prover/", dir.display());
+                let (_, trace) = pd.execute_helper(&d, &d, inp.to_vec(), Some(vec![y]), None, false).unwrap();
+                let h = &trace.iter().find(|(tr, _)| tr.step_number == y).unwrap().1;
+                hex::decode(h).unwrap().try_into().unwrap()
+            }
+        });
         let _ = std::fs::remove_dir_all(&dir);
-        self.msgs = from_search(&self.contract.program.schedule, &s, None).unwrap();
+        self.msgs = from_search(&self.contract.program.schedule, &s, jh.as_ref()).unwrap();
         self.words = input_words(inp);
         println!("SESS {}: Alice claims {what}: the program {:?} at step {}", self.cid, s.claim.0, s.claim.1);
     }
@@ -431,6 +446,13 @@ impl Session {
     }
 }
 
+/// The tail's keys (a jump list's read and jump challenges), public.
+fn tail_keys(id: u32) -> lngap_ladder::tail::TailKeys {
+    use lngap_ladder::tail::{chunk_fields, CHUNKS};
+    let k = |who: &str, c: usize, f: usize, n: usize| WotsSecret::from_entropy(WotsParams::for_bytes(n as u32), Seed::from_label(&format!("sess/{id}/{who}/tail/{c}/{f}")).derive_bytes("wots")).public();
+    lngap_ladder::tail::TailKeys { path: (0..CHUNKS).map(|c| chunk_fields(c).iter().enumerate().map(|(f, n)| k("hub", c, f, *n)).collect()).collect(), hop: (0..CHUNKS).map(|c| k("alice", c, 0, 1)).collect() }
+}
+
 fn terms(id: u32, t_close: u32) -> Terms {
     Terms { id, unit: Amount::from_sat(100_000), bits: 4, low_bits: 0, deposit: 10, t_close, reserve_alice: Amount::from_sat(200_000), reserve_hub: Amount::from_sat(300_000) }
 }
@@ -660,9 +682,11 @@ fn sessions_on_the_groth16_verifier() {
     let dir = std::env::temp_dir().join(format!("lngap-sess-real-{}-{}", std::process::id(), std::env::var("LNGAP_NARY").unwrap_or_default()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(groth16_verifier_elf(), dir.join("zkverifier.elf")).unwrap();
-    // the search's arity: LNGAP_NARY (2 or 8; default 8)
+    // the search's arity: LNGAP_NARY (2 or 8; default 8); the trace hashed
+    // as a jump list unless LNGAP_JUMP=0
     let nary: u8 = std::env::var("LNGAP_NARY").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
-    std::fs::write(dir.join("groth16.yaml"), format!("elf: zkverifier.elf\nnary_search: {nary}\nmax_steps: 536870912\ninput_section_name: .input\ninputs:\n  - size: 172\n    owner: prover\n")).unwrap();
+    let jump = std::env::var("LNGAP_JUMP").map(|v| v != "0").unwrap_or(true);
+    std::fs::write(dir.join("groth16.yaml"), format!("elf: zkverifier.elf\nnary_search: {nary}\nmax_steps: 536870912\ninput_section_name: .input\njump_list: {jump}\ninputs:\n  - size: 172\n    owner: prover\n")).unwrap();
     let pdf = dir.join("groth16.yaml").display().to_string();
     let valid = hex::decode(include_str!("data/withdraw-9-42.hex").trim()).unwrap();
     let words = input_words(&valid);
@@ -682,7 +706,7 @@ fn sessions_on_the_groth16_verifier() {
     let mk = |cid| Session::with(terms(42, t_close), cid, &pdf, b_word, checks.clone());
     let (mut r, mut x, mut i, mut mm) = (mk(61), mk(62), mk(63), mk(64));
     let m = r.m();
-    println!("SESS [real] the Groth16 verifier, {nary}-ary search: {rounds} rounds, {m} depths; four sessions' keys and families in {:.1?}", t.elapsed());
+    println!("SESS [real] the Groth16 verifier, {nary}-ary search{}: {rounds} rounds, {m} depths; four sessions' keys and families in {:.1?}", if jump { ", a jump list" } else { "" }, t.elapsed());
     let t = Instant::now();
     r.play_input(&valid, "b = 9 (a valid proof)");
     x.play_input(&tampered, "b = 10 (the proof is for 9)");

@@ -59,9 +59,38 @@ pub fn read_signed(key: &WotsPublic, wire: &[Vec<u8>]) -> Result<Vec<u8>> {
 /// A link's own witness items: below the two 2-of-2 signatures, the
 /// script and the control block.
 fn link_items(tx: &Transaction) -> Result<Vec<Vec<u8>>> {
-    let w: Vec<Vec<u8>> = tx.input[0].witness.iter().map(|x| x.to_vec()).collect();
+    link_items_in(tx, 0)
+}
+
+/// [`link_items`] of input `i` (a combine carries a chunk in each).
+fn link_items_in(tx: &Transaction, i: usize) -> Result<Vec<Vec<u8>>> {
+    let w: Vec<Vec<u8>> = tx.input.get(i).context("no such input")?.witness.iter().map(|x| x.to_vec()).collect();
     ensure!(w.len() >= 4, "not a link");
     Ok(w[..w.len() - 4].to_vec())
+}
+
+/// [`move_wires`] of input `i`.
+pub fn move_wires_in(tx: &Transaction, i: usize, keys: &[WotsPublic]) -> Result<Vec<Vec<Vec<u8>>>> {
+    let items = link_items_in(tx, i)?;
+    let mut end = items.len();
+    let mut out = vec![];
+    for k in keys {
+        let n = 2 * k.params.total_digits() as usize;
+        ensure!(end >= n, "the input carries no move");
+        out.push(items[end - n..end].to_vec());
+        end -= n;
+    }
+    Ok(out)
+}
+
+/// What input `i` carries under `keys`, field by field, in order.
+pub fn read_move_in(tx: &Transaction, i: usize, keys: &[WotsPublic]) -> Result<Vec<u8>> {
+    let wires = move_wires_in(tx, i, keys)?;
+    let mut m = vec![];
+    for (k, w) in keys.iter().zip(&wires) {
+        m.extend(read_signed(k, w)?);
+    }
+    Ok(m)
 }
 
 /// A move's fields' signature items in a link, as they appear (wire
@@ -241,13 +270,14 @@ impl Prover {
     fn hashes_at(&self, steps: &[u64]) -> Result<std::collections::BTreeMap<u64, ([u8; 20], lngap_zk::Step)>> {
         hashes_at(&self.pdf, &self.dir, &self.input, steps, self.fail.clone())
     }
-    /// The hub's path as read (its links' messages): the first hop whose
-    /// hash isn't the one in her own history (or `None`: the path is
-    /// genuine). Her history up to the agreed step is the truth.
-    pub fn check_path(&self, first: &[u8], second: &[u8]) -> Result<Option<usize>> {
+    /// The hub's path as read (its chunks, from its combine's inputs): the
+    /// first hop whose hash isn't the one in her own history (or `None`:
+    /// the path is genuine). Her history up to the agreed step is the
+    /// truth.
+    pub fn check_path(&self, chunks: &[Vec<u8>]) -> Result<Option<usize>> {
         let j = self.s.jump.context("a jump list")?;
         let t = u64::from(View { s: &self.s, msgs: &self.msgs }.record().step);
-        let (n, types, end, hops) = HopPath::parse(first, second);
+        let (n, types, end, hops) = HopPath::parse(chunks);
         let mut xs = vec![t];
         for ty in &types {
             let x = *xs.last().unwrap();

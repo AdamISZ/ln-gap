@@ -168,13 +168,12 @@ impl Spec<'_> {
                 v.push(equiv_move_leaf(ctx, &format!("{d}_{f}"), k, mover_at(d).other()));
             }
         }
-        // under a jump list, the hub's path (the read and jump challenges)
-        if j == m {
-            if let Some(t) = self.tail {
-                let csv = self.post_csv.max(1);
-                let b = verify_move(ctx.two_of_two_verify(Builder::new().csv(csv)), &t.path[0]);
-                v.push(Leaf::new("path", b.push_int(1).into_script(), Timelock::csv(csv)));
-            }
+        // under a jump list, the hub's path split (the read and jump
+        // challenges): its carriers take the path's chunks
+        if j == m && self.tail.is_some() {
+            let csv = self.post_csv.max(1);
+            let b = ctx.two_of_two_verify(Builder::new().csv(csv));
+            v.push(Leaf::new("path", b.push_int(1).into_script(), Timelock::csv(csv)));
         }
         // Alice's proofs
         if j == m {
@@ -191,20 +190,25 @@ impl Spec<'_> {
 /// Where in the tail an output sits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TailOut {
-    /// After the hub's path link `l` (0 or 1).
+    /// `path_split`'s carrier `c` (chunk `c`'s input in a combine).
+    Carrier(usize),
+    /// After the hub's `combine_<k>` (a path of `k` chunks).
     Path(usize),
-    /// After Alice's choice of hop on path link `l`'s output.
+    /// After Alice's choice of hop on `combine_<k>`'s output.
     Hop(usize),
 }
 
 impl Spec<'_> {
     /// The leaves of an output in the tail (a jump list's read and jump
     /// challenges, lngap_ladder::tail):
-    /// - after path link 0: the hub's second link (`post`), Alice's choice
-    ///   (`hop`), the hub's verdicts after `w` (`disprove_jump`,
-    ///   `disprove_read_<r>`), Alice's timeout after `w + delta'`;
-    /// - after path link 1: the same but `post`;
-    /// - after her choice: the hub's reveal of the hop (`disprove_hop_<k>`,
+    /// - a carrier: `chunk` (2-of-2 pre-signed into a combine, with chunk
+    ///   `c`'s signatures); carrier 0 also Alice's timeout after `w +
+    ///   delta'` (the hub split and stalled), the others the hub's `sweep`
+    ///   after `w` (left over by a shorter path);
+    /// - after `combine_<k>`: Alice's choice (`hop`), the hub's verdicts
+    ///   after `w` (`disprove_jump`, `disprove_read_<r>`), Alice's timeout
+    ///   after `w + delta'`;
+    /// - after her choice: the hub's reveal of the hop (`disprove_hop_<i>`,
     ///   `disprove_hop_range`), Alice's timeout after `w`.
     pub fn tail_leaves(&self, at: TailOut) -> Vec<Leaf> {
         let ctx = self.ctx;
@@ -215,22 +219,29 @@ impl Spec<'_> {
         let mut v = vec![];
         let hub_gate = |lock: u16| Builder::new().csv(lock).checksigverify(&ctx.key(Role::Hub).payment);
         match at {
-            TailOut::Path(l) => {
-                if l == 0 {
-                    let b = verify_move(ctx.two_of_two_verify(Builder::new().csv(csv)), &t.path[1]);
-                    v.push(Leaf::new("post", b.push_int(1).into_script(), Timelock::csv(csv)));
+            TailOut::Carrier(c) => {
+                let b = verify_move(ctx.two_of_two_verify(Builder::new()), &t.path[c]);
+                v.push(Leaf::new("chunk", b.push_int(1).into_script(), Timelock::NONE));
+                if c == 0 {
+                    let lock = w + ctx.params.delta_prime;
+                    let b = ctx.two_of_two_verify(Builder::new().csv(lock));
+                    v.push(Leaf::new(Self::split_name(Role::User), b.push_int(1).into_script(), Timelock::csv(lock)));
+                } else {
+                    v.push(Leaf::new("sweep", hub_gate(w).push_int(1).into_script(), Timelock::csv(w)));
                 }
-                let b = verify_drop(ctx.two_of_two_verify(Builder::new().csv(csv)), &t.hop[l]);
+            }
+            TailOut::Path(k) => {
+                let b = verify_drop(ctx.two_of_two_verify(Builder::new().csv(csv)), &t.hop[k - 1]);
                 v.push(Leaf::new("hop", b.push_int(1).into_script(), Timelock::csv(csv)));
-                for r in crate::tail::verdicts(self.s, l) {
+                for r in crate::tail::verdicts(self.s, k) {
                     v.push(Leaf::new(format!("disprove_{}", r.name), r.script(hub_gate(w), &key), Timelock::csv(w)));
                 }
                 let lock = w + ctx.params.delta_prime;
                 let b = ctx.two_of_two_verify(Builder::new().csv(lock));
                 v.push(Leaf::new(Self::split_name(Role::User), b.push_int(1).into_script(), Timelock::csv(lock)));
             }
-            TailOut::Hop(l) => {
-                for r in crate::tail::hop_rules(self.s, l) {
+            TailOut::Hop(k) => {
+                for r in crate::tail::hop_rules(self.s, k) {
                     v.push(Leaf::new(format!("disprove_{}", r.name), r.script(hub_gate(ctx.params.delta), &key), Timelock::csv(ctx.params.delta)));
                 }
                 let b = ctx.two_of_two_verify(Builder::new().csv(w));
@@ -242,8 +253,9 @@ impl Spec<'_> {
     /// A tail rule by name (without `disprove_`), for its witness.
     pub fn tail_rule(&self, at: TailOut, name: &str) -> Option<Rule> {
         let rules = match at {
-            TailOut::Path(l) => crate::tail::verdicts(self.s, l),
-            TailOut::Hop(l) => crate::tail::hop_rules(self.s, l),
+            TailOut::Carrier(_) => vec![],
+            TailOut::Path(k) => crate::tail::verdicts(self.s, k),
+            TailOut::Hop(k) => crate::tail::hop_rules(self.s, k),
         };
         rules.into_iter().find(|r| r.name == name)
     }

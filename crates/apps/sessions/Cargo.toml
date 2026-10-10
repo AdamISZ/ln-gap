@@ -28,4 +28,5 @@ emulator = { git = "https://github.com/FairgateLabs/BitVMX-CPU", rev = "299009c6
 bitvmx-cpu-definitions = { git = "https://github.com/FairgateLabs/BitVMX-CPU", rev = "299009c65e635327025ee13ffe1e1f1671bd0615" }
 
 [dev-dependencies]
+riscv-decode = "0.2.3"
 lngap-tictactoe = { path = "../tictactoe" }

@@ -1242,6 +1242,7 @@ dependencies = [
  "lngap-tictactoe",
  "lngap-v25",
  "lngap-zk",
+ "riscv-decode",
  "serde",
 ]
 

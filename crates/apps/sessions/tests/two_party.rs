@@ -43,11 +43,11 @@ use lngap_ladder::mover_at;
 use lngap_ladder::rules::spends;
 use lngap_ladder::script::{rule_wire, wots_wire, Msg};
 use lngap_lamport::winternitz::{WotsParams, WotsSecret};
-use lngap_sessions::contract::{sign_all, Check, Contract, Program, Spec};
-use lngap_sessions::play::{move_wires, read_move, read_words, word_wires, Prover, Verdict, Verifier};
+use lngap_sessions::contract::{sig_name, sign_all, Check, Contract, Program, Spec};
+use lngap_sessions::play::{move_wires, move_wires_in, read_move, read_move_in, read_words, word_wires, Prover, Verdict, Verifier};
 use lngap_sessions::session::Terms;
 use lngap_ladder::ladder::TailOut;
-use lngap_ladder::tail::{first_fields, second_fields, TailKeys, CHUNK};
+use lngap_ladder::tail::{chunk_fields, TailKeys, CHUNKS};
 use lngap_sessions::play::PathKind;
 use lngap_sessions::statement::{input, write_program_with};
 use emulator::executor::utils::{FailConfiguration, FailReads};
@@ -67,14 +67,21 @@ struct Opened {
     // the hub's
     hub: PartyKeys,
     hub_moves: HashMap<u32, Vec<WotsSecret>>,
-    /// Under a jump list: the hub's path keys, Alice's choice keys.
-    hub_path: Option<[Vec<WotsSecret>; 2]>,
-    alice_hop: Option<[WotsSecret; 2]>,
+    /// Under a jump list: the hub's path chunks' keys, Alice's choice keys
+    /// (one per combine).
+    hub_path: Option<Vec<Vec<WotsSecret>>>,
+    alice_hop: Option<Vec<WotsSecret>>,
     wallets: [FeeWallet; 2],
 }
 
 fn open(rt: &Regtest, dir: &Path, cid: u32, returns: &[(u32, u32)], jump: bool) -> Opened {
     let program = Program::load(&write_program_with(&dir.join(format!("p{cid}")), cid, returns, 2, jump).unwrap()).unwrap();
+    open_program(rt, program, cid, 0, 1, jump)
+}
+
+/// [`open`] on any statement program: `b` in input word `b_word`, the memo
+/// check on word `memo_word`.
+fn open_program(rt: &Regtest, program: Program, cid: u32, b_word: usize, memo_word: usize, jump: bool) -> Opened {
     let m = program.depths();
     let alice = PartyKeys::from_seed(Role::User, Seed::from_label(&format!("2p/{cid}/alice")));
     let hub = PartyKeys::from_seed(Role::Hub, Seed::from_label(&format!("2p/{cid}/hub")));
@@ -88,10 +95,10 @@ fn open(rt: &Regtest, dir: &Path, cid: u32, returns: &[(u32, u32)], jump: bool) 
     let terms = Terms { id: cid, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 5_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(if jump { 300_000 } else { 100_000 }) };
     let params = ChannelParams { presign_fee: Amount::from_sat(80_000), ..ChannelParams::regtest(Amount::ZERO) };
     let tk = |who: &str, l: usize, f: usize, n: usize| WotsSecret::from_entropy(WotsParams::for_bytes(n as u32), Seed::from_label(&format!("2p/{cid}/{who}/tail/{l}/{f}")).derive_bytes("wots"));
-    let hub_path: Option<[Vec<WotsSecret>; 2]> = jump.then(|| [first_fields().iter().enumerate().map(|(f, n)| tk("hub", 0, f, *n)).collect(), second_fields().iter().enumerate().map(|(f, n)| tk("hub", 1, f, *n)).collect()]);
-    let alice_hop = jump.then(|| [tk("alice", 0, 0, 1), tk("alice", 1, 0, 1)]);
-    let tail = hub_path.as_ref().zip(alice_hop.as_ref()).map(|(p, h)| TailKeys { path: [p[0].iter().map(|k| k.public()).collect(), p[1].iter().map(|k| k.public()).collect()], hop: [h[0].public(), h[1].public()] });
-    let spec = Spec { terms, cid, params, pubs: [alice.public(), hub.public()], b_word: 0, checks: vec![Check { name: "memo".into(), word: 1, value: cid }], moves, inputs: inputs.iter().map(|k| k.public()).collect(), tail };
+    let hub_path: Option<Vec<Vec<WotsSecret>>> = jump.then(|| (0..CHUNKS).map(|c| chunk_fields(c).iter().enumerate().map(|(f, n)| tk("hub", c, f, *n)).collect()).collect());
+    let alice_hop: Option<Vec<WotsSecret>> = jump.then(|| (0..CHUNKS).map(|k| tk("alice", k, 0, 1)).collect());
+    let tail = hub_path.as_ref().zip(alice_hop.as_ref()).map(|(p, h)| TailKeys { path: p.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(), hop: h.iter().map(|k| k.public()).collect() });
+    let spec = Spec { terms, cid, params, pubs: [alice.public(), hub.public()], b_word, checks: vec![Check { name: "memo".into(), word: memo_word, value: cid }], moves, inputs: inputs.iter().map(|k| k.public()).collect(), tail };
     let contract = Contract::new(spec, &program).unwrap();
     let (op, _) = rt.fund(&contract.tree().unwrap().script_pubkey(), contract.value()).unwrap();
     let presigned = contract.presign(op).unwrap();
@@ -108,6 +115,19 @@ impl Opened {
     /// Post a link, its poster paying with a child; the link as mined.
     fn post(&mut self, rt: &Regtest, name: &str, wire: Vec<Vec<u8>>, by: Role) -> Transaction {
         let tx = self.finish(name, wire);
+        rt.send_raw(&tx).unwrap_or_else(|e| panic!("{name} at its floor: {e:#}"));
+        let child = self.wallets[by.idx()].bump(&tx, 1);
+        rt.send_raw(&child).unwrap_or_else(|e| panic!("{name}'s child: {e:#}"));
+        rt.mine(1).unwrap();
+        rt.get_tx(&tx.compute_txid()).unwrap()
+    }
+    /// Post a link with several inputs (a combine), each its wire.
+    fn post_multi(&mut self, rt: &Regtest, name: &str, wires: Vec<Vec<Vec<u8>>>, by: Role) -> Transaction {
+        let p = &self.set[name];
+        let n = p.inputs();
+        let hub: Vec<Vec<u8>> = (0..n).map(|i| self.hub_sigs[&sig_name(name, i)].clone()).collect();
+        let alice: Vec<Vec<u8>> = (0..n).map(|i| self.alice_sigs[&sig_name(name, i)].clone()).collect();
+        let tx = p.finish_multi(wires, &hub, &alice);
         rt.send_raw(&tx).unwrap_or_else(|e| panic!("{name} at its floor: {e:#}"));
         let child = self.wallets[by.idx()].bump(&tx, 1);
         rt.send_raw(&child).unwrap_or_else(|e| panic!("{name}'s child: {e:#}"));
@@ -164,13 +184,28 @@ fn dispute(rt: &Regtest, dir: &Path, o: &mut Opened, claim: &[u8], force: ForceC
     wire.extend(o.sign_move(1, &o.alice_moves[&1], alice.last()));
     rt.mine(u64::from(p.to_self_delay)).unwrap();
     o.post(rt, "escalate", wire, Role::User);
-    assert!(o.contract.rest_words().is_empty(), "the mock's words are all the claim's");
+    // the rest of her input, if the claim's words don't cover it
+    let rest_words = o.contract.rest_words();
+    if !rest_words.is_empty() {
+        let wire: Vec<Vec<u8>> = rest_words.iter().rev().flat_map(|&k| wots_wire(&o.inputs[k].sign(&input_message(words[k])).unwrap())).collect();
+        o.post(rt, "inputs", wire, Role::User);
+    }
 
     // ----- the hub: read the claim and the input from the chain
     let esc = o.read(rt, "escalate");
     let keys: Vec<_> = claim_words.iter().map(|&j| o.contract.spec.inputs[j].clone()).collect();
     let read: Vec<u32> = read_words(&esc, &keys, Some(o.key(1))).unwrap();
-    let input_read: Vec<u8> = read.iter().flat_map(|w| w.to_le_bytes()).collect();
+    let mut all = vec![0u32; o.contract.spec.inputs.len()];
+    for (j, w) in claim_words.iter().zip(&read) {
+        all[*j] = *w;
+    }
+    if !rest_words.is_empty() {
+        let rest_keys: Vec<_> = rest_words.iter().map(|&j| o.contract.spec.inputs[j].clone()).collect();
+        for (j, w) in rest_words.iter().zip(read_words(&o.read(rt, "inputs"), &rest_keys, None).unwrap()) {
+            all[*j] = w;
+        }
+    }
+    let input_read: Vec<u8> = all.iter().flat_map(|w| w.to_le_bytes()).collect();
     let move1 = read_move(&esc, o.key(1)).unwrap();
     let Some(mut hub) = Verifier::start(&o.program, &input_read, &dir.join("hub"), &move1, force).unwrap() else {
         // nothing to dispute: Alice's timeout pays her after w
@@ -262,34 +297,33 @@ fn dispute(rt: &Regtest, dir: &Path, o: &mut Opened, claim: &[u8], force: ForceC
                 path.hashes[k][0] ^= 1;
             }
             let h_t = lngap_ladder::moves::View { s: &o.program.schedule, msgs: &hub.msgs }.step_hash();
-            let (first, second) = path.messages(&h_t);
+            let chunks = path.messages(&h_t);
+            let k = path.chunks();
             let hp = o.hub_path.take().unwrap();
             let sign = |keys: &[WotsSecret], msg: &[u8], sizes: &[usize]| -> Vec<Vec<u8>> {
                 let mut at = 0;
-                let sigs: Vec<Vec<Vec<u8>>> = keys.iter().zip(sizes).map(|(k, n)| { let w = wots_wire(&k.sign(&msg[at..at + n]).unwrap()); at += n; w }).collect();
+                let sigs: Vec<Vec<Vec<u8>>> = keys.iter().zip(sizes).map(|(key, n)| { let w = wots_wire(&key.sign(&msg[at..at + n]).unwrap()); at += n; w }).collect();
                 sigs.into_iter().rev().flatten().collect()
             };
-            o.post(rt, "path_0", sign(&hp[0], &first, &first_fields()), Role::Hub);
-            let link = usize::from(path.n() > CHUNK);
-            if link == 1 {
-                o.post(rt, "path_1", sign(&hp[1], &second, &second_fields()), Role::Hub);
-            }
+            // the split, then the combine of k chunks, chunk c in input c
+            o.post(rt, "path_split", vec![], Role::Hub);
+            let wires: Vec<Vec<Vec<u8>>> = (0..k).map(|c| sign(&hp[c], &chunks[c], &chunk_fields(c))).collect();
+            let comb_name = format!("combine_{k}");
+            let comb = o.post_multi(rt, &comb_name, wires, Role::Hub);
+            println!("TWOPARTY the hub's path: {} hops in {k} chunks: path_split {} vB, {comb_name} {} vB", path.n(), o.read(rt, "path_split").vsize(), comb.vsize());
             // Alice reads the path from the chain and checks it against her
             // own history
             let pk = o.contract.spec.tail.clone().unwrap();
-            let read_first = read_move(&o.read(rt, "path_0"), &pk.path[0]).unwrap();
-            let read_second = if link == 1 { read_move(&o.read(rt, "path_1"), &pk.path[1]).unwrap() } else { vec![] };
-            let p_name = format!("path_{link}");
-            let p_tx = o.read(rt, &p_name);
-            let (p_op, p_out) = (OutPoint { txid: p_tx.compute_txid(), vout: 0 }, p_tx.output[0].clone());
+            let read: Vec<Vec<u8>> = (0..k).map(|c| read_move_in(&comb, c, &pk.path[c]).unwrap()).collect();
+            let (p_op, p_out) = (OutPoint { txid: comb.compute_txid(), vout: 0 }, comb.output[0].clone());
             let tail_wire = |o: &Opened, rule: &lngap_ladder::rules::Rule, wit: &[u8]| -> Vec<Vec<u8>> {
                 let reveals: Vec<Vec<Vec<u8>>> = rule
                     .msgs
                     .iter()
                     .map(|msg| match *msg {
                         Msg::Field(d, f) => move_wires(&o.read(rt, &Opened::link_name(d)), o.key(d)).unwrap()[f].clone(),
-                        Msg::Path(l, f) => move_wires(&o.read(rt, &format!("path_{l}")), &pk.path[l]).unwrap()[f].clone(),
-                        Msg::Hop(l) => move_wires(&o.read(rt, &format!("hop_{l}")), std::slice::from_ref(&pk.hop[l])).unwrap()[0].clone(),
+                        Msg::Path(c, f) => move_wires_in(&comb, c, &pk.path[c]).unwrap()[f].clone(),
+                        Msg::Hop(l) => move_wires(&o.read(rt, &format!("hop_{}", l + 1)), std::slice::from_ref(&pk.hop[l])).unwrap()[0].clone(),
                         Msg::Word(_) => unreachable!(),
                     })
                     .collect();
@@ -303,26 +337,26 @@ fn dispute(rt: &Regtest, dir: &Path, o: &mut Opened, claim: &[u8], force: ForceC
                 tx.input[0].witness = tapscript_witness(&wire, &leaf.script, &tree.control_block(leaf_name).unwrap());
                 tx
             };
-            match alice.check_path(&read_first, &read_second).unwrap() {
-                Some(k) => {
-                    // she challenges hop k; the hub can't reveal a forged hop
-                    let hk = o.alice_hop.as_ref().unwrap()[link].sign(&[k as u8]).unwrap();
-                    o.post(rt, &format!("hop_{link}"), wots_wire(&hk), Role::User);
-                    let h_tx = o.read(rt, &format!("hop_{link}"));
+            match alice.check_path(&read).unwrap() {
+                Some(i) => {
+                    // she challenges hop i; the hub can't reveal a forged hop
+                    let hk = o.alice_hop.as_ref().unwrap()[k - 1].sign(&[i as u8]).unwrap();
+                    o.post(rt, &format!("hop_{k}"), wots_wire(&hk), Role::User);
+                    let h_tx = o.read(rt, &format!("hop_{k}"));
                     let (h_op, h_out) = (OutPoint { txid: h_tx.compute_txid(), vout: 0 }, h_tx.output[0].clone());
-                    let at = TailOut::Hop(link);
-                    let rule = o.contract.tail_rule(at, &format!("hop_{k}")).unwrap();
-                    let pre = hub.reveal(&path, k).unwrap();
+                    let at = TailOut::Hop(k);
+                    let rule = o.contract.tail_rule(at, &format!("hop_{i}")).unwrap();
+                    let pre = hub.reveal(&path, i).unwrap();
                     let tree = o.contract.tail_tree(at).unwrap();
-                    let reveal = hub_spend(o, &tree, h_op, &h_out, &format!("disprove_hop_{k}"), tail_wire(o, &rule, &pre));
+                    let reveal = hub_spend(o, &tree, h_op, &h_out, &format!("disprove_hop_{i}"), tail_wire(o, &rule, &pre));
                     rt.mine(u64::from(p.delta)).unwrap();
                     assert!(rt.test_accept(&reveal).is_err(), "a forged hop can't be revealed");
                     rt.mine(u64::from(w)).unwrap();
-                    let name = format!("timeout_hop_{link}");
+                    let name = format!("timeout_hop_{k}");
                     let t = o.finish(&name, vec![]);
                     let t = o.wallets[0].pay(t, &o.set[&name].prevout);
                     confirm(rt, &t).unwrap_or_else(|e| panic!("{name}: {e}"));
-                    End::HopRefuted(k)
+                    End::HopRefuted(i)
                 }
                 None => {
                     // the path is genuine: after her window, the hub's verdict
@@ -330,13 +364,13 @@ fn dispute(rt: &Regtest, dir: &Path, o: &mut Opened, claim: &[u8], force: ForceC
                         PathKind::Jump => "jump".to_string(),
                         PathKind::Read(r) => format!("read_{r}"),
                     };
-                    let at = TailOut::Path(link);
+                    let at = TailOut::Path(k);
                     let rule = o.contract.tail_rule(at, &name).unwrap();
                     let tree = o.contract.tail_tree(at).unwrap();
                     let tx = hub_spend(o, &tree, p_op, &p_out, &format!("disprove_{name}"), tail_wire(o, &rule, &pre_y));
                     rt.mine(u64::from(w)).unwrap();
                     rt.mine_with(std::slice::from_ref(&tx)).unwrap_or_else(|e| panic!("disprove_{name}: {e:#}"));
-                    println!("TWOPARTY the hub's path: {} hops to step {y}, {} link(s); disprove_{name}: {} vB", path.n(), link + 1, tx.vsize());
+                    println!("TWOPARTY the hub's verdict at step {y}: disprove_{name}: {} vB", tx.vsize());
                     End::PathVerdict(name)
                 }
             }
@@ -344,9 +378,12 @@ fn dispute(rt: &Regtest, dir: &Path, o: &mut Opened, claim: &[u8], force: ForceC
     }
 }
 
-/// A step of the honest execution reading an address written earlier: (the
-/// step, which read, the address, the value, its last write).
-fn a_written_read(program: &Program, claim: &[u8], dir: &Path) -> (u64, u8, u32, u32, u64) {
+/// A lying read the search lands on: a step of the honest execution
+/// reading an address written earlier, its value flipped (Alice's fault),
+/// such that BitVMX's search disputes that very step. (the step, which
+/// read, the address, its last write, the fault)
+fn a_read_lie(program: &Program, claim: &[u8], dir: &Path, min_hops: usize) -> (u64, u8, u32, u64, FailConfiguration) {
+    let j = program.schedule.jump.expect("a jump list");
     let d = format!("{}/", dir.display());
     std::fs::create_dir_all(&d).unwrap();
     let (_, last, _) = emulator::decision::challenge::prover_execute(&program.pdf, claim.to_vec(), &d, &d, true, None, false).unwrap();
@@ -355,12 +392,22 @@ fn a_written_read(program: &Program, claim: &[u8], dir: &Path) -> (u64, u8, u32,
     let never = bitvmx_cpu_definitions::constants::LAST_STEP_INIT;
     for (t, _) in trace.iter().rev() {
         for (r, rd) in [(2u8, &t.read_2), (1, &t.read_1)] {
-            if rd.last_step != never && rd.last_step > 0 && t.step_number > rd.last_step + 2 {
-                return (t.step_number, r, rd.address, rd.value, rd.last_step);
+            if rd.last_step == never || rd.last_step == 0 || t.step_number <= rd.last_step + 2 || j.path(t.step_number - 1, rd.last_step).len() < min_hops {
+                continue;
+            }
+            let args: Vec<String> = vec![t.step_number.to_string(), format!("{:#x}", rd.address), format!("{:#x}", rd.value ^ 1), format!("{:#x}", rd.address), rd.last_step.to_string()];
+            let fail = FailConfiguration::new_fail_reads(if r == 1 { FailReads::new(Some(&args), None) } else { FailReads::new(None, Some(&args)) });
+            let sd = dir.join(format!("probe-{}", t.step_number));
+            let found = lngap_zk::dispute::search(&program.pdf, claim, &sd, &lngap_zk::dispute::Behaviour { fail: Some(fail.clone()) }, &lngap_zk::dispute::Behaviour::default(), ForceCondition::ValidInputWrongStepOrHash);
+            if let Ok(Some(sr)) = found {
+                // the search lands on the lie, and the lie isn't the halt
+                if sr.step == t.step_number && sr.final_step.claim_last_step != sr.step {
+                    return (t.step_number, r, rd.address, rd.last_step, fail);
+                }
             }
         }
     }
-    panic!("no read of a written address");
+    panic!("no read lie lands the search on its step");
 }
 
 #[test]
@@ -385,34 +432,103 @@ fn two_parties_play_from_the_chain() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The read and jump challenges (J4). Ignored for now: the hub's path
-/// link carries more one-time signatures than one input's 1,000-item stack
-/// holds (JUMPLIST_PLAN.md, PROGRESS).
+/// The read and jump challenges (J4), on a jump list.
 #[test]
-#[ignore]
 fn the_read_and_jump_challenges() {
     let rt = Regtest::start_standard().unwrap();
     let dir = std::env::temp_dir().join(format!("lngap-2pj-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let b = 40_000u32;
-    let claim = input(b, 55);
-    let probe = open(&rt, &dir, 55, &[(b, 55)], true);
-    let (rs, r, addr, value, ls) = a_written_read(&probe.program, &claim, &dir.join("probe"));
-    // J: a wrong long-jump hash at the step after the read's (its write valid)
-    let fail_j = FailConfiguration { fail_jump: Some(rs), ..Default::default() };
-    // L: a lying read at step rs (the value step ls didn't write)
-    let args: Vec<String> = [rs.to_string(), format!("{addr:#x}"), format!("{:#x}", value ^ 1), format!("{addr:#x}"), ls.to_string()].into();
-    let fail_l = FailConfiguration::new_fail_reads(if r == 1 { FailReads::new(Some(&args), None) } else { FailReads::new(None, Some(&args)) });
-    for (cid, label, fail, forge, want) in [
-        (55u32, "J", fail_j.clone(), false, "PathVerdict(\"jump\")"),
-        (56, "L", fail_l.clone(), false, "PathVerdict(\"read_"),
-        (57, "F", fail_l, true, "HopRefuted"),
+    // L2 and F2: a path of two chunks (more than 9 hops: a combine of two
+    // inputs)
+    for (cid, label, kind, forge, min_hops, want) in [
+        (55u32, "J", "jump", false, 0, "PathVerdict(\"jump\")"),
+        (56, "L", "read", false, 0, "PathVerdict(\"read_"),
+        (57, "F", "read", true, 0, "HopRefuted"),
+        (58, "L2", "read", false, 10, "PathVerdict(\"read_"),
+        (59, "F2", "read", true, 10, "HopRefuted"),
     ] {
         let mut o = open(&rt, &dir, cid, &[(b, cid)], true);
+        let claim = input(b, cid);
+        // a read lie the search lands on, on this contract's program
+        let (rs, r, addr, ls, fail_l) = a_read_lie(&o.program, &claim, &dir.join(format!("probe{cid}")), min_hops);
+        // or, a wrong long-jump hash at that step (its write valid)
+        let fail = if kind == "jump" { FailConfiguration { fail_jump: Some(rs), ..Default::default() } } else { fail_l };
         let t = std::time::Instant::now();
-        let end = dispute(&rt, &dir.join(format!("d{cid}")), &mut o, &input(b, cid), ForceCondition::ValidInputWrongStepOrHash, Some(fail), forge);
-        println!("TWOPARTY {label} (a jump list; step {rs}'s read {r} of {addr:#x}, written at {ls}): {end:?} ({:.1?})", t.elapsed());
+        let end = dispute(&rt, &dir.join(format!("d{cid}")), &mut o, &claim, ForceCondition::ValidInputWrongStepOrHash, Some(fail), forge);
+        println!("TWOPARTY {label} (a jump list; at step {rs}, read {r} of {addr:#x}, last written at {ls}): {end:?} ({:.1?})", t.elapsed());
         assert!(format!("{end:?}").starts_with(want), "{label}: {end:?}");
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The verifier ELF as shipped (BitVMX-CPU's built copy, from the Cargo
+/// checkout).
+fn groth16_verifier_elf() -> std::path::PathBuf {
+    let home = std::env::var("CARGO_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".cargo"));
+    let checkouts = home.join("git/checkouts");
+    for d in std::fs::read_dir(&checkouts).unwrap().flatten() {
+        if !d.file_name().to_string_lossy().starts_with("bitvmx-cpu-") {
+            continue;
+        }
+        for rev in std::fs::read_dir(d.path()).unwrap().flatten() {
+            let elf = rev.path().join("docker-riscv32/verifier/build/zkverifier-new-mul.elf");
+            if rev.file_name().to_string_lossy().starts_with("299009c") && elf.exists() {
+                return elf;
+            }
+        }
+    }
+    panic!("BitVMX-CPU 299009c not found under {}", checkouts.display());
+}
+
+/// Opt-in, slow (the real statement: about 10 minutes): the read challenge
+/// on BitVMX's Groth16 verifier, 8-ary, its trace hashed as a jump list.
+/// Alice's valid proof (b = 9, memo 42), but she flips one register read
+/// around step 300 million (an arithmetic step whose write depends on it):
+/// the search lands there, and the hub wins with a path over the real
+/// trace to the read's last write.
+#[test]
+#[ignore]
+fn the_read_challenge_on_the_groth16_verifier() {
+    let rt = Regtest::start_standard().unwrap();
+    let dir = std::env::temp_dir().join(format!("lngap-2p-real-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(groth16_verifier_elf(), dir.join("zkverifier.elf")).unwrap();
+    std::fs::write(dir.join("groth16.yaml"), "elf: zkverifier.elf\nnary_search: 8\nmax_steps: 536870912\ninput_section_name: .input\njump_list: true\ninputs:\n  - size: 172\n    owner: prover\n").unwrap();
+    let pdf = dir.join("groth16.yaml").display().to_string();
+    let claim = hex::decode(include_str!("data/withdraw-9-42.hex").trim()).unwrap();
+    let program = Program::load(&pdf).unwrap();
+    // an arithmetic step near 300 million reading a register written well
+    // before it: flip that read
+    let t0 = std::time::Instant::now();
+    let probe = dir.join("probe");
+    let d = format!("{}/", probe.display());
+    std::fs::create_dir_all(&d).unwrap();
+    emulator::decision::challenge::prover_execute(&pdf, claim.clone(), &d, &d, true, None, false).unwrap();
+    let pd = emulator::loader::program_definition::ProgramDefinition::from_config(&pdf).unwrap();
+    let from = 300_000_000u64;
+    let (_, trace) = pd.execute_helper(&d, &d, claim.clone(), Some((from..from + 5000).collect()), None, false).unwrap();
+    let never = bitvmx_cpu_definitions::constants::LAST_STEP_INIT;
+    let (q, addr, value, ls) = trace
+        .iter()
+        .map(|(t, _)| t)
+        .filter(|t| t.step_number >= from)
+        .filter_map(|t| {
+            let op = riscv_decode::decode(t.read_pc.opcode).ok()?;
+            use riscv_decode::Instruction as I;
+            let alu = matches!(op, I::Add(_) | I::Sub(_) | I::Xor(_) | I::Or(_) | I::And(_) | I::Addi(_) | I::Xori(_) | I::Ori(_) | I::Andi(_) | I::Sltu(_) | I::Mul(_) | I::Mulhu(_));
+            (alu && t.read_1.last_step != never && t.step_number > t.read_1.last_step + 200 && t.trace_step.get_write().address != t.read_1.address).then(|| (t.step_number, t.read_1.address, t.read_1.value, t.read_1.last_step))
+        })
+        .max_by_key(|c| c.0 - c.3)
+        .expect("an arithmetic step reading an old register");
+    println!("TWOPARTY [real] the honest execution and a window of its trace in {:.0?}: step {q} reads {addr:#x} = {value:#x}, last written at {ls}", t0.elapsed());
+    let args: Vec<String> = vec![q.to_string(), format!("{addr:#x}"), format!("{:#x}", value ^ 1), format!("{addr:#x}"), ls.to_string()];
+    let fail = FailConfiguration::new_fail_reads(FailReads::new(Some(&args), None));
+    let mut o = open_program(&rt, program, 42, 41, 42, true);
+    let t = std::time::Instant::now();
+    let end = dispute(&rt, &dir.join("d"), &mut o, &claim, ForceCondition::ValidInputWrongStepOrHash, Some(fail), false);
+    println!("TWOPARTY [real] the read challenge: {end:?} ({:.0?})", t.elapsed());
+    assert!(format!("{end:?}").starts_with("PathVerdict(\"read_1"), "{end:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }

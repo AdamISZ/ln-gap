@@ -66,8 +66,11 @@ impl FeeWallet {
     /// change back to this wallet.
     pub fn bump(&mut self, parent: &Transaction, anchor: u32) -> Transaction {
         let need = Amount::from_sat((parent.vsize() as u64 + 220) * FEERATE);
+        // the anchor: output `anchor`, or wherever this party's is (a path's
+        // split has it after its carriers)
+        let spk = self.tree.script_pubkey();
+        let anchor = if parent.output[anchor as usize].script_pubkey == spk { anchor } else { parent.output.iter().position(|o| o.script_pubkey == spk).expect("the anchor is this party's") as u32 };
         let a_out = parent.output[anchor as usize].clone();
-        assert_eq!(a_out.script_pubkey, self.tree.script_pubkey(), "the anchor is this party's");
         let i = self.coins.iter().enumerate().filter(|(_, c)| c.1.value + a_out.value >= need + Amount::from_sat(1_000)).min_by_key(|(_, c)| c.1.value).map(|(i, _)| i).expect("a fee coin large enough");
         let (op, coin) = self.coins.remove(i);
         let a_op = OutPoint { txid: parent.compute_txid(), vout: anchor };

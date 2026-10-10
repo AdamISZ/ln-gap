@@ -68,3 +68,66 @@ fn the_presigned_set() {
     assert!(bad.verify(&set, &c.spec.pubs).is_err(), "a signature by the wrong party");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Opt-in: each link's size on BitVMX's Groth16 verifier (8-ary, a jump
+/// list), from the pre-signed set (a link's floor is its vsize at 1
+/// sat/vB): no emulation needed.
+#[test]
+#[ignore]
+fn link_sizes_on_the_groth16_verifier() {
+    let home = std::env::var("HOME").unwrap();
+    let elf = std::fs::read_dir(format!("{home}/.cargo/git/checkouts"))
+        .unwrap()
+        .flatten()
+        .filter(|d| d.file_name().to_string_lossy().starts_with("bitvmx-cpu-"))
+        .flat_map(|d| std::fs::read_dir(d.path()).unwrap().flatten())
+        .map(|r| r.path().join("docker-riscv32/verifier/build/zkverifier-new-mul.elf"))
+        .find(|p| p.exists() && p.to_string_lossy().contains("299009c"))
+        .expect("the verifier ELF");
+    let dir = std::env::temp_dir().join(format!("lngap-sizes-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(elf, dir.join("zkverifier.elf")).unwrap();
+    for (nary, jump) in [(2u8, false), (8, false), (8, true)] {
+        std::fs::write(dir.join("g.yaml"), format!("elf: zkverifier.elf\nnary_search: {nary}\nmax_steps: 536870912\ninput_section_name: .input\njump_list: {jump}\ninputs:\n  - size: 172\n    owner: prover\n")).unwrap();
+        let program = Program::load(&dir.join("g.yaml").display().to_string()).unwrap();
+        let m = program.depths();
+        let (alice, hub) = (PartyKeys::from_seed(Role::User, Seed::from_label("z/alice")), PartyKeys::from_seed(Role::Hub, Seed::from_label("z/hub")));
+        let moves: Vec<Vec<WotsSecret>> = (1..=m).map(|d| program.field_bytes(d).into_iter().enumerate().map(|(f, n)| WotsSecret::from_entropy(WotsParams::for_bytes(n), [d as u8, f as u8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9])).collect()).collect();
+        let inputs: Vec<WotsSecret> = (0..program.info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x70 + j as u8; 32])).collect();
+        let tail = program.schedule.jump.map(|_| {
+            use lngap_ladder::tail::{chunk_fields, TailKeys, CHUNKS};
+            let k = |c: usize, f: usize, n: usize| WotsSecret::from_entropy(WotsParams::for_bytes(n as u32), [0xa0 + c as u8, f as u8, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]).public();
+            TailKeys { path: (0..CHUNKS).map(|c| chunk_fields(c).iter().enumerate().map(|(f, n)| k(c, f, *n)).collect()).collect(), hop: (0..CHUNKS).map(|c| k(0x10 + c, 0, 1)).collect() }
+        });
+        let terms = Terms { id: 42, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 1_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(2_000_000) };
+        let spec = Spec {
+            terms,
+            cid: 42,
+            params: ChannelParams::regtest(Amount::from_sat(20_000_000)),
+            pubs: [alice.public(), hub.public()],
+            b_word: 41,
+            checks: vec![Check { name: "memo".into(), word: 42, value: 42 }],
+            moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
+            inputs: inputs.iter().map(|k| k.public()).collect(),
+            tail,
+        };
+        let c = Contract::new(spec, &program).unwrap();
+        let set = c.presign(OutPoint { txid: Txid::all_zeros(), vout: 0 }).unwrap();
+        // a link's size is its floor less its anchor
+        let size = |name: &str| -> u64 {
+            let p = set.iter().find(|p| p.name == name).unwrap_or_else(|| panic!("{name}"));
+            let input: Amount = std::iter::once(p.prevout.value).chain(p.extra.iter().map(|e| e.0.value)).sum();
+            let outs: Amount = p.tx.output.iter().map(|o| o.value).sum();
+            (input - outs).to_sat()
+        };
+        let label = format!("{nary}-ary{}", if jump { ", a jump list" } else { "" });
+        println!("SIZES {label}: {m} depths, {} pre-signed transactions", set.len());
+        println!("SIZES {label}: escalate {} vB, inputs {} vB, the hub's choice {} vB, Alice's round {} vB, the final move {} vB", size("escalate"), size("inputs"), size("move_2"), size("move_3"), size(&format!("move_{m}")));
+        let chain: u64 = ["escalate".to_string(), "inputs".to_string()].into_iter().chain((2..=m).map(|j| format!("move_{j}"))).map(|n| size(&n)).sum();
+        println!("SIZES {label}: the whole chain of links {chain} vB");
+        if jump {
+            let combines: Vec<String> = (1..=lngap_ladder::tail::CHUNKS).map(|k| format!("{}", size(&format!("combine_{k}")))).collect();
+            println!("SIZES {label}: path_split {} vB; combine_1..8 [{}] vB; hop_1 {} vB", size("path_split"), combines.join(", "), size("hop_1"));
+        }
+    }
+}

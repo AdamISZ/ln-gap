@@ -28,8 +28,14 @@
 //!
 //! With no hops (`n = 0`, `y = t`) the end must be Alice's `h(t)`.
 //!
-//! The path is posted in up to two links of `C` hops each; the first
-//! carries `n`, the types and the end.
+//! The path is posted in one transaction: one input's witness counts
+//! toward Script's 1,000-item stack, and a signed byte costs four items,
+//! so the path is split into chunks of about ten hashes, each carried by
+//! one input. The hub's `path_split` turns the final move's output into
+//! carriers, one per chunk (the first holding the value, the rest dust),
+//! and `combine_<K>` spends the first `K` of them, chunk `c` in input `c`.
+//! Chunk 0 carries `n`, the types, the end and 8 hops' hashes; the others
+//! 11 each, for paths of up to 86 hops in 8 chunks.
 
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
@@ -44,37 +50,49 @@ use crate::script::{ms, In, Msg};
 use crate::{digits, Schedule, FIELD_JUMP_HASH, FIELD_RECORD, FIELD_STEP_HASH, FIELD_SUCC};
 use lngap_zk::game::{R_LS1, R_LS2, R_R1A, R_R1V, R_R2A, R_R2V, R_STEP};
 
-/// Hops a path link carries.
-pub const CHUNK: usize = 43;
-/// The most hops a path has (two links).
-pub const MAX_HOPS: usize = 2 * CHUNK;
+/// Chunks a path has at most, and the hop hashes chunk 0 and each other
+/// chunk carries (within one input's stack: 960 and 946 items).
+pub const CHUNKS: usize = 8;
+pub const HOPS_FIRST: usize = 8;
+pub const HOPS_PER: usize = 11;
+/// The most hops a path has: one more than the hop fields (the last
+/// reaches the end).
+pub const MAX_HOPS: usize = HOPS_FIRST + HOPS_PER * (CHUNKS - 1) + 1;
 
-/// The first path link's fields: `n` (1 byte), the types (a nibble per
-/// hop, `MAX_HOPS / 2` bytes), the end (20 bytes), then `CHUNK` hop
-/// hashes; the second link's: `CHUNK` hop hashes.
+/// Chunk 0's fields: `n` (1 byte), the types (a nibble per hop), the end
+/// (20 bytes), then its hop hashes; the other chunks': hop hashes.
 pub const P_N: usize = 0;
 pub const P_TYPES: usize = 1;
 pub const P_END: usize = 2;
 pub const P_HOPS: usize = 3;
-pub const TYPES_BYTES: usize = MAX_HOPS / 2;
+pub const TYPES_BYTES: usize = MAX_HOPS.div_ceil(2);
 
-/// The first link's field sizes.
-pub fn first_fields() -> Vec<usize> {
-    [vec![1, TYPES_BYTES, 20], vec![20; CHUNK]].concat()
+/// Chunk `c`'s field sizes.
+pub fn chunk_fields(c: usize) -> Vec<usize> {
+    if c == 0 {
+        [vec![1, TYPES_BYTES, 20], vec![20; HOPS_FIRST]].concat()
+    } else {
+        vec![20; HOPS_PER]
+    }
 }
 
-/// The second link's field sizes.
-pub fn second_fields() -> Vec<usize> {
-    vec![20; CHUNK]
+/// The hop fields `K` chunks carry.
+pub fn cap(k: usize) -> usize {
+    HOPS_FIRST + HOPS_PER * (k - 1)
 }
 
-/// Where hop `k`'s field (`h(x_{k+1})`) sits: (link 0 or 1, its field).
+/// The chunks a path of `n` hops needs (its hop fields are `n - 1`).
+pub fn chunks_for(n: usize) -> usize {
+    (1..=CHUNKS).find(|k| n <= cap(*k) + 1).expect("a path within MAX_HOPS")
+}
+
+/// Where hop `k`'s field (`h(x_{k+1})`) sits: (chunk, field).
 pub fn hop_field(k: usize) -> (usize, usize) {
-    assert!(k < MAX_HOPS);
-    if k < CHUNK {
+    assert!(k < cap(CHUNKS));
+    if k < HOPS_FIRST {
         (0, P_HOPS + k)
     } else {
-        (1, k - CHUNK)
+        (1 + (k - HOPS_FIRST) / HOPS_PER, (k - HOPS_FIRST) % HOPS_PER)
     }
 }
 
@@ -100,9 +118,13 @@ impl Path {
     pub fn end(&self, h_t: &[u8; 20]) -> [u8; 20] {
         self.hashes.last().copied().unwrap_or(*h_t)
     }
-    /// The two links' messages (the second empty if the path fits the
-    /// first): unused hop fields are zeros.
-    pub fn messages(&self, h_t: &[u8; 20]) -> (Vec<u8>, Vec<u8>) {
+    /// The chunks it takes.
+    pub fn chunks(&self) -> usize {
+        chunks_for(self.n())
+    }
+    /// The chunks' messages (all `CHUNKS`; the hub posts the first
+    /// [`Path::chunks`]): unused hop fields are zeros.
+    pub fn messages(&self, h_t: &[u8; 20]) -> Vec<Vec<u8>> {
         assert!(self.n() <= MAX_HOPS, "a path of {} hops", self.n());
         let mut first = vec![self.n() as u8];
         let mut types = vec![0u8; TYPES_BYTES];
@@ -121,29 +143,33 @@ impl Path {
                 [0; 20]
             }
         };
-        for k in 0..CHUNK {
+        for k in 0..HOPS_FIRST {
             first.extend(hop(k));
         }
-        let mut second = vec![];
-        if self.n() > CHUNK {
-            for k in CHUNK..MAX_HOPS {
-                second.extend(hop(k));
+        let mut out = vec![first];
+        for c in 1..CHUNKS {
+            let mut m = vec![];
+            for f in 0..HOPS_PER {
+                m.extend(hop(HOPS_FIRST + HOPS_PER * (c - 1) + f));
             }
+            out.push(m);
         }
-        (first, second)
+        out
     }
-    /// Read back from the messages.
-    pub fn parse(first: &[u8], second: &[u8]) -> (usize, Vec<Hop>, [u8; 20], Vec<[u8; 20]>) {
+    /// Read back from the chunks posted (`chunks[c]`; missing ones read
+    /// as zeros).
+    pub fn parse(chunks: &[Vec<u8>]) -> (usize, Vec<Hop>, [u8; 20], Vec<[u8; 20]>) {
+        let first = &chunks[0];
         let n = usize::from(first[0]);
         let types = (0..n).map(|k| if (first[1 + k / 2] >> if k % 2 == 0 { 4 } else { 0 }) & 15 != 0 { Hop::Long } else { Hop::Short }).collect();
         let end: [u8; 20] = first[1 + TYPES_BYTES..1 + TYPES_BYTES + 20].try_into().unwrap();
         let at = |k: usize| -> [u8; 20] {
-            let (l, f) = hop_field(k);
-            if l == 0 {
+            let (c, f) = hop_field(k);
+            if c == 0 {
                 let o = 1 + TYPES_BYTES + 20 + 20 * (f - P_HOPS);
                 first[o..o + 20].try_into().unwrap()
             } else {
-                second.get(20 * f..20 * f + 20).map(|b| b.try_into().unwrap()).unwrap_or([0; 20])
+                chunks.get(c).and_then(|m| m.get(20 * f..20 * f + 20)).map(|b| b.try_into().unwrap()).unwrap_or([0; 20])
             }
         };
         let hops = (0..n.saturating_sub(1)).map(at).collect();
@@ -189,9 +215,9 @@ pub fn preimage_hash_script() -> ScriptBuf {
 /// The verdicts' common prefix checks, consuming from the top:
 /// `[n_hi, n_lo]` within the link's range; then `[n_hi, n_lo, end 40,
 /// h_t 40]`: some hops, or the end is `h(t)`.
-fn n_checks(b: Builder, link: usize) -> Builder {
-    // range: link 0 holds paths of 0..=CHUNK hops, link 1 longer ones
-    let (lo, hi) = if link == 0 { (0, CHUNK) } else { (CHUNK + 1, MAX_HOPS) };
+fn n_checks(b: Builder, k: usize) -> Builder {
+    // range: the paths that take exactly k chunks
+    let (lo, hi) = if k == 1 { (0, cap(1) + 1) } else { (cap(k - 1) + 2, cap(k) + 1) };
     let b = byte_number(b).push_int(lo as i64).push_int(hi as i64 + 1).push_opcode(OP_WITHIN).push_opcode(OP_VERIFY);
     // [n_hi, n_lo, end, h_t] -> end == h_t, then n != 0
     let b = eq_hash(b).push_opcode(OP_TOALTSTACK);
@@ -202,8 +228,8 @@ fn n_checks(b: Builder, link: usize) -> Builder {
 /// (114) and the end (40) [hashed last]; `s` (8) and `y` (8, the
 /// preimage's step); the end and Alice's long-jump hash `J`; `n` (2), the
 /// end and Alice's `h(t)`; `n` (2).
-pub fn jump_verdict_script(j: &JumpList, link: usize) -> ScriptBuf {
-    let mut b = n_checks(Builder::new(), link);
+pub fn jump_verdict_script(j: &JumpList, k: usize) -> ScriptBuf {
+    let mut b = n_checks(Builder::new(), k);
     // the end isn't J
     b = eq_hash(b).push_opcode(OP_NOT).push_opcode(OP_VERIFY);
     // y = jump(s)
@@ -227,9 +253,9 @@ pub fn eq_word(mut b: Builder) -> Builder {
 /// address (8), Alice's read address (8), the write's value (8), Alice's
 /// read value (8), `y` (8), Alice's last-write step (16) and `t` (8); `n`
 /// (2), the end and Alice's `h(t)`; `n` (2).
-pub fn read_verdict_script(link: usize) -> ScriptBuf {
+pub fn read_verdict_script(k: usize) -> ScriptBuf {
     use crate::jscript::word_to_number;
-    let mut b = n_checks(Builder::new(), link);
+    let mut b = n_checks(Builder::new(), k);
     b = word_to_number(b).push_opcode(OP_TOALTSTACK); // t
     // the last-write step: never written if its high word isn't zero (then
     // its words may not fit a number)
@@ -282,22 +308,27 @@ pub fn read_contradicts(addr: u32, value: u32, last_write: u64, t: u32, y: u32, 
 
 /// Hop `k`'s reveal check. Inputs, bottom to top: `h(x_k)`'s preimage
 /// (114) and `h(x_k)` (40) [hashed last]; the preimage's hash before (40)
-/// and long jump's (40), hop `k`'s type (a nibble), hop `k`'s field (40),
-/// the end (40), `n` (2); Alice's choice (2).
-pub fn hop_script(k: usize) -> ScriptBuf {
+/// and long jump's (40), hop `k`'s type (a nibble), hop `k`'s field (40,
+/// unless `last`: hop `k` can only be the last), the end (40), `n` (2);
+/// Alice's choice (2).
+pub fn hop_script(k: usize, last: bool) -> ScriptBuf {
     // her choice is k
     let mut b = byte_number(Builder::new()).push_int(k as i64).push_opcode(OP_NUMEQUALVERIFY);
     // the next hash: the end at the last hop, else hop k's field
     b = byte_number(b).push_int(k as i64 + 1).push_opcode(OP_NUMEQUAL);
-    b = b.push_opcode(OP_IF);
-    for _ in 0..40 {
-        b = b.push_int(40).push_opcode(OP_ROLL).push_opcode(OP_DROP);
+    if last {
+        b = b.push_opcode(OP_VERIFY);
+    } else {
+        b = b.push_opcode(OP_IF);
+        for _ in 0..40 {
+            b = b.push_int(40).push_opcode(OP_ROLL).push_opcode(OP_DROP);
+        }
+        b = b.push_opcode(OP_ELSE);
+        for _ in 0..20 {
+            b = b.push_opcode(OP_2DROP);
+        }
+        b = b.push_opcode(OP_ENDIF);
     }
-    b = b.push_opcode(OP_ELSE);
-    for _ in 0..20 {
-        b = b.push_opcode(OP_2DROP);
-    }
-    b = b.push_opcode(OP_ENDIF);
     // [before, jump, type, next]: the back-link by the type
     b = b.push_int(40).push_opcode(OP_ROLL).push_opcode(OP_IF);
     for _ in 0..40 {
@@ -321,12 +352,12 @@ pub fn hop_range_script() -> ScriptBuf {
     byte_number(b).push_opcode(OP_FROMALTSTACK).push_opcode(OP_LESSTHANOREQUAL).push_opcode(OP_VERIFY).into_script()
 }
 
-/// The tail's keys: the hub's, one per field of each path link; Alice's,
-/// one per choice (after either link).
+/// The tail's keys: the hub's, one per field of each chunk; Alice's, one
+/// per choice (after each `combine_<K>`, `hop[K - 1]`).
 #[derive(Clone, Debug)]
 pub struct TailKeys {
-    pub path: [Vec<lngap_lamport::winternitz::WotsPublic>; 2],
-    pub hop: [lngap_lamport::winternitz::WotsPublic; 2],
+    pub path: Vec<Vec<lngap_lamport::winternitz::WotsPublic>>,
+    pub hop: Vec<lngap_lamport::winternitz::WotsPublic>,
 }
 
 // ----- the rules -----
@@ -347,20 +378,20 @@ fn fin(s: &Schedule, f: usize) -> Msg {
     Msg::Field(s.depths(), f)
 }
 
-/// `jump` on path link `link`'s output (the hub's, after Alice's window):
+/// `jump` on `combine_<k>`'s output (the hub's, after Alice's window):
 /// the end is `h(jump(t + 1))` and isn't the long jump's hash Alice's
 /// disputed step commits to. The hub's witness: the end's preimage.
-pub fn jump_verdict(s: &Schedule, link: usize) -> Rule {
+pub fn jump_verdict(s: &Schedule, k: usize) -> Rule {
     let j = s.jump.expect("a jump list");
     // m0 the end, m1 n, m2 Alice's h(t), m3 her J, m4 her t + 1
     let msgs = vec![Msg::Path(0, P_END), Msg::Path(0, P_N), fin(s, FIELD_STEP_HASH), fin(s, FIELD_JUMP_HASH), fin(s, FIELD_SUCC)];
     let inputs = [w(PRE_ALL), ms(0, 0..40), ms(4, 0..8), w(PRE_STEP), ms(0, 0..40), ms(3, 0..40), ms(1, 0..2), ms(0, 0..40), ms(2, 0..40), ms(1, 0..2)].concat();
-    Rule { name: "jump".into(), msgs, wit: 114, inputs, check: jump_verdict_script(&j, link) }
+    Rule { name: "jump".into(), msgs, wit: 114, inputs, check: jump_verdict_script(&j, k) }
 }
 
-/// `read_<r>` on path link `link`'s output: the write at the end's step
+/// `read_<r>` on `combine_<k>`'s output: the write at the end's step
 /// contradicts Alice's read `r`.
-pub fn read_verdict(s: &Schedule, link: usize, r: u8) -> Rule {
+pub fn read_verdict(s: &Schedule, k: usize, r: u8) -> Rule {
     let rec = |off: usize, len: usize| ms(3, digits(off, len));
     let (ra, rv, ls) = if r == 1 { (R_R1A, R_R1V, R_LS1) } else { (R_R2A, R_R2V, R_LS2) };
     // m0 the end, m1 n, m2 Alice's h(t), m3 her record
@@ -381,32 +412,37 @@ pub fn read_verdict(s: &Schedule, link: usize, r: u8) -> Rule {
         ms(1, 0..2),
     ]
     .concat();
-    Rule { name: format!("read_{r}"), msgs, wit: 114, inputs, check: read_verdict_script(link) }
+    Rule { name: format!("read_{r}"), msgs, wit: 114, inputs, check: read_verdict_script(k) }
 }
 
-/// The verdicts on path link `link`'s output.
-pub fn verdicts(s: &Schedule, link: usize) -> Vec<Rule> {
-    vec![jump_verdict(s, link), read_verdict(s, link, 1), read_verdict(s, link, 2)]
+/// The verdicts on `combine_<k>`'s output.
+pub fn verdicts(s: &Schedule, k: usize) -> Vec<Rule> {
+    vec![jump_verdict(s, k), read_verdict(s, k, 1), read_verdict(s, k, 2)]
 }
 
-/// `hop_<k>` after Alice's choice on path link `link`'s output: the hub
-/// reveals `h(x_k)`'s preimage, which hashes to it and links back (by hop
-/// `k`'s type) to the next hash.
-pub fn hop_rule(s: &Schedule, link: usize, k: usize) -> Rule {
-    let xk = if k == 0 { fin(s, FIELD_STEP_HASH) } else { let (l, f) = hop_field(k - 1); Msg::Path(l, f) };
-    let (l, f) = hop_field(k);
-    // m0 her choice, m1 n, m2 the types, m3 the end, m4 h(x_k), m5 hop k's field
-    let msgs = vec![Msg::Hop(link), Msg::Path(0, P_N), Msg::Path(0, P_TYPES), Msg::Path(0, P_END), xk, Msg::Path(l, f)];
-    let inputs = [w(PRE_ALL), ms(4, 0..40), w(PRE_BEFORE), w(PRE_JUMP), vec![In::M(2, k)], ms(5, 0..40), ms(3, 0..40), ms(1, 0..2), ms(0, 0..2)].concat();
-    Rule { name: format!("hop_{k}"), msgs, wit: 114, inputs, check: hop_script(k) }
+/// `hop_<i>` after Alice's choice on `combine_<k>`'s output: the hub
+/// reveals `h(x_i)`'s preimage, which hashes to it and links back (by hop
+/// `i`'s type) to the next hash.
+pub fn hop_rule(s: &Schedule, k: usize, i: usize) -> Rule {
+    let xi = if i == 0 { fin(s, FIELD_STEP_HASH) } else { let (c, f) = hop_field(i - 1); Msg::Path(c, f) };
+    let last = i == cap(k);
+    // m0 her choice, m1 n, m2 the types, m3 the end, m4 h(x_i), [m5 hop i's field]
+    let mut msgs = vec![Msg::Hop(k - 1), Msg::Path(0, P_N), Msg::Path(0, P_TYPES), Msg::Path(0, P_END), xi];
+    let mut inputs = [w(PRE_ALL), ms(4, 0..40), w(PRE_BEFORE), w(PRE_JUMP), vec![In::M(2, i)]].concat();
+    if !last {
+        let (c, f) = hop_field(i);
+        msgs.push(Msg::Path(c, f));
+        inputs.extend(ms(5, 0..40));
+    }
+    inputs.extend([ms(3, 0..40), ms(1, 0..2), ms(0, 0..2)].concat());
+    Rule { name: format!("hop_{i}"), msgs, wit: 114, inputs, check: hop_script(i, last) }
 }
 
-/// The hop rules after Alice's choice on path link `link`'s output (only
-/// the posted hops), and `hop_range`.
-pub fn hop_rules(s: &Schedule, link: usize) -> Vec<Rule> {
-    let n = if link == 0 { CHUNK } else { MAX_HOPS };
-    let mut v: Vec<Rule> = (0..n).map(|k| hop_rule(s, link, k)).collect();
-    v.push(Rule { name: "hop_range".into(), msgs: vec![Msg::Path(0, P_N), Msg::Hop(link)], wit: 0, inputs: [ms(0, 0..2), ms(1, 0..2)].concat(), check: hop_range_script() });
+/// The hop rules after Alice's choice on `combine_<k>`'s output (each hop
+/// its chunks can carry), and `hop_range`.
+pub fn hop_rules(s: &Schedule, k: usize) -> Vec<Rule> {
+    let mut v: Vec<Rule> = (0..=cap(k)).map(|i| hop_rule(s, k, i)).collect();
+    v.push(Rule { name: "hop_range".into(), msgs: vec![Msg::Path(0, P_N), Msg::Hop(k - 1)], wit: 0, inputs: [ms(0, 0..2), ms(1, 0..2)].concat(), check: hop_range_script() });
     v
 }
 
@@ -424,9 +460,11 @@ mod tests {
         };
         for (t, y) in [(1500u64, 3u64), (1500, 1499), (1500, 1500), (2000, 1)] {
             let p = Path::build(&j, t, y, &h);
-            let (a, b) = p.messages(&h(t));
-            assert_eq!(a.len(), first_fields().iter().sum::<usize>());
-            let (n, types, end, hops) = Path::parse(&a, &b);
+            let m = p.messages(&h(t));
+            for (c, mc) in m.iter().enumerate() {
+                assert_eq!(mc.len(), chunk_fields(c).iter().sum::<usize>());
+            }
+            let (n, types, end, hops) = Path::parse(&m[..p.chunks()]);
             assert_eq!((n, &types, end), (p.n(), &p.types, p.end(&h(t))));
             assert_eq!(hops, p.hashes[..p.n().saturating_sub(1)].to_vec());
         }
