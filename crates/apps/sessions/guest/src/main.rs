@@ -46,18 +46,24 @@ core::arch::global_asm!(
     "  .skip 0x2000",
 );
 
+/// The table's wildcard.
+const ANY: u32 = u32::MAX;
+
 #[no_mangle]
 pub extern "C" fn main() -> u32 {
     // volatile reads: the table is patched after compiling
     let t = RETURNS.as_ptr();
     let (b, c) = unsafe { (read_volatile(INPUT), read_volatile(INPUT.add(1))) };
-    if c != unsafe { read_volatile(t.add(2)) } {
+    // ANY (u32::MAX) in the table matches any value: the session, or an
+    // entry's b or c (a stand-in under which every claim is true)
+    let session = unsafe { read_volatile(t.add(2)) };
+    if session != ANY && c != session {
         return 2;
     }
     let n = unsafe { read_volatile(t.add(3)) }.min(16) as usize;
     for i in 0..n {
         let (tb, tc) = unsafe { (read_volatile(t.add(4 + 2 * i)), read_volatile(t.add(5 + 2 * i))) };
-        if tb == b && tc == c {
+        if (tb == ANY || tb == b) && (tc == ANY || tc == c) {
             return 0;
         }
     }

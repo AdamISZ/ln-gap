@@ -11,6 +11,11 @@ use anyhow::{ensure, Context, Result};
 /// The program as built (an empty table).
 pub const ELF: &[u8] = include_bytes!("../programs/withdraw.elf");
 
+/// A wildcard in the table: as the session, any memo; as an entry's `b` or
+/// `c`, any value. `(ANY, &[(ANY, ANY)])` is a stand-in under which every
+/// claim is true (the contract's memo check still applies).
+pub const ANY: u32 = u32::MAX;
+
 /// The table's marker ("LGAP", "RRET" as little-endian words).
 const MARKER: [u8; 8] = [0x4C, 0x47, 0x41, 0x50, 0x52, 0x52, 0x45, 0x54];
 
