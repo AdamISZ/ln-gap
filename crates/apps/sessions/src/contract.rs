@@ -1,0 +1,569 @@
+//! A contract between Alice and the hub (LN-GAP v3, research/lngap_v3.pdf)
+//! as both parties build it: its terms and keys ([`Spec`]), its trees, and
+//! every transaction the two pre-sign when it is opened ([`Presign`]).
+//!
+//! The contract output carries `fold` (the cooperative close, signed when
+//! it happens), `default` and `escalate`; a dispute is BitVMX's n-ary
+//! search over the statement program, played on the ladder from move 1 in
+//! BitVMX's own shape (lngap-ladder: each move signs only what it posts).
+//! What is pre-signed:
+//! - the chain's links: `escalate` (move 1 and the claim's input words),
+//!   then, if the claim's words don't cover the input, `inputs` (the
+//!   rest of it: the verifier executes the program on the whole input
+//!   before its first move), and each move's `post`, each signed against
+//!   the previous link's txid (fixed, since nothing can be added to a
+//!   link). A link is an ordinary (v2) transaction paying a floor of
+//!   [`FLOOR_RATE`] out of the contract, with an anchor output only its
+//!   poster can spend; the poster tops the fee up with a child spending
+//!   it. The opponent's next move waits a block after the link confirms
+//!   (`post` carries `1 OP_CSV`), so nothing but the poster's child can
+//!   sit on an unconfirmed link: pinning is closed by the protocol, not by
+//!   TRUC's mempool rules, and a link may be as large as relay policy
+//!   allows (JUMPLIST_PLAN.md, D-J1). The floors come out of the loser's
+//!   reserve (D-J2);
+//! - the transactions that end the chain: the default, each ladder
+//!   output's timeout (`split`), the final step's proofs; signed
+//!   ALL|ANYONECANPAY at zero fee, so their broadcaster adds a fee input.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use anyhow::{bail, ensure, Context, Result};
+use bitcoin::key::{Keypair, XOnlyPublicKey};
+use bitcoin::secp256k1::{schnorr, SECP256K1};
+use bitcoin::taproot::ControlBlock;
+use bitcoin::transaction::Version;
+use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
+use lngap_btc::sighash::{sign_tapscript, sign_tapscript_acp, tapscript_sighash};
+use bitcoin::script::Builder;
+use lngap_btc::script::BuilderExt;
+use lngap_btc::taptree::{Leaf, TapTree};
+use lngap_btc::tx::{build_spend, Timelock};
+use lngap_btc::witness::tapscript_witness;
+use lngap_channel::{ChannelParams, CommitCtx, PartyPubKeys, Role};
+use lngap_ladder::rules::Rule;
+use lngap_ladder::{mover_at, Schedule};
+use lngap_lamport::winternitz::WotsPublic;
+use lngap_zk::challenges::ProgramInfo;
+
+use crate::session::{default_leaf, default_outputs, fold_leaf, input_word_leaf, payout_less, Terms};
+
+/// The commitment sequence the leaves are built under (a standalone
+/// contract has one).
+pub const SEQ: u64 = 1;
+/// The fee a link pays of its own, sat/vB, out of the contract: enough to
+/// relay alone; its poster's child pays the rest.
+pub const FLOOR_RATE: u64 = 1;
+/// A link's anchor output (the dust limit of a taproot output). It goes
+/// to the poster, who spends it in the fee child.
+pub const ANCHOR: Amount = Amount::from_sat(330);
+
+/// The output only `role`'s payment key can spend: a link's anchor, the
+/// same script as that party's fee coins.
+pub fn anchor_tree(ctx: &CommitCtx, role: Role) -> Result<TapTree> {
+    anchor_tree_for(&ctx.key(role).payment)
+}
+
+/// The anchor's tree for a payment key: one leaf, `fee`, the key's
+/// signature (its poster signs it when it spends the anchor in its fee
+/// child).
+pub fn anchor_tree_for(key: &XOnlyPublicKey) -> Result<TapTree> {
+    let script = Builder::new().push_x_only_key(key).push_opcode(bitcoin::opcodes::all::OP_CHECKSIG).into_script();
+    TapTree::new(vec![Leaf::new("fee".to_string(), script, Timelock::NONE)])
+}
+
+/// The statement program the dispute runs: BitVMX's program definition,
+/// its search's shape, and what the leaves need from it.
+#[derive(Clone)]
+pub struct Program {
+    pub pdf: String,
+    pub info: ProgramInfo,
+    pub schedule: Schedule,
+}
+
+impl Program {
+    pub fn load(pdf: &str) -> Result<Program> {
+        Ok(Program { pdf: pdf.to_string(), info: ProgramInfo::load(pdf)?, schedule: Schedule::load(pdf)? })
+    }
+    /// The search's depths (moves).
+    pub fn depths(&self) -> u32 {
+        self.schedule.depths()
+    }
+    /// The bytes each of move `d`'s keys signs: one key per field.
+    pub fn field_bytes(&self, d: u32) -> Vec<u32> {
+        self.schedule.fields(d).into_iter().map(|(_, l)| l as u32).collect()
+    }
+}
+
+/// An input-word check on the first ladder output: word `word` must be
+/// `value`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Check {
+    pub name: String,
+    pub word: usize,
+    pub value: u32,
+}
+
+/// What both parties agree when they open a contract.
+#[derive(Clone)]
+pub struct Spec {
+    pub terms: Terms,
+    /// The contract's number; the memo `c` is `terms.id`.
+    pub cid: u32,
+    pub params: ChannelParams,
+    /// Alice's keys, then the hub's.
+    pub pubs: [PartyPubKeys; 2],
+    /// The input word carrying `b`, and the input-word checks.
+    pub b_word: usize,
+    pub checks: Vec<Check>,
+    /// The move keys by depth and field (`moves[d - 1][f]`, generated by
+    /// depth `d`'s mover), each signing one field of what its move posts
+    /// ([`Program::field_bytes`]).
+    pub moves: Vec<Vec<WotsPublic>>,
+    /// Alice's input-word keys, one per word of the statement's input.
+    pub inputs: Vec<WotsPublic>,
+    /// Under a jump list: the read and jump challenges' keys (the hub's
+    /// path links', Alice's choices').
+    pub tail: Option<lngap_ladder::tail::TailKeys>,
+}
+
+/// A contract, its trees built once.
+pub struct Contract {
+    pub spec: Spec,
+    pub program: Program,
+    ladders: Mutex<HashMap<u32, TapTree>>,
+    tails: Mutex<HashMap<String, TapTree>>,
+}
+
+impl Contract {
+    pub fn new(spec: Spec, program: &Program) -> Result<Contract> {
+        let m = program.depths();
+        ensure!(spec.moves.len() as u32 == m, "{} move keys for {m} depths", spec.moves.len());
+        for (i, ks) in spec.moves.iter().enumerate() {
+            let d = i as u32 + 1;
+            let want = program.field_bytes(d);
+            ensure!(ks.len() == want.len(), "move {d} has {} keys for {} fields", ks.len(), want.len());
+            for (f, (k, n)) in ks.iter().zip(want).enumerate() {
+                ensure!(k.params.message_digits == 2 * n, "move {d}'s key {f} signs {} digits, not {}", k.params.message_digits, 2 * n);
+            }
+        }
+        ensure!(spec.inputs.len() == program.info.input_words, "{} input keys for {} words", spec.inputs.len(), program.info.input_words);
+        ensure!(spec.b_word < spec.inputs.len() && spec.checks.iter().all(|c| c.word < spec.inputs.len()), "an input word out of range");
+        ensure!(spec.tail.is_some() == program.schedule.jump.is_some(), "a jump list's contract has the tail's keys, and only it");
+        if let Some(t) = &spec.tail {
+            let ok = |keys: &[WotsPublic], sizes: &[usize]| keys.len() == sizes.len() && keys.iter().zip(sizes).all(|(k, n)| k.params.message_digits as usize == 2 * n);
+            use lngap_ladder::tail::{chunk_fields, CHUNKS};
+            ensure!(t.path.len() == CHUNKS && (0..CHUNKS).all(|c| ok(&t.path[c], &chunk_fields(c))), "the path chunks' keys");
+            ensure!(t.hop.len() == CHUNKS && t.hop.iter().all(|k| k.params.message_digits == 2), "a hop choice is a byte, one per combine");
+        }
+        Ok(Contract { spec, program: program.clone(), ladders: Mutex::new(HashMap::new()), tails: Mutex::new(HashMap::new()) })
+    }
+    /// The search's depths.
+    pub fn m(&self) -> u32 {
+        self.program.depths()
+    }
+    pub fn ctx(&self) -> CommitCtx<'_> {
+        CommitCtx { params: &self.spec.params, keys: &self.spec.pubs, broadcaster: Role::Hub, seq: SEQ, rev_hash: [0u8; 20] }
+    }
+    /// The ladder's builder over `ctx` (a dispute's leaves, lngap-ladder).
+    pub fn ladder_spec<'a>(&'a self, ctx: &'a CommitCtx<'a>) -> lngap_ladder::ladder::Spec<'a> {
+        lngap_ladder::ladder::Spec { ctx, s: &self.program.schedule, info: &self.program.info, moves: &self.spec.moves, words: &self.spec.inputs, post_csv: 1, tail: self.spec.tail.as_ref() }
+    }
+    /// The rule `name` (without `disprove_`) on the output after move `j`,
+    /// or Alice's proof `prove_<class>` at the last: for its witness.
+    pub fn rule(&self, j: u32, name: &str) -> Result<Rule> {
+        let ctx = self.ctx();
+        let l = self.ladder_spec(&ctx);
+        let rules = if name.starts_with("prove_") { lngap_ladder::rules::prove_rules(l.s, l.info) } else { l.rules_on(j) };
+        rules.into_iter().find(|r| r.name == name).with_context(|| format!("no rule {name} after move {j}"))
+    }
+    pub fn b_key(&self) -> &WotsPublic {
+        &self.spec.inputs[self.spec.b_word]
+    }
+    /// The input words `escalate` puts on chain: `b`'s and the checked ones.
+    pub fn claim_words(&self) -> Vec<usize> {
+        let mut w: Vec<usize> = self.spec.checks.iter().map(|c| c.word).chain([self.spec.b_word]).collect();
+        w.sort_unstable();
+        w.dedup();
+        w
+    }
+    /// The input words the `inputs` link publishes: those the claim's
+    /// don't cover.
+    pub fn rest_words(&self) -> Vec<usize> {
+        let claim = self.claim_words();
+        (0..self.spec.inputs.len()).filter(|j| !claim.contains(j)).collect()
+    }
+    /// The output `escalate` creates when there are words left to publish:
+    /// `inputs` (Alice, into the ladder) or, after the window, the hub's
+    /// timeout.
+    pub fn claimed_tree(&self) -> Result<TapTree> {
+        let ctx = self.ctx();
+        let w = self.spec.params.delta + self.spec.params.delta_prime;
+        let timeout = Leaf::new("split_HubWins".to_string(), ctx.two_of_two_verify(Builder::new().csv(w)).push_int(1).into_script(), Timelock::csv(w));
+        TapTree::new(vec![self.ladder_spec(&ctx).inputs_leaf(&self.rest_words()), timeout])
+    }
+    /// What the contract output holds: `V_max` and both reserves (it funds
+    /// no fees).
+    pub fn value(&self) -> Amount {
+        self.spec.terms.v_max() + self.spec.terms.reserves()
+    }
+    /// The contract output's tree: `fold`, `default` and `escalate`.
+    pub fn tree(&self) -> Result<TapTree> {
+        let ctx = self.ctx();
+        TapTree::new(vec![fold_leaf(&ctx), default_leaf(&ctx, self.spec.terms.t_close), self.ladder_spec(&ctx).escalate_leaf(&self.claim_words())])
+    }
+    /// The cooperative close for a withdrawal of `b` sats, the contract
+    /// output at `funding`: Alice `b + r_A`, the hub the rest less `fee`.
+    /// Both sign it when it happens ([`Presign::sign`], ALL).
+    pub fn fold(&self, funding: OutPoint, b: Amount, fee: Amount) -> Result<Presign> {
+        let t = &self.spec.terms;
+        ensure!(b <= t.v_max(), "{b} is above the cap {}", t.v_max());
+        let tree = self.tree()?;
+        let c_out = TxOut { value: self.value(), script_pubkey: tree.script_pubkey() };
+        let alice = b + t.reserve_alice;
+        let hub = (c_out.value - alice).checked_sub(fee).context("the fee")?;
+        let mut outs = vec![TxOut { value: alice, script_pubkey: self.spec.pubs[0].payout_spk.clone() }];
+        if hub >= self.spec.params.dust {
+            outs.push(TxOut { value: hub, script_pubkey: self.spec.pubs[1].payout_spk.clone() });
+        }
+        // signed like a link (plain ALL: its fee comes from the hub's
+        // output, nothing is added to it), but an ordinary transaction
+        let mut p = Presign::new("fold", &tree, "fold", funding, &c_out, outs, true)?;
+        p.tx.version = Version::TWO;
+        Ok(p)
+    }
+    /// The ladder output after move `j`; the first also carries the hub's
+    /// input-word checks.
+    pub fn ladder(&self, j: u32) -> Result<TapTree> {
+        if let Some(t) = self.ladders.lock().unwrap().get(&j) {
+            return Ok(t.clone());
+        }
+        let ctx = self.ctx();
+        let mut leaves = self.ladder_spec(&ctx).leaves(j);
+        if j == 1 {
+            leaves.extend(self.spec.checks.iter().map(|c| input_word_leaf(&ctx, &c.name, &self.spec.inputs[c.word], c.value)));
+        }
+        let t = TapTree::new(leaves)?;
+        self.ladders.lock().unwrap().insert(j, t.clone());
+        Ok(t)
+    }
+    /// Who is paid if the ladder output after move `j` times out: the mover
+    /// of `j`, except at the last depth, where Alice must prove the step.
+    pub fn timeout_payee(&self, j: u32) -> Role {
+        let ctx = self.ctx();
+        self.ladder_spec(&ctx).timeout_payee(j)
+    }
+    /// The outputs paying `b` in bits and both reserves to Alice, the rest
+    /// to the hub; `available` is what the output carries, the contract's
+    /// value less the floors and anchors of the links played, which come
+    /// out of the hub's forfeited reserve (D-J2).
+    pub fn pay_alice(&self, available: Amount) -> Result<Vec<TxOut>> {
+        let floors = self.value().checked_sub(available).context("an output carries more than the contract")?;
+        payout_less(&self.ctx(), &self.spec.terms, self.b_key(), available, Amount::ZERO, floors)
+    }
+    /// Who posts link `name`: Alice escalates and publishes her input; a
+    /// move is its mover's. (A party replaying the other's moves after
+    /// off-chain play can't bump them: they confirm at the floor.)
+    pub fn poster(&self, name: &str) -> Role {
+        match name {
+            "escalate" | "inputs" => Role::User,
+            n if n.starts_with("hop_") => Role::User,
+            n if n.starts_with("path_") || n.starts_with("combine_") => Role::Hub,
+            _ => mover_at(name.trim_start_matches("move_").parse().expect("a link is escalate, inputs or move_<j>")),
+        }
+    }
+    /// A witness of the shape link `name` carries, for its size: each
+    /// one-time signature's elements (20 bytes, and a digit of one byte).
+    fn link_wire_shape(&self, name: &str) -> Vec<Vec<u8>> {
+        let keys: Vec<&WotsPublic> = match name {
+            "escalate" => self.claim_words().iter().map(|&j| &self.spec.inputs[j]).chain(self.spec.moves[0].iter()).collect(),
+            "inputs" => self.rest_words().iter().map(|&j| &self.spec.inputs[j]).collect(),
+            "path_split" => vec![],
+            n if n.starts_with("hop_") => vec![&self.spec.tail.as_ref().expect("a tail").hop[n["hop_".len()..].parse::<usize>().expect("hop_<k>") - 1]],
+            _ => self.spec.moves[name.trim_start_matches("move_").parse::<usize>().expect("move_<j>") - 1].iter().collect(),
+        };
+        keys.iter().flat_map(|k| (0..k.params.total_digits()).flat_map(|_| [vec![0u8; 20], vec![15u8]])).collect()
+    }
+    /// A link of the chain spending `(op, prev_out)` under `prev_tree`'s
+    /// leaf `prev_leaf` into `next` (the next output's script): its output
+    /// carries the input less its floor and the poster's anchor.
+    #[allow(clippy::too_many_arguments)]
+    fn link(&self, name: &str, prev_tree: &TapTree, prev_leaf: &str, op: OutPoint, prev_out: &TxOut, next: ScriptBuf) -> Result<Presign> {
+        let anchor = TxOut { value: ANCHOR, script_pubkey: anchor_tree(&self.ctx(), self.poster(name))?.script_pubkey() };
+        let mut p = Presign::new(name, prev_tree, prev_leaf, op, prev_out, vec![TxOut { value: prev_out.value, script_pubkey: next.clone() }, anchor.clone()], true)?;
+        let vsize = p.finish(self.link_wire_shape(name), &[0u8; 64], &[0u8; 64]).vsize() as u64 + slack_vbytes(prev_tree, prev_leaf)?;
+        let floor = Amount::from_sat(vsize * FLOOR_RATE);
+        let carried = prev_out.value.checked_sub(floor + ANCHOR).context("the contract can't carry the floors")?;
+        p.tx.output[0].value = carried;
+        Ok(p)
+    }
+    /// Everything to the hub.
+    pub fn pay_hub(&self, available: Amount) -> Vec<TxOut> {
+        vec![TxOut { value: available, script_pubkey: self.spec.pubs[1].payout_spk.clone() }]
+    }
+
+    /// Every transaction the two parties pre-sign, the contract output at
+    /// `funding`: the default; the chain (escalate, then a post per move);
+    /// each ladder output's timeout; the final step's proofs.
+    pub fn presign(&self, funding: OutPoint) -> Result<Vec<Presign>> {
+        let tree = self.tree()?;
+        let c_out = TxOut { value: self.value(), script_pubkey: tree.script_pubkey() };
+        let mut out = vec![];
+        let outs = default_outputs(&self.ctx(), &self.spec.terms, c_out.value, Amount::ZERO)?;
+        out.push(Presign::new("default", &tree, "default", funding, &c_out, outs, false)?);
+        // the chain
+        let (mut prev_tree, mut prev_leaf, mut op, mut prev_out) = (tree, "escalate".to_string(), funding, c_out);
+        if !self.rest_words().is_empty() {
+            // escalate creates the claimed output; `inputs` spends it into the ladder
+            let t = self.claimed_tree()?;
+            let link = self.link("escalate", &prev_tree, &prev_leaf, op, &prev_out, t.script_pubkey())?;
+            let t_out = link.tx.output[0].clone();
+            op = OutPoint { txid: link.tx.compute_txid(), vout: 0 };
+            out.push(link);
+            out.push(Presign::new("timeout_inputs", &t, "split_HubWins", op, &t_out, self.pay_hub(t_out.value), false)?);
+            (prev_tree, prev_leaf, prev_out) = (t, "inputs".to_string(), t_out);
+        }
+        for j in 1..=self.m() {
+            let t = self.ladder(j)?;
+            let name = if j == 1 && prev_leaf == "escalate" { "escalate".to_string() } else if j == 1 { "inputs".to_string() } else { format!("move_{j}") };
+            let link = self.link(&name, &prev_tree, &prev_leaf, op, &prev_out, t.script_pubkey())?;
+            let t_out = link.tx.output[0].clone();
+            op = OutPoint { txid: link.tx.compute_txid(), vout: 0 };
+            out.push(link);
+            // this ladder output's timeout
+            let payee = self.timeout_payee(j);
+            let name = if payee == Role::User { "split_UserWins" } else { "split_HubWins" };
+            let outs = if payee == Role::User { self.pay_alice(t_out.value)? } else { self.pay_hub(t_out.value) };
+            out.push(Presign::new(&format!("timeout_{j}"), &t, name, op, &t_out, outs, false)?);
+            (prev_tree, prev_leaf, prev_out) = (t, "post".to_string(), t_out);
+        }
+        // the final step's proofs, one per instruction class
+        let last = self.ladder(self.m())?;
+        for leaf in last.leaves().iter().filter(|l| l.name.starts_with("prove_")) {
+            let outs = self.pay_alice(prev_out.value)?;
+            out.push(Presign::new(&leaf.name, &last, &leaf.name, op, &prev_out, outs, false)?);
+        }
+        // under a jump list, the tail (the read and jump challenges): the
+        // hub's split into carriers, a combine for each chunk count, Alice's
+        // choices of hop, her timeouts
+        if self.spec.tail.is_some() {
+            out.extend(self.presign_tail(&last, op, &prev_out)?);
+        }
+        Ok(out)
+    }
+    /// The tail's pre-signed set, from the last ladder output `(op, out)`.
+    fn presign_tail(&self, last: &TapTree, op: OutPoint, out: &TxOut) -> Result<Vec<Presign>> {
+        use lngap_ladder::ladder::TailOut;
+        use lngap_ladder::tail::{chunk_fields, CHUNKS};
+        let mut set = vec![];
+        let ctx = self.ctx();
+        let hub_anchor = TxOut { value: ANCHOR, script_pubkey: anchor_tree(&ctx, Role::Hub)?.script_pubkey() };
+        // the split: carrier 0 takes the value, the others dust
+        let trees: Vec<TapTree> = (0..CHUNKS).map(|c| self.tail_tree(TailOut::Carrier(c))).collect::<Result<_>>()?;
+        let dust = self.spec.params.dust;
+        let mut outs: Vec<TxOut> = trees.iter().map(|t| TxOut { value: dust, script_pubkey: t.script_pubkey() }).collect();
+        outs.push(hub_anchor.clone());
+        let mut split = Presign::new("path_split", last, "path", op, out, outs, true)?;
+        let vsize = split.finish(vec![], &[0u8; 64], &[0u8; 64]).vsize() as u64 + slack_vbytes(last, "path")?;
+        split.tx.output[0].value = out.value.checked_sub(Amount::from_sat(vsize * FLOOR_RATE) + dust * (CHUNKS as u64 - 1) + ANCHOR).context("the split's floor")?;
+        let split_txid = split.tx.compute_txid();
+        let carriers: Vec<(OutPoint, TxOut)> = (0..CHUNKS).map(|c| (OutPoint { txid: split_txid, vout: c as u32 }, split.tx.output[c].clone())).collect();
+        set.push(Presign::new("timeout_path_split", &trees[0], "split_UserWins", carriers[0].0, &carriers[0].1, self.pay_alice(carriers[0].1.value)?, false)?);
+        set.push(split);
+        // a combine for each chunk count k: carriers 0..k, chunk c in input c
+        for k in 1..=CHUNKS {
+            let p_tree = self.tail_tree(TailOut::Path(k))?;
+            let ins: Vec<(OutPoint, TxOut, TapTree, &str)> = (0..k).map(|c| (carriers[c].0, carriers[c].1.clone(), trees[c].clone(), "chunk")).collect();
+            let total: Amount = ins.iter().map(|i| i.1.value).sum();
+            let mut comb = Presign::new_multi(&format!("combine_{k}"), &ins, vec![TxOut { value: total, script_pubkey: p_tree.script_pubkey() }, hub_anchor.clone()])?;
+            let shape: Vec<Vec<Vec<u8>>> = (0..k).map(|c| chunk_fields(c).iter().flat_map(|n| (0..lngap_lamport::winternitz::WotsParams::for_bytes(*n as u32).total_digits()).flat_map(|_| [vec![0u8; 20], vec![15u8]])).collect()).collect();
+            let sigs = vec![vec![0u8; 64]; k];
+            let vsize = comb.finish_multi(shape, &sigs, &sigs).vsize() as u64 + trees[..k].iter().map(|t| slack_vbytes(t, "chunk")).sum::<Result<u64>>()?;
+            comb.tx.output[0].value = total.checked_sub(Amount::from_sat(vsize * FLOOR_RATE) + ANCHOR).context("the combine's floor")?;
+            let p_op = OutPoint { txid: comb.tx.compute_txid(), vout: 0 };
+            let p_out = comb.tx.output[0].clone();
+            set.push(comb);
+            set.push(Presign::new(&format!("timeout_combine_{k}"), &p_tree, "split_UserWins", p_op, &p_out, self.pay_alice(p_out.value)?, false)?);
+            // Alice's choice of hop, and its timeout
+            let h_tree = self.tail_tree(TailOut::Hop(k))?;
+            let hop = self.link(&format!("hop_{k}"), &p_tree, "hop", p_op, &p_out, h_tree.script_pubkey())?;
+            let h_op = OutPoint { txid: hop.tx.compute_txid(), vout: 0 };
+            let h_out = hop.tx.output[0].clone();
+            set.push(hop);
+            set.push(Presign::new(&format!("timeout_hop_{k}"), &h_tree, "split_UserWins", h_op, &h_out, self.pay_alice(h_out.value)?, false)?);
+        }
+        Ok(set)
+    }
+    /// An output's tree in the tail (a jump list's read and jump
+    /// challenges).
+    pub fn tail_tree(&self, at: lngap_ladder::ladder::TailOut) -> Result<TapTree> {
+        let k = format!("{at:?}");
+        if let Some(t) = self.tails.lock().unwrap().get(&k) {
+            return Ok(t.clone());
+        }
+        let ctx = self.ctx();
+        let t = TapTree::new(self.ladder_spec(&ctx).tail_leaves(at))?;
+        self.tails.lock().unwrap().insert(k, t.clone());
+        Ok(t)
+    }
+    /// A tail rule (without `disprove_`), for its witness.
+    pub fn tail_rule(&self, at: lngap_ladder::ladder::TailOut, name: &str) -> Result<Rule> {
+        let ctx = self.ctx();
+        self.ladder_spec(&ctx).tail_rule(at, name).with_context(|| format!("no tail rule {name} at {at:?}"))
+    }
+}
+
+/// The vbytes to add to a link's size for its floor, spending `tree`'s
+/// leaf `leaf`: what a leaf at the tree's greatest depth would add, so the
+/// floors (and the hub's reserve that covers them) are the statement's,
+/// not the keys'.
+fn slack_vbytes(tree: &TapTree, leaf: &str) -> Result<u64> {
+    Ok((tree.depth_slack(leaf)? as u64).div_ceil(4))
+}
+
+/// One pre-signed transaction: unsigned, with what its signatures cover.
+/// Most have one input; a path's combine has one per chunk (`extra`).
+#[derive(Clone, Debug)]
+pub struct Presign {
+    pub name: String,
+    pub tx: Transaction,
+    pub prevout: TxOut,
+    pub leaf: ScriptBuf,
+    pub control: ControlBlock,
+    /// Inputs after the first: each its prevout, leaf and control block.
+    pub extra: Vec<(TxOut, ScriptBuf, ControlBlock)>,
+    /// A link of the chain (plain ALL signatures, its poster's anchor at
+    /// output 1); otherwise a terminal transaction (ALL|ANYONECANPAY).
+    pub link: bool,
+}
+
+/// The name an input's signatures go by: the transaction's for input 0,
+/// `name#i` for input `i`.
+pub fn sig_name(name: &str, i: usize) -> String {
+    if i == 0 {
+        name.to_string()
+    } else {
+        format!("{name}#{i}")
+    }
+}
+
+impl Presign {
+    fn new(name: &str, tree: &TapTree, leaf: &str, op: OutPoint, prevout: &TxOut, outputs: Vec<TxOut>, link: bool) -> Result<Presign> {
+        let l = tree.leaf(leaf).with_context(|| format!("{name}: no leaf {leaf}"))?;
+        let tx = build_spend(op, &l.timelock, outputs);
+        Ok(Presign { name: name.to_string(), tx, prevout: prevout.clone(), leaf: l.script.clone(), control: tree.control_block(leaf)?, extra: vec![], link })
+    }
+    /// A link with several inputs, each `(outpoint, prevout, tree, leaf)`.
+    fn new_multi(name: &str, inputs: &[(OutPoint, TxOut, TapTree, &str)], outputs: Vec<TxOut>) -> Result<Presign> {
+        let mut ins = vec![];
+        let mut info = vec![];
+        for (op, out, tree, leaf) in inputs {
+            let l = tree.leaf(leaf).with_context(|| format!("{name}: no leaf {leaf}"))?;
+            ins.push((*op, l.timelock.sequence()));
+            info.push((out.clone(), l.script.clone(), tree.control_block(leaf)?));
+        }
+        let tx = lngap_btc::tx::build_tx(&ins, outputs, bitcoin::absolute::LockTime::ZERO);
+        let (prevout, leaf, control) = info.remove(0);
+        Ok(Presign { name: name.to_string(), tx, prevout, leaf, control, extra: info, link: true })
+    }
+    /// The inputs.
+    pub fn inputs(&self) -> usize {
+        1 + self.extra.len()
+    }
+    fn prevouts(&self) -> Vec<TxOut> {
+        std::iter::once(self.prevout.clone()).chain(self.extra.iter().map(|e| e.0.clone())).collect()
+    }
+    fn leaf_of(&self, i: usize) -> &ScriptBuf {
+        if i == 0 {
+            &self.leaf
+        } else {
+            &self.extra[i - 1].1
+        }
+    }
+    /// This party's signature (on input 0).
+    pub fn sign(&self, kp: &Keypair) -> Result<Vec<u8>> {
+        self.sign_input(kp, 0)
+    }
+    /// This party's signature on input `i`.
+    pub fn sign_input(&self, kp: &Keypair, i: usize) -> Result<Vec<u8>> {
+        if self.link {
+            Ok(sign_tapscript(kp, &self.tx, i, &self.prevouts(), self.leaf_of(i))?.as_ref().to_vec())
+        } else {
+            ensure!(i == 0, "a terminal transaction has one input");
+            sign_tapscript_acp(kp, &self.tx, 0, &self.prevout, &self.leaf)
+        }
+    }
+    /// Check the other party's signature (on input 0).
+    pub fn verify(&self, pk: &XOnlyPublicKey, sig: &[u8]) -> Result<()> {
+        self.verify_input(pk, 0, sig)
+    }
+    /// Check the other party's signature on input `i`.
+    pub fn verify_input(&self, pk: &XOnlyPublicKey, i: usize, sig: &[u8]) -> Result<()> {
+        if self.link {
+            let s = schnorr::Signature::from_slice(sig)?;
+            let msg = tapscript_sighash(&self.tx, i, &self.prevouts(), self.leaf_of(i))?;
+            SECP256K1.verify_schnorr(&s, &msg, pk).map_err(|e| anyhow::anyhow!("{}: {e}", self.name))
+        } else {
+            ensure!(i == 0, "a terminal transaction has one input");
+            ensure!(sig.len() == 65 && sig[64] == bitcoin::sighash::TapSighashType::AllPlusAnyoneCanPay as u8, "{}: not an ALL|ANYONECANPAY signature", self.name);
+            let s = schnorr::Signature::from_slice(&sig[..64])?;
+            let leaf_hash = bitcoin::taproot::TapLeafHash::from_script(&self.leaf, bitcoin::taproot::LeafVersion::TapScript);
+            let h = bitcoin::sighash::SighashCache::new(&self.tx).taproot_script_spend_signature_hash(0, &bitcoin::sighash::Prevouts::One(0, &self.prevout), leaf_hash, bitcoin::sighash::TapSighashType::AllPlusAnyoneCanPay)?;
+            let msg = bitcoin::secp256k1::Message::from_digest(bitcoin::hashes::Hash::to_byte_array(h));
+            SECP256K1.verify_schnorr(&s, &msg, pk).map_err(|e| anyhow::anyhow!("{}: {e}", self.name))
+        }
+    }
+    /// The transaction ready to broadcast: `wire` (the leaf's own witness,
+    /// such as a move) below the hub's and Alice's signatures.
+    pub fn finish(&self, wire: Vec<Vec<u8>>, hub_sig: &[u8], alice_sig: &[u8]) -> Transaction {
+        self.finish_multi(vec![wire], &[hub_sig.to_vec()], &[alice_sig.to_vec()])
+    }
+    /// [`Presign::finish`] for each input: its wire and both signatures.
+    pub fn finish_multi(&self, wires: Vec<Vec<Vec<u8>>>, hub_sigs: &[Vec<u8>], alice_sigs: &[Vec<u8>]) -> Transaction {
+        let mut tx = self.tx.clone();
+        for (i, wire) in wires.into_iter().enumerate() {
+            let mut w = wire;
+            w.push(hub_sigs[i].clone());
+            w.push(alice_sigs[i].clone());
+            let control = if i == 0 { &self.control } else { &self.extra[i - 1].2 };
+            tx.input[i].witness = tapscript_witness(&w, self.leaf_of(i), control);
+        }
+        tx
+    }
+}
+
+/// Both parties' signatures on a contract's pre-signed set, by name
+/// ([`sig_name`]).
+#[derive(Clone, Debug, Default)]
+pub struct Signed {
+    pub hub: HashMap<String, Vec<u8>>,
+    pub alice: HashMap<String, Vec<u8>>,
+}
+
+impl Signed {
+    /// Check every signature of both parties on `set`.
+    pub fn verify(&self, set: &[Presign], pubs: &[PartyPubKeys; 2]) -> Result<()> {
+        for p in set {
+            for i in 0..p.inputs() {
+                let n = sig_name(&p.name, i);
+                let (Some(h), Some(a)) = (self.hub.get(&n), self.alice.get(&n)) else {
+                    bail!("{n}: a signature is missing");
+                };
+                p.verify_input(&pubs[1].payment, i, h)?;
+                p.verify_input(&pubs[0].payment, i, a)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One party's signatures on the whole set (every input).
+pub fn sign_all(set: &[Presign], kp: &Keypair) -> Result<HashMap<String, Vec<u8>>> {
+    let mut out = HashMap::new();
+    for p in set {
+        for i in 0..p.inputs() {
+            out.insert(sig_name(&p.name, i), p.sign_input(kp, i)?);
+        }
+    }
+    Ok(out)
+}

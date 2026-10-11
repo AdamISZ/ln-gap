@@ -31,6 +31,7 @@ use lngap_lamport::winternitz::{WotsPublic, WotsSig};
 use lngap_pos::instance::mover_at;
 use lngap_pos::ttt::{Layout, PosLeaf};
 
+use crate::{LeanFile, OpensFile};
 use crate::challenges::ProgramInfo;
 use crate::final_d60::{final_leaves, input_key_params, input_leaves, input_message, input_signed};
 use crate::game::{prove_script_d60, Search, BLOCK};
@@ -42,6 +43,9 @@ pub struct ZkFamily {
     pub info: ProgramInfo,
     /// The prover's input keys, one per input word (D61).
     pub input_keys: Vec<WotsPublic>,
+    /// Lean moves (LN-GAP v3): the move keys by depth (index `d - 1`),
+    /// each signing its move's head alone; `None` for D60's pair keys.
+    pub moves: Option<Vec<WotsPublic>>,
     /// One (opcode, micro-step) sample per instruction class in the code.
     pub classes: BTreeMap<String, (u32, u8)>,
     /// Built leaf scripts, per (depth, rebuttal key): they depend on nothing
@@ -90,7 +94,22 @@ pub fn code_classes(info: &ProgramInfo) -> BTreeMap<String, (u32, u8)> {
 impl ZkFamily {
     pub fn new(search: Search, info: ProgramInfo, input_keys: Vec<WotsPublic>) -> Arc<ZkFamily> {
         let classes = code_classes(&info);
-        Arc::new(ZkFamily { search, info, input_keys, classes, cache: Mutex::new(Cache::default()) })
+        Arc::new(ZkFamily { search, info, input_keys, moves: None, classes, cache: Mutex::new(Cache::default()) })
+    }
+
+    /// The family with lean moves: `moves[d - 1]` signs depth `d`'s head.
+    pub fn lean(search: Search, info: ProgramInfo, input_keys: Vec<WotsPublic>, moves: Vec<WotsPublic>) -> Arc<ZkFamily> {
+        assert_eq!(moves.len() as u32, search.depths(), "one move key per depth");
+        let classes = code_classes(&info);
+        Arc::new(ZkFamily { search, info, input_keys, moves: Some(moves), classes, cache: Mutex::new(Cache::default()) })
+    }
+
+    /// What opens the file at `l.depth`: the lean moves' keys, or the pair
+    /// key `rebut`.
+    fn lean_file(&self, l: &Layout) -> Option<LeanFile> {
+        let mv = self.moves.as_ref()?;
+        let d = l.depth as usize;
+        Some(LeanFile { prior: (d >= 2).then(|| mv[d - 2].clone()), new: mv[d - 1].clone() })
     }
 }
 
@@ -124,7 +143,7 @@ pub fn encode_inputs(words: &[u32], sigs: &[WotsSig]) -> Vec<u8> {
 }
 
 impl ZkFamily {
-    fn build_disproves(&self, l: &Layout, rebut: &WotsPublic) -> Vec<PosLeaf> {
+    fn build_disproves(&self, l: &Layout, rebut: &impl OpensFile) -> Vec<PosLeaf> {
         let d = l.depth;
         let s = &self.search;
         if d == 1 {
@@ -153,7 +172,7 @@ impl ZkFamily {
         }
     }
 
-    fn build_proofs(&self, l: &Layout, rebut: &WotsPublic) -> Vec<(String, ScriptBuf)> {
+    fn build_proofs(&self, l: &Layout, rebut: &impl OpensFile) -> Vec<(String, ScriptBuf)> {
         self.classes
             .iter()
             .map(|(key, &(op, micro))| {
@@ -172,7 +191,11 @@ impl lngap_pos::ext::Family for ZkFamily {
         let leaves = match hit {
             Some(v) => v,
             None => {
-                let v: Arc<Vec<(String, ScriptBuf)>> = Arc::new(self.build_disproves(l, rebut).into_iter().map(|p| (p.name, p.script)).collect());
+                let built = match self.lean_file(l) {
+                    Some(f) => self.build_disproves(l, &f),
+                    None => self.build_disproves(l, rebut),
+                };
+                let v: Arc<Vec<(String, ScriptBuf)>> = Arc::new(built.into_iter().map(|p| (p.name, p.script)).collect());
                 self.cache.lock().unwrap().disproves.insert(key, v.clone());
                 v
             }
@@ -190,7 +213,10 @@ impl lngap_pos::ext::Family for ZkFamily {
         match hit {
             Some(v) => v.as_ref().clone(),
             None => {
-                let v = self.build_proofs(l, rebut);
+                let v = match self.lean_file(l) {
+                    Some(f) => self.build_proofs(l, &f),
+                    None => self.build_proofs(l, rebut),
+                };
                 self.cache.lock().unwrap().proofs.insert(key, Arc::new(v.clone()));
                 v
             }
@@ -239,6 +265,10 @@ impl lngap_pos::ext::Family for ZkFamily {
 
     fn equiv_keys(&self) -> Vec<(String, WotsPublic, Role)> {
         self.input_keys.iter().enumerate().map(|(j, k)| (format!("equiv_input_{j}"), k.clone(), mover_at(1))).collect()
+    }
+
+    fn lean_moves(&self) -> bool {
+        self.moves.is_some()
     }
 
     fn settle_code(&self) -> u8 {

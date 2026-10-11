@@ -20,6 +20,11 @@ bitcoin.workspace = true
 anyhow.workspace = true
 hex.workspace = true
 blake3 = "1"
+# native Groth16 (groth16.rs): the pairing, and the receipt claim's hashing
+ark-bn254 = "0.5"
+ark-ec = "0.5"
+ark-ff = "0.5"
+sha2.workspace = true
 riscv-decode = "0.2.3"
 bitcoin-script-functions = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-functions", tag = "v0.6.0" }
 bitcoin-script-riscv = { git = "https://github.com/FairgateLabs/BitVMX-CPU", rev = "299009c65e635327025ee13ffe1e1f1671bd0615" }

@@ -32,4 +32,9 @@ pub trait Family: Send + Sync + std::fmt::Debug {
     fn equiv_keys(&self) -> Vec<(String, WotsPublic, Role)>;
     /// The outcome code `settle` pays at the deadline (nobody disputed).
     fn settle_code(&self) -> u8;
+    /// Lean moves (LN-GAP v3): each move signed alone under its depth's
+    /// key, rather than the pair with both heads' authorship.
+    fn lean_moves(&self) -> bool {
+        false
+    }
 }

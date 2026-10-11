@@ -1,0 +1,154 @@
+# Proving the sessions guest and wrapping it in Groth16
+
+The sessions PoC disputes one program on Bitcoin: BitVMX's Groth16
+verifier. To feed it a real proof of *our* withdrawal guest, the guest's
+RISC Zero receipt must be wrapped in Groth16. Every step of that runs on
+a Mac except the last, RISC Zero's Groth16 prover, which is a Docker
+image for **x86_64 only** (gnark plus the proving key). This directory is
+the RISC Zero side: the guest (`methods/guest`), a host tool `lngap-r0`
+(`host/`) and these scripts.
+
+Everything is pinned to **RISC Zero 3.0.6**. The BitVMX verifier ELF
+bakes in RISC Zero 3.0's control root (`a54dc85a…1f56`) and BN254
+control id (`c07a6514…4404`), so receipts made with any 3.0 release
+verify with it unpatched (the older sample proof needed a patch; see
+`crates/apps/zk/GROTH16.md`).
+
+## On the Linux machine
+
+**You need:** x86_64 Linux; Rust (`rustup`); Docker Engine usable by
+your user (`docker info` works without sudo); git and curl; about 15 GB
+of free disk; 16 GB of RAM or more is safest for the Groth16 step (the
+setup script warns below that). GNU `time` (`apt install time`) is
+optional: with it, the logs record peak memory.
+
+1. Get the branch (after it has been pushed):
+
+       git clone <the repo> ln-gap && cd ln-gap
+       git checkout v25-seal
+       cd crates/apps/sessions/r0
+
+2. Set up (user-level, no sudo; about 10 minutes, mostly the image pull
+   and the build):
+
+       scripts/linux-setup.sh
+
+   It checks the machine, installs RISC Zero's `rzup` (its installer
+   adds `~/.risc0/bin` to your shell profile), then through it the guest
+   toolchain, `r0vm` 3.0.6 and `cargo-risczero` 3.0.6, pulls
+   `risczero/risc0-groth16-prover:v2025-04-03.1`, and builds `lngap-r0`.
+
+3. Self-test the whole pipeline (prove, wrap, verify):
+
+       scripts/linux-selftest.sh
+
+   It ends with `selftest: OK`-style output from `lngap-r0 verify` and
+   writes `selftest.log`. **Send that log back**: it records the
+   machine, the times and (with GNU `time`) the peak memory of each step.
+
+## Building the guest reproducibly
+
+The image id (the hash of the guest's binary) is what the session
+contract pins, so both parties, and anyone auditing, must get the same
+one. RISC Zero's ordinary build embeds machine-specific details (the Mac
+and the laptop got different ids for the same code); its Docker build
+doesn't. So the guest is built canonically on x86 Linux, inside RISC
+Zero's pinned builder image (`risczero/risc0-guest-builder:r0.1.88.0`,
+x86 only), and the resulting binary is committed as
+`guests/withdraw.bin`. The host tool proves that committed binary and
+computes its image id from it, so every machine proves the same program.
+
+    scripts/build-guest.sh
+
+It refuses to run with uncommitted changes under `methods/guest`, builds
+the guest in Docker (a few minutes the first time, pulling the image),
+writes `guests/withdraw.bin` and prints its image id and SHA-256. Bring
+the binary back to be committed. To check reproducibility, run the same
+script on another x86 machine at the same commit: the image id must be
+identical.
+
+## The withdrawal, end to end
+
+    scripts/linux-withdraw.sh 9 42
+
+builds the guest reproducibly (as below), rebuilds the host tool around
+it, builds the toy L2 with Alice's return of 9 to the hub with memo 42,
+checks the statement natively, proves it (about 5.8 million cycles, six
+segments: minutes), wraps it in Groth16 and encodes it as the BitVMX
+verifier's input. It writes `withdraw.log`. Bring back
+`guests/withdraw.bin` (the reproducible build, to be committed) and the
+log's last lines: the guest's SHA-256, the image id, the journal and the
+input hex.
+
+## Wrapping a receipt made on the Mac
+
+On the Mac (see below), `lngap-r0 prove <b> <c> succinct.bin` writes a
+succinct receipt (about 220 KB). Then:
+
+    # Mac -> Linux
+    scp succinct.bin linux:ln-gap/crates/apps/sessions/r0/receipts/
+
+    # on Linux
+    scripts/wrap.sh receipts/succinct.bin receipts/groth16.bin
+
+    # Linux -> Mac
+    scp linux:ln-gap/crates/apps/sessions/r0/receipts/groth16.bin .
+
+`wrap.sh` also writes `receipts/groth16.log`. Measured on a 12-core,
+38 GB laptop: proving 21 s, the wrap 102 s. The Groth16 receipt is a
+few hundred bytes of seal plus the journal; `lngap-r0 show groth16.bin`
+prints the image id, journal and seal.
+
+Both sides must prove the same guest: the committed `guests/withdraw.bin`.
+Pull the branch on both machines before proving.
+
+## On the Mac
+
+Proving on the Mac works through `r0vm` (RISC Zero's prebuilt prover;
+the host tool uses RISC Zero's client API, so nothing of RISC Zero's
+needs compiling here, and Xcode's Metal compiler is not needed):
+
+    curl -L https://risczero.com/install | bash      # rzup
+    rzup install rust
+    rzup install r0vm 3.0.6
+    rzup install cargo-risczero 3.0.6
+    cd crates/apps/sessions/r0 && cargo build --release
+    ./target/release/lngap-r0 prove 9 42 succinct.bin   # ~7 s
+
+`RISC0_DEV_MODE=1` makes fake receipts (instant, not proofs; `show`
+labels them) for working on the guest.
+
+## What the tool does
+
+    lngap-r0 prove <b> <c> <out>   a succinct (STARK) receipt of the guest on (b, c)
+    lngap-r0 wrap <in> <out>       the Groth16 receipt of a succinct receipt
+    lngap-r0 verify <in>           verify against the guest's image id
+    lngap-r0 show <in>             kind, image id, journal, seal
+    lngap-r0 selftest              prove (9, 42), wrap, verify
+    lngap-r0 withdraw-demo <b> <c> <out>   the toy L2's withdrawal, checked and proved
+    lngap-r0 bitvmx-input <in> <out.hex>   a Groth16 receipt as the verifier's input
+
+The guest is the withdrawal statement (`methods/guest`, the check in
+`core/`): a note owned by the hub, of value `b` and memo `c`, in the
+commitment tree of a state root the L2's sequencer signed (BIP340); it
+commits `b ‖ c`. The toy L2 that builds its input is `host/src/toy.rs`,
+deterministic from fixed seeds, so every machine builds the same input.
+
+## If something goes wrong
+
+- `docker returned failure exit code: Some(1)`: the container couldn't
+  read its input. RISC Zero passes it through a working directory, by
+  default under `/tmp`, which a snap-installed Docker can't see; the
+  scripts set `RISC0_WORK_DIR=$HOME/r0work` for this reason (set it
+  yourself when running `lngap-r0 wrap` by hand).
+- `docker returned failure exit code` otherwise: run the image by hand to see why,
+  `docker run --rm risczero/risc0-groth16-prover:v2025-04-03.1`; out of
+  memory is the usual cause (check `dmesg` for the OOM killer). Exit
+  code 137 is the kernel's kill: on the Mac, under Colima's default VM
+  (2 CPUs, 1.9 GB, the amd64 image emulated), the wrap died this way
+  after 26 s. A larger VM (`colima start --memory 24 --cpu 8 --arch
+  x86_64`, say) might do it there, slowly; x86 Linux is the plain route.
+- `r0vm` version errors: the host tool and `r0vm` must both be 3.0.x;
+  `rzup show` lists what's installed, `rzup default r0vm 3.0.6` selects.
+- `image id mismatch` on verify: the two machines built different
+  guests; check out the same commit on both and rebuild.

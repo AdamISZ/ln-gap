@@ -25,6 +25,7 @@ pub mod challenges;
 pub mod chain;
 pub mod dispute;
 pub mod game;
+pub mod groth16;
 pub mod guard;
 pub mod final_d60;
 pub mod family;
@@ -44,6 +45,70 @@ use riscv_decode::Instruction;
 
 /// Head bytes (the venue's fixed head size).
 pub const HEAD_BYTES: usize = 48;
+
+/// What opens a leaf's register file: verifies the reveal(s) on top of the
+/// stack and leaves the file's message digits, the prior head's first
+/// (deepest), as the leaves expect.
+pub trait OpensFile {
+    fn open_file(&self, b: Builder) -> Builder;
+}
+
+/// The mover's pair key (D60): one signature over the parked pair.
+impl OpensFile for WotsPublic {
+    fn open_file(&self, b: Builder) -> Builder {
+        b.wots_verify(self)
+    }
+}
+
+/// Lean moves (LN-GAP v3): each move is signed alone, under its depth's
+/// key (with, at depth 1 and the final depth, the claim block or the
+/// record after the head); a leaf re-reveals both signatures, both public
+/// once posted. The
+/// new move's verify runs first (its reveal on top), its digits wait on
+/// the altstack while the prior's are verified, then return above them:
+/// the same file as the pair key's. Witness, wire order: the prior move's
+/// reveal, then the new move's.
+#[derive(Clone, Debug)]
+pub struct LeanFile {
+    /// The prior move's key; `None` at depth 1.
+    pub prior: Option<WotsPublic>,
+    pub new: WotsPublic,
+}
+
+/// A head's digits in a file.
+const HEAD_DIGITS: usize = 2 * HEAD_BYTES;
+
+/// Verify a move's signature and keep only its head's digits: a key may
+/// sign more than the head (move 1 signs its claim block with it, the
+/// final move its record, so that the data the other side needs is on
+/// chain under the mover's signature); the extra digits are on top.
+fn verify_head(mut b: Builder, key: &WotsPublic) -> Builder {
+    b = b.wots_verify(key);
+    let extra = key.params.message_digits as usize - HEAD_DIGITS;
+    for _ in 0..extra / 2 {
+        b = b.push_opcode(OP_2DROP);
+    }
+    if extra % 2 == 1 {
+        b = b.push_opcode(OP_DROP);
+    }
+    b
+}
+
+impl OpensFile for LeanFile {
+    fn open_file(&self, mut b: Builder) -> Builder {
+        b = verify_head(b, &self.new);
+        if let Some(p) = &self.prior {
+            for _ in 0..HEAD_DIGITS {
+                b = b.push_opcode(OP_TOALTSTACK);
+            }
+            b = verify_head(b, p);
+            for _ in 0..HEAD_DIGITS {
+                b = b.push_opcode(OP_FROMALTSTACK);
+            }
+        }
+        b
+    }
+}
 
 /// Where the emulator puts the registers (the Groth16 ELF's layout).
 pub const BASE_REGISTER_ADDRESS: u32 = 0xF000_0000;
@@ -66,6 +131,10 @@ impl Step {
         b[8..12].copy_from_slice(&self.pc.to_be_bytes());
         b[12] = self.micro;
         b
+    }
+    pub fn from_bytes(b: &[u8; 13]) -> Step {
+        let w = |i: usize| u32::from_be_bytes(b[i..i + 4].try_into().unwrap());
+        Step { write_addr: w(0), write_value: w(4), pc: w(8), micro: b[12] }
     }
 }
 
@@ -326,7 +395,7 @@ fn digest_src(n: usize) -> Vec<Src> {
 /// digest (which consumes it); then, per phase, bring its inputs back and
 /// run its script; push 1. The extra data's nibbles lie below the pair
 /// reveal in the witness.
-pub(crate) fn leaf_with_extra(l: &Layout, key: &WotsPublic, phases: &[(Vec<Src>, ScriptBuf)]) -> ScriptBuf {
+pub(crate) fn leaf_with_extra(l: &Layout, key: &impl OpensFile, phases: &[(Vec<Src>, ScriptBuf)]) -> ScriptBuf {
     let mut all = vec![(digest_src(l.new), digest_check_script())];
     all.extend(phases.iter().cloned());
     leaf_phases(l, key, EXTRA_BYTES * 2, &all)
@@ -335,9 +404,9 @@ pub(crate) fn leaf_with_extra(l: &Layout, key: &WotsPublic, phases: &[(Vec<Src>,
 /// The general leaf body: `n_extra` witness nibbles below the pair reveal;
 /// gather all phases' inputs, last phase first (so the first comes back
 /// first), drop the file, then restore and run each phase in order.
-pub(crate) fn leaf_phases(l: &Layout, key: &WotsPublic, n_extra: usize, phases: &[(Vec<Src>, ScriptBuf)]) -> ScriptBuf {
+pub(crate) fn leaf_phases(l: &Layout, key: &impl OpensFile, n_extra: usize, phases: &[(Vec<Src>, ScriptBuf)]) -> ScriptBuf {
     let file = l.file;
-    let mut b = Builder::new().wots_verify(key);
+    let mut b = key.open_file(Builder::new());
     for (src, _) in phases.iter().rev() {
         for s in src.iter().rev() {
             b = match *s {
@@ -372,7 +441,7 @@ pub(crate) fn leaf_phases(l: &Layout, key: &WotsPublic, n_extra: usize, phases: 
 /// head's digit 0 deepest; any extra witness items lie below them); PICK
 /// `src` (or push its constants) to the altstack, last first; drop the
 /// register file; bring them back (`src[0]` deepest); run `check`; push 1.
-pub(crate) fn leaf_script_src(l: &Layout, key: &WotsPublic, src: &[Src], check: &ScriptBuf) -> ScriptBuf {
+pub(crate) fn leaf_script_src(l: &Layout, key: &impl OpensFile, src: &[Src], check: &ScriptBuf) -> ScriptBuf {
     leaf_phases(l, key, 0, &[(src.to_vec(), check.clone())])
 }
 
@@ -421,7 +490,7 @@ pub fn prove_name(instruction: &Instruction, micro: u8) -> String {
 /// The prover's `zk_prove_<class>` leaf over the parked pair (depth >= 2),
 /// for `instruction`'s class at micro-step `micro`. `holds` is its native
 /// mirror (a proof exists for the pair), which needs an executor.
-pub fn prove_leaf(l: &Layout, key: &WotsPublic, instruction: &Instruction, micro: u8, holds: Arc<dyn Fn(&[u8; HEAD_BYTES], &[u8; HEAD_BYTES]) -> bool + Send + Sync>) -> PosLeaf {
+pub fn prove_leaf(l: &Layout, key: &impl OpensFile, instruction: &Instruction, micro: u8, holds: Arc<dyn Fn(&[u8; HEAD_BYTES], &[u8; HEAD_BYTES]) -> bool + Send + Sync>) -> PosLeaf {
     let p = l.prior.expect("the proof reads a prior head: depth >= 2");
     let n = l.new;
     // the hash check's inputs (deepest): prev hash, the write record, and

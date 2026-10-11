@@ -12,6 +12,8 @@ All of this is dependent on what's called a **venue**, which is a set trusted on
 
 For the actual whole argument, read the [short paper](docs/paper/lngap-short.pdf) to get the general structure and motivation. An AI-authored much more detailed paper is [also available](docs/paper/lngap_draft.pdf ) and can also be used to dive in further.
 
+A later design, **Lichen**, uses these contracts for withdrawals from a hub's layer 2, disputed on Bitcoin by BitVMX's search instead of a venue: its [paper](https://github.com/AdamISZ/lichen/blob/master/papers/lichen-draft.pdf) and client software are in the [lichen repository](https://github.com/AdamISZ/lichen), and its contracts and dispute code are here, under `crates/apps/sessions`. [From a Rust program to one step on Bitcoin](docs/paper/pipeline.pdf) explains how such a withdrawal is proved, wrapped in Groth16 and disputed.
+
 For diagram-led explanations of the key mechanics (how a game rule is tested in Script, the one-time signatures, the venue's attestations, the pre-signed dispute graph), see [docs/](docs/README.md).
 
 ## Caveat

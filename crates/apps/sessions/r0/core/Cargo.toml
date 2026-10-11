@@ -1,0 +1,14 @@
+[package]
+name = "lngap-r0-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# The withdrawal statement's data and check, shared by the guest (which
+# proves it) and the host (which builds the toy L2's inputs and checks
+# them before proving).
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+sha2 = { version = "0.10", default-features = false }
+k256 = { version = "0.13", default-features = false, features = ["schnorr"] }

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# A pass-through `docker` used by scripts/build-guest.sh. RISC Zero's guest
+# build exports the ELF with `docker build --output=<dir>`; with some Docker
+# installs (a snap one, buildx 0.37) that export fails as a non-root user,
+# because it tries to keep the container's root ownership of the files
+# ("lchownat ... operation not permitted"). Here such a build exports a tar
+# instead, unpacked as the calling user. The build itself (so the binary and
+# its image id) is unchanged; everything else passes straight through.
+set -euo pipefail
+real="${LNGAP_REAL_DOCKER:?LNGAP_REAL_DOCKER must name the real docker}"
+out=""
+args=()
+for a in "$@"; do
+    case "$a" in
+        --output=*) out="${a#--output=}" ;;
+        *) args+=("$a") ;;
+    esac
+done
+if [ -n "$out" ] && [ "${args[0]:-}" = build ]; then
+    tarf="$(mktemp "${TMPDIR:-/tmp}/lngap-guest-XXXXXX")"
+    "$real" build --output "type=tar,dest=$tarf" "${args[@]:1}"
+    mkdir -p "$out"
+    tar -xf "$tarf" -C "$out" --no-same-owner
+    rm -f "$tarf"
+else
+    exec "$real" "$@"
+fi
