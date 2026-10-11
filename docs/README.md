@@ -4,6 +4,9 @@ Short, diagram-led walk-throughs of the mechanisms that recur across the
 code. Each one drills into a single concrete example rather than trying to
 be complete; the [short paper](paper/lngap-short.pdf) gives the
 motivation, and the [long paper](paper/lngap_draft.pdf) the full design.
+[From a Rust program to one step on Bitcoin](paper/pipeline.pdf) follows
+a withdrawal's proof from the guest program to one disputed step, for
+[Lichen](https://github.com/AdamISZ/lichen).
 
 | | |
 |---|---|
