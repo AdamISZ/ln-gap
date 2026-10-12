@@ -73,7 +73,7 @@ fn prove(b: u32, c: u32) -> Result<Receipt> {
 /// it: `lichen withdraw-input <memo>`), checked natively first.
 fn prove_input(path: &str) -> Result<Receipt> {
     let input: lngap_r0_core::WithdrawInput = serde_json::from_slice(&std::fs::read(path)?).with_context(|| format!("{path}: a withdrawal input"))?;
-    let journal = lngap_r0_core::check(&input, &lngap_r0_core::SEQUENCER_KEY, &lngap_r0_core::HUB_KEY).map_err(|e| anyhow::anyhow!("the statement fails natively: {e:?}"))?;
+    let journal = lngap_r0_core::check(&input).map_err(|e| anyhow::anyhow!("the statement fails natively: {e:?}"))?;
     eprintln!("{path}: the return of {} with memo {} at index {}, root signed at height {}; journal {}", input.note.value, input.note.memo, input.index, input.height, hex::encode(journal));
     let env = ExecutorEnv::builder().write(&input)?.build()?;
     let t = Instant::now();
@@ -145,7 +145,7 @@ fn main() -> Result<()> {
         }
         ["withdraw-demo", b, c, out] => {
             let input = toy::withdraw_input(b.parse()?, c.parse()?);
-            let journal = lngap_r0_core::check(&input, &lngap_r0_core::SEQUENCER_KEY, &lngap_r0_core::HUB_KEY).map_err(|e| anyhow::anyhow!("the statement fails natively: {e:?}"))?;
+            let journal = lngap_r0_core::check(&input).map_err(|e| anyhow::anyhow!("the statement fails natively: {e:?}"))?;
             eprintln!("the toy L2: Alice's return of {b} with memo {c} at index {}, root signed at height {}; journal {}", input.index, input.height, hex::encode(journal));
             let env = ExecutorEnv::builder().write(&input)?.build()?;
             let t = Instant::now();

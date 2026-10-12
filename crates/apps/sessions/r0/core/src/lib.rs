@@ -10,13 +10,17 @@
 //!
 //! The sequencer signs `R` (BIP340). The statement: a note owned by the
 //! hub, of value `b` and memo `c`, is in the commitment tree of a state
-//! root the sequencer signed. Its journal is `b ‖ c` (little-endian u32s).
-//! Not checked here: that `R` follows from valid transitions (the
-//! validity assumption; the `transition` guest's job).
+//! root the sequencer signed. Its journal is `b ‖ c ‖ D` (`b`, `c`
+//! little-endian u32s; `D` the deployment id). Not checked here: that `R`
+//! follows from valid transitions (the validity assumption; the
+//! `transition` guest's job).
 //!
-//! The sequencer's and the hub's keys are constants: the guest's image id
-//! pins them (one image per L2 deployment). In the toy they come from
-//! fixed seeds (see the host).
+//! The sequencer's and the hub's keys are part of the input, and the
+//! journal commits to them as the deployment id
+//! `D = SHA256("lngap/deployment" ‖ sequencer ‖ hub)`: one guest (one
+//! image id) serves every deployment, and a contract pins its own `D` as
+//! it pins the memo. The toy deployment's keys come from fixed seeds (see
+//! the host).
 
 #![no_std]
 
@@ -31,17 +35,32 @@ use sha2::{Digest, Sha256};
 /// The commitment tree's depth: 2^16 notes.
 pub const TREE_DEPTH: usize = 16;
 
-/// The toy L2's sequencer key (x-only), from the seed "lngap-toy/sequencer".
+/// The toy deployment's sequencer key (x-only), from the seed
+/// "lngap-toy/sequencer": for tests and regtest demos only (anyone can
+/// derive its secret).
 pub const SEQUENCER_KEY: [u8; 32] = [
     0xa7, 0xad, 0x0e, 0xb4, 0xbc, 0xc5, 0xdf, 0x74, 0xd9, 0x6c, 0xb0, 0x35, 0xfd, 0xcc, 0x75, 0x3e,
     0x47, 0x2a, 0xfa, 0x7f, 0x54, 0x73, 0xfc, 0xcf, 0x9e, 0xe5, 0x6f, 0xc7, 0x92, 0x03, 0xd1, 0x7f,
 ];
 
-/// The toy hub's key (x-only), from the seed "lngap-toy/hub".
+/// The toy deployment's hub key (x-only), from the seed "lngap-toy/hub":
+/// for tests and regtest demos only.
 pub const HUB_KEY: [u8; 32] = [
     0xd3, 0xb3, 0x18, 0xbc, 0x30, 0x36, 0x56, 0x6f, 0x33, 0xf5, 0xea, 0x00, 0x0a, 0x7e, 0xee, 0xfc,
     0x41, 0xcb, 0x6d, 0xac, 0x09, 0xfd, 0x3a, 0x23, 0x76, 0xf2, 0x43, 0x79, 0x84, 0xea, 0xdf, 0xea,
 ];
+
+/// The journal's length in bytes: `b ‖ c ‖ D`.
+pub const JOURNAL_LEN: usize = 40;
+
+/// A deployment's id: its sequencer's and hub's keys (x-only), hashed.
+pub fn deployment_id(sequencer: &[u8; 32], hub: &[u8; 32]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"lngap/deployment");
+    h.update(sequencer);
+    h.update(hub);
+    h.finalize().into()
+}
 
 /// A note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +123,9 @@ pub struct WithdrawInput {
     pub note: Note,
     pub index: u32,
     pub path: Vec<[u8; 32]>,
+    /// The deployment: its sequencer's and hub's keys (x-only).
+    pub sequencer: [u8; 32],
+    pub hub: [u8; 32],
 }
 
 /// Why a withdrawal input is rejected.
@@ -115,10 +137,10 @@ pub enum Reject {
     BadSignature,
 }
 
-/// The statement: check `input` against the sequencer's and the hub's
-/// keys; on success, the journal `b ‖ c`.
-pub fn check(input: &WithdrawInput, sequencer: &[u8; 32], hub: &[u8; 32]) -> Result<[u8; 8], Reject> {
-    if &input.note.owner != hub {
+/// The statement: check `input` against its deployment's keys; on
+/// success, the journal `b ‖ c ‖ D`.
+pub fn check(input: &WithdrawInput) -> Result<[u8; JOURNAL_LEN], Reject> {
+    if input.note.owner != input.hub {
         return Err(Reject::NotTheHubs);
     }
     if input.path.len() != TREE_DEPTH {
@@ -127,11 +149,12 @@ pub fn check(input: &WithdrawInput, sequencer: &[u8; 32], hub: &[u8; 32]) -> Res
     let b = u32::try_from(input.note.value).map_err(|_| Reject::TooLarge)?;
     let tree = root_from_path(input.note.commitment(), input.index, &input.path);
     let root = state_root(input.height, &tree, &input.nullifiers);
-    let key = VerifyingKey::from_bytes(sequencer).map_err(|_| Reject::BadSignature)?;
+    let key = VerifyingKey::from_bytes(&input.sequencer).map_err(|_| Reject::BadSignature)?;
     let sig = Signature::try_from(input.signature.as_slice()).map_err(|_| Reject::BadSignature)?;
     key.verify_raw(&root, &sig).map_err(|_| Reject::BadSignature)?;
-    let mut journal = [0u8; 8];
+    let mut journal = [0u8; JOURNAL_LEN];
     journal[..4].copy_from_slice(&b.to_le_bytes());
-    journal[4..].copy_from_slice(&input.note.memo.to_le_bytes());
+    journal[4..8].copy_from_slice(&input.note.memo.to_le_bytes());
+    journal[8..].copy_from_slice(&deployment_id(&input.sequencer, &input.hub));
     Ok(journal)
 }

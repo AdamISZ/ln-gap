@@ -15,3 +15,12 @@ resolver = "3"
 [dependencies]
 lngap-r0-core = { path = "../../core" }
 risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
+
+# RISC Zero's accelerated crypto (its zkVM's precompiles for SHA-256 and
+# big-number arithmetic): the statement's cost is almost all the
+# sequencer's BIP340 signature, 5.9M cycles in plain software, 428k with
+# these (measured 2026-10-12: 6 min to 30 s on an M4 Pro)
+[patch.crates-io]
+sha2 = { git = "https://github.com/risc0/RustCrypto-hashes", tag = "sha2-v0.10.9-risczero.0" }
+k256 = { git = "https://github.com/risc0/RustCrypto-elliptic-curves", tag = "k256/v0.13.4-risczero.1" }
+crypto-bigint = { git = "https://github.com/risc0/RustCrypto-crypto-bigint", tag = "v0.5.5-risczero.0" }

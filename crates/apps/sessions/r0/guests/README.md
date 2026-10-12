@@ -12,9 +12,17 @@ that build's.
 |---|---|---|
 | placeholder (commits b, c) | Mac, local build (development only) | `0a89c87936208a4e19b83b3161ea9c992282057e16e39ebc1279c1e85df83695` |
 | withdraw (the statement), at 96e041b | Mac, local build (development only) | `843412961546156cf1276c6d22adb816d1eb1879a0f57d0abe799d1d779d7216` |
-| **withdraw (the statement), at 6ed5998: the current file** | **x86 Linux, `build-guest.sh` (reproducible), 441,580 bytes, SHA-256 `1a64b317e6c0db816b25515be9dbd476ed259e8e5f00e0b1908613190223538f`** | **`4beda75466ff0db4aa6c6fe9512140368ad287c695f0ff162775db93039aa639`** |
+| withdraw (the statement), at 6ed5998 | x86 Linux, `build-guest.sh` (reproducible), 441,580 bytes, SHA-256 `1a64b317e6c0db816b25515be9dbd476ed259e8e5f00e0b1908613190223538f` | `4beda75466ff0db4aa6c6fe9512140368ad287c695f0ff162775db93039aa639` |
+| **withdraw, deployment keys in the input, journal `b ‖ c ‖ D`, accelerated crypto: the current file** | **Mac, local build (development only, until the canonical build), 373,072 bytes, SHA-256 `a4adfb2d14b22449689e6b7b4f0095c4d54eee98c4b4f530117aa4c4f226be56`** | **`1bb827a083155b984971443d0c11a0e161041ff77fb77360dcaa7b2013693cdf`** |
 
-Checked on the Mac: the host tool recomputes the same image id from the
+The current statement (2026-10-12): the sequencer's and the hub's keys
+are part of the input, and the journal commits to them as the deployment
+id `D`, so one guest serves every deployment; the guest uses RISC Zero's
+accelerated `sha2`, `k256` and `crypto-bigint`. Its proof of the toy L2's
+(9, 42) on an M4 Pro: 440k cycles, one segment, 30 s (CPU). The
+canonical build (`build-guest.sh` on x86) replaces this file and its row.
+
+The previous statement, at 6ed5998: checked on the Mac: the host tool recomputes the same image id from the
 file. Its proof (toy L2, b = 9, c = 42; 5.9M cycles, 27.7 min on a
 12-core laptop, 9.6 GB peak; Groth16 wrap 109 s), encoded as the
 verifier's 172-byte input, runs BitVMX's unpatched Groth16 verifier to

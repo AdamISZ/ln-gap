@@ -87,13 +87,13 @@ pub fn withdraw_input(b: u32, c: u32) -> WithdrawInput {
     let nullifiers = nullifier_root();
     let root = state_root(height, &tree.root(), &nullifiers);
     let signature = sequencer().sign_raw(&root, &[0u8; 32]).expect("signing").to_bytes().to_vec();
-    WithdrawInput { height, nullifiers, signature, note, index, path: tree.path(index) }
+    WithdrawInput { height, nullifiers, signature, note, index, path: tree.path(index), sequencer: xonly(&sequencer()), hub: xonly(&hub()) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lngap_r0_core::{check, root_from_path, Reject, HUB_KEY, SEQUENCER_KEY};
+    use lngap_r0_core::{check, deployment_id, root_from_path, Reject, HUB_KEY, SEQUENCER_KEY};
 
     #[test]
     fn the_constants_are_the_seeds_keys() {
@@ -115,15 +115,25 @@ mod tests {
     #[test]
     fn the_statement_holds_and_rejects() {
         let input = withdraw_input(9, 42);
-        assert_eq!(check(&input, &SEQUENCER_KEY, &HUB_KEY), Ok([9, 0, 0, 0, 42, 0, 0, 0]));
+        let journal = check(&input).unwrap();
+        assert_eq!(journal[..8], [9, 0, 0, 0, 42, 0, 0, 0]);
+        assert_eq!(journal[8..], deployment_id(&SEQUENCER_KEY, &HUB_KEY));
         let mut bad = input.clone();
         bad.note.value = 10;
-        assert_eq!(check(&bad, &SEQUENCER_KEY, &HUB_KEY), Err(Reject::BadSignature), "another value is not in the signed state");
+        assert_eq!(check(&bad), Err(Reject::BadSignature), "another value is not in the signed state");
         let mut bad = input.clone();
         bad.note.owner = [7; 32];
-        assert_eq!(check(&bad, &SEQUENCER_KEY, &HUB_KEY), Err(Reject::NotTheHubs));
-        let mut bad = input;
+        assert_eq!(check(&bad), Err(Reject::NotTheHubs));
+        let mut bad = input.clone();
         bad.signature[0] ^= 1;
-        assert_eq!(check(&bad, &SEQUENCER_KEY, &HUB_KEY), Err(Reject::BadSignature));
+        assert_eq!(check(&bad), Err(Reject::BadSignature));
+        // another deployment's keys: the return is not its hub's, or the
+        // root is not its sequencer's
+        let mut bad = input.clone();
+        bad.hub = [7; 32];
+        assert_eq!(check(&bad), Err(Reject::NotTheHubs));
+        let mut bad = input;
+        bad.sequencer = xonly(&hub());
+        assert_eq!(check(&bad), Err(Reject::BadSignature));
     }
 }
