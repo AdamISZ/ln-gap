@@ -4,7 +4,7 @@
 # The JSON is what `lichen withdraw-input <memo>` prints: the return note,
 # its path and the sequencer's signed root. Proves the canonical guest on
 # it (STARK), wraps the proof in Groth16, and writes the BitVMX verifier's
-# 172-byte input as hex: give it to `lichen dispute ... --input <out.hex>`.
+# 204-byte input as hex: give it to `lichen dispute ... --input <out.hex>`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 json="$(realpath "$1")"; out="${2:-claim.hex}"

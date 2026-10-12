@@ -98,7 +98,7 @@ fn open_program(rt: &Regtest, program: Program, cid: u32, b_word: usize, memo_wo
     let hub_path: Option<Vec<Vec<WotsSecret>>> = jump.then(|| (0..CHUNKS).map(|c| chunk_fields(c).iter().enumerate().map(|(f, n)| tk("hub", c, f, *n)).collect()).collect());
     let alice_hop: Option<Vec<WotsSecret>> = jump.then(|| (0..CHUNKS).map(|k| tk("alice", k, 0, 1)).collect());
     let tail = hub_path.as_ref().zip(alice_hop.as_ref()).map(|(p, h)| TailKeys { path: p.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(), hop: h.iter().map(|k| k.public()).collect() });
-    let spec = Spec { terms, cid, params, pubs: [alice.public(), hub.public()], b_word, checks: vec![Check { name: "memo".into(), word: memo_word, value: cid }], moves, inputs: inputs.iter().map(|k| k.public()).collect(), tail };
+    let spec = Spec { terms, cid, params, pubs: [alice.public(), hub.public()], b_word, checks: vec![Check { name: "memo".into(), word: memo_word, value: cid, in_claim: true }], moves, inputs: inputs.iter().map(|k| k.public()).collect(), tail };
     let contract = Contract::new(spec, &program).unwrap();
     let (op, _) = rt.fund(&contract.tree().unwrap().script_pubkey(), contract.value()).unwrap();
     let presigned = contract.presign(op).unwrap();
