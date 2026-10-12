@@ -96,12 +96,18 @@ impl Program {
 }
 
 /// An input-word check on the first ladder output: word `word` must be
-/// `value`.
+/// `value`. `in_claim`: whether `escalate` publishes the word (with `b`)
+/// or `inputs` does, with the rest of the input. Either way the check's
+/// leaf is on the ladder output after move 1, which `inputs` creates; the
+/// choice is only about fitting `escalate`'s witness, with move 1's
+/// hashes, under Script's 1,000-element stack (each word's one-time
+/// signature is about 20 elements).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Check {
     pub name: String,
     pub word: usize,
     pub value: u32,
+    pub in_claim: bool,
 }
 
 /// What both parties agree when they open a contract.
@@ -180,9 +186,10 @@ impl Contract {
     pub fn b_key(&self) -> &WotsPublic {
         &self.spec.inputs[self.spec.b_word]
     }
-    /// The input words `escalate` puts on chain: `b`'s and the checked ones.
+    /// The input words `escalate` puts on chain: `b`'s and the checked ones
+    /// marked `in_claim`.
     pub fn claim_words(&self) -> Vec<usize> {
-        let mut w: Vec<usize> = self.spec.checks.iter().map(|c| c.word).chain([self.spec.b_word]).collect();
+        let mut w: Vec<usize> = self.spec.checks.iter().filter(|c| c.in_claim).map(|c| c.word).chain([self.spec.b_word]).collect();
         w.sort_unstable();
         w.dedup();
         w

@@ -96,7 +96,7 @@ struct Session {
 
 impl Session {
     fn new(terms: Terms, pdf: &str) -> Session {
-        let checks = vec![Check { name: "memo".into(), word: 1, value: terms.id }];
+        let checks = vec![Check { name: "memo".into(), word: 1, value: terms.id, in_claim: true }];
         Session::with(terms, terms.id, pdf, 0, checks)
     }
     /// A contract on any statement program: contract number `cid`, `b` in
@@ -700,7 +700,7 @@ fn sessions_on_the_groth16_verifier() {
     let rounds = Program::load(&pdf).unwrap().schedule.rounds();
 
     let t_close = rt.height().unwrap() + 2_000;
-    let check = |name: &str, word: usize, value: u32| Check { name: name.into(), word, value };
+    let check = |name: &str, word: usize, value: u32| Check { name: name.into(), word, value, in_claim: true };
     let checks: Vec<Check> = [check("journal_len", 0, 2), check("memo", c_word, 42)].into_iter().chain((1..9).map(|j| check(&format!("image_{j}"), j, id_words[j - 1]))).collect();
     let t = Instant::now();
     let mk = |cid| Session::with(terms(42, t_close), cid, &pdf, b_word, checks.clone());

@@ -1,10 +1,11 @@
 # Test data
 
-`withdraw-9-42-deployment.hex` (to come from the canonical build:
-`r0/scripts/linux-withdraw.sh` prints it): the verifier's 204-byte input
-for the current statement on the toy deployment's return of 9 with memo
+`withdraw-9-42-deployment.hex`: the verifier's 204-byte input for the
+current statement (image id `e0cd81a7...298e`, the canonical build;
+`r0/scripts/linux-withdraw.sh` prints it) on the toy deployment's return of 9 with memo
 42: journal length (10 words), image id, the proof's points, journal
-`b ‖ c ‖ D` (`D` the toy deployment's id). lichen's `groth16.rs` reads it.
+`b ‖ c ‖ D` (`D` the toy deployment's id). Halt(0) in 477,943,091 steps.
+lichen's `groth16.rs` and contract tests read it.
 
 `withdraw-9-42.hex`, the previous statement's (the ladder's tests use it:
 any valid Groth16 input does): the BitVMX Groth16 verifier's 172-byte input for a
