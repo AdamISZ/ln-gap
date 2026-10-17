@@ -41,6 +41,7 @@ use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyPubKeys, Role};
+pub use lngap_ladder::ladder::{Site, Windows};
 use lngap_ladder::rules::Rule;
 use lngap_ladder::{mover_at, Schedule};
 use lngap_lamport::winternitz::WotsPublic;
@@ -57,6 +58,9 @@ pub const FLOOR_RATE: u64 = 1;
 /// A link's anchor output (the dust limit of a taproot output). It goes
 /// to the poster, who spends it in the fee child.
 pub const ANCHOR: Amount = Amount::from_sat(330);
+/// The relative timelock on a move's `post`: a block, so that nothing of
+/// the opponent's sits in the mempool on an unconfirmed link (no TRUC).
+pub const POST_CSV: u16 = 1;
 
 /// The output only `role`'s payment key can spend: a link's anchor, the
 /// same script as that party's fee coins.
@@ -131,6 +135,9 @@ pub struct Spec {
     /// Under a jump list: the read and jump challenges' keys (the hub's
     /// path links', Alice's choices').
     pub tail: Option<lngap_ladder::tail::TailKeys>,
+    /// The dispute's windows by obligation, or none: the single window
+    /// `delta + delta'` of contracts made before them.
+    pub windows: Option<Windows>,
 }
 
 /// A contract, its trees built once.
@@ -156,6 +163,9 @@ impl Contract {
         ensure!(spec.inputs.len() == program.info.input_words, "{} input keys for {} words", spec.inputs.len(), program.info.input_words);
         ensure!(spec.b_word < spec.inputs.len() && spec.checks.iter().all(|c| c.word < spec.inputs.len()), "an input word out of range");
         ensure!(spec.tail.is_some() == program.schedule.jump.is_some(), "a jump list's contract has the tail's keys, and only it");
+        if let Some(w) = spec.windows {
+            w.check(spec.params.delta, POST_CSV).map_err(|e| anyhow::anyhow!(e))?;
+        }
         if let Some(t) = &spec.tail {
             let ok = |keys: &[WotsPublic], sizes: &[usize]| keys.len() == sizes.len() && keys.iter().zip(sizes).all(|(k, n)| k.params.message_digits as usize == 2 * n);
             use lngap_ladder::tail::{chunk_fields, CHUNKS};
@@ -171,9 +181,16 @@ impl Contract {
     pub fn ctx(&self) -> CommitCtx<'_> {
         CommitCtx { params: &self.spec.params, keys: &self.spec.pubs, broadcaster: Role::Hub, seq: SEQ, rev_hash: [0u8; 20] }
     }
+    /// A timeout's relative lock, in blocks from the confirmation of the
+    /// output it spends: when its payee may take the output, the other
+    /// party's window at that point over.
+    pub fn lock(&self, site: Site) -> u16 {
+        let ctx = self.ctx();
+        self.ladder_spec(&ctx).lock(site)
+    }
     /// The ladder's builder over `ctx` (a dispute's leaves, lngap-ladder).
     pub fn ladder_spec<'a>(&'a self, ctx: &'a CommitCtx<'a>) -> lngap_ladder::ladder::Spec<'a> {
-        lngap_ladder::ladder::Spec { ctx, s: &self.program.schedule, info: &self.program.info, moves: &self.spec.moves, words: &self.spec.inputs, post_csv: 1, tail: self.spec.tail.as_ref() }
+        lngap_ladder::ladder::Spec { ctx, s: &self.program.schedule, info: &self.program.info, moves: &self.spec.moves, words: &self.spec.inputs, post_csv: POST_CSV, tail: self.spec.tail.as_ref(), windows: self.spec.windows }
     }
     /// The rule `name` (without `disprove_`) on the output after move `j`,
     /// or Alice's proof `prove_<class>` at the last: for its witness.
@@ -205,7 +222,7 @@ impl Contract {
     /// timeout.
     pub fn claimed_tree(&self) -> Result<TapTree> {
         let ctx = self.ctx();
-        let w = self.spec.params.delta + self.spec.params.delta_prime;
+        let w = self.lock(Site::Claimed);
         let timeout = Leaf::new("split_HubWins".to_string(), ctx.two_of_two_verify(Builder::new().csv(w)).push_int(1).into_script(), Timelock::csv(w));
         TapTree::new(vec![self.ladder_spec(&ctx).inputs_leaf(&self.rest_words()), timeout])
     }

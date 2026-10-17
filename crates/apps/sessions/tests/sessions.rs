@@ -123,6 +123,7 @@ impl Session {
             moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
             inputs: input_secrets.iter().map(|k| k.public()).collect(),
             tail: program.schedule.jump.map(|_| tail_keys(id)),
+            windows: None,
         };
         let contract = Contract::new(spec, &program).unwrap();
         Session { terms, cid, user, hub, contract, input_secrets, moves, pdf: pdf.to_string(), words: vec![], msgs: vec![], set: HashMap::new(), wallets: vec![] }

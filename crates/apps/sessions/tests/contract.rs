@@ -34,6 +34,7 @@ fn the_presigned_set() {
         moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
         inputs: inputs.iter().map(|k| k.public()).collect(),
         tail: None,
+        windows: None,
     };
     let c = Contract::new(spec, &program).unwrap();
     let t = std::time::Instant::now();
@@ -110,6 +111,7 @@ fn link_sizes_on_the_groth16_verifier() {
             moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
             inputs: inputs.iter().map(|k| k.public()).collect(),
             tail,
+            windows: None,
         };
         let c = Contract::new(spec, &program).unwrap();
         let set = c.presign(OutPoint { txid: Txid::all_zeros(), vout: 0 }).unwrap();
@@ -130,4 +132,65 @@ fn link_sizes_on_the_groth16_verifier() {
             println!("SIZES {label}: path_split {} vB; combine_1..8 [{}] vB; hop_1 {} vB", size("path_split"), combines.join(", "), size("hop_1"));
         }
     }
+}
+
+/// Windows by obligation: each timeout's lock, and the contracts made
+/// before them (no windows) keep the single window and its races.
+#[test]
+fn windows_set_each_timeout() {
+    use lngap_sessions::contract::{Site, Windows};
+    let dir = std::env::temp_dir().join(format!("lngap-windows-{}", std::process::id()));
+    let pdf = write_program(&dir, 42, &[(9, 42)]).unwrap();
+    let program = Program::load(&pdf).unwrap();
+    let m = program.depths();
+    let (alice, hub) = (PartyKeys::from_seed(Role::User, Seed::from_label("w/alice")), PartyKeys::from_seed(Role::Hub, Seed::from_label("w/hub")));
+    let moves: Vec<Vec<WotsSecret>> = (1..=m)
+        .map(|d| program.field_bytes(d).into_iter().enumerate().map(|(f, n)| WotsSecret::from_entropy(WotsParams::for_bytes(n), Seed::from_label(&format!("w/move/{d}/{f}")).derive_bytes("wots"))).collect())
+        .collect();
+    let inputs: Vec<WotsSecret> = (0..program.info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x70 + j as u8; 32])).collect();
+    let terms = Terms { id: 42, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 1_000, reserve_alice: Amount::from_sat(20_000), reserve_hub: Amount::from_sat(100_000) };
+    let contract = |windows: Option<Windows>| {
+        let spec = Spec {
+            terms,
+            cid: 42,
+            params: ChannelParams::regtest(Amount::from_sat(20_000_000)),
+            pubs: [alice.public(), hub.public()],
+            b_word: 0,
+            checks: vec![Check { name: "memo".into(), word: 1, value: 42, in_claim: true }],
+            moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
+            inputs: inputs.iter().map(|k| k.public()).collect(),
+            tail: None,
+            windows,
+        };
+        Contract::new(spec, &program)
+    };
+    let csv = |c: &Contract, j: u32, leaf: &str| c.ladder(j).unwrap().leaf(leaf).unwrap().timelock.csv;
+    // before: one window, w = delta + delta' (12 on regtest), the races at
+    // the end delta' more
+    let old = contract(None).unwrap();
+    for (site, lock) in [(Site::Claimed, 12), (Site::Next(1), 12), (Site::Next(2), 12), (Site::ProveAfter, 12), (Site::FinalTimeout, 18), (Site::Carrier, 18), (Site::CarrierSweep, 12), (Site::VerdictAfter, 12), (Site::PathTimeout, 18), (Site::HopTimeout, 12)] {
+        assert_eq!(old.lock(site), lock, "{site:?} without windows");
+    }
+    // by obligation: Alice 14, the hub's choices 10, its heavy moves 16
+    let w = Windows { user: 14, hub: 10, path: 16 };
+    let new = contract(Some(w)).unwrap();
+    for (site, lock) in [(Site::Claimed, 14), (Site::Next(1), 10), (Site::Next(2), 14), (Site::Next(m - 2), 10), (Site::Next(m - 1), 14), (Site::ProveAfter, 16), (Site::FinalTimeout, 30), (Site::Carrier, 16), (Site::CarrierSweep, 16), (Site::VerdictAfter, 14), (Site::PathTimeout, 30), (Site::HopTimeout, 16)] {
+        assert_eq!(new.lock(site), lock, "{site:?} with {w:?}");
+    }
+    // in the trees: after Alice's move the hub's window, after its choice
+    // hers; at the last depth her proofs after the hub's window, its
+    // timeout after hers too
+    assert_eq!(csv(&new, 1, "split_UserWins"), Some(10));
+    assert_eq!(csv(&new, 2, "split_HubWins"), Some(14));
+    assert_eq!(csv(&new, m, "split_HubWins"), Some(30));
+    let prove = new.ladder(m).unwrap().leaves().iter().find(|l| l.name.starts_with("prove_")).unwrap().timelock.csv;
+    assert_eq!(prove, Some(16));
+    assert_eq!(csv(&old, 1, "split_UserWins"), Some(12));
+    assert_eq!(csv(&old, m, "split_HubWins"), Some(18));
+    // windows that would let a disprove come too late, or leave the hub
+    // no time to post, are refused
+    assert!(contract(Some(Windows { user: 6, ..w })).is_err(), "Alice's window within the disprove delay");
+    assert!(contract(Some(Windows { path: 6, ..w })).is_err(), "the hub's heavy window within the disprove delay");
+    assert!(contract(Some(Windows { hub: 1, ..w })).is_err(), "no time to post");
+    let _ = std::fs::remove_dir_all(&dir);
 }

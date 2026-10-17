@@ -6,9 +6,10 @@
 //! - `post` (`j < 2R + 1`): the next mover's move, 2-of-2 pre-signed into
 //!   the next output, after `1 OP_CSV` (with no TRUC, nothing of the
 //!   opponent's may sit in the mempool on an unconfirmed link);
-//! - its timeout, `split_<payee>`: 2-of-2 pre-signed after `w = delta +
-//!   delta'` to the mover of `j`, except at the last depth, where Alice
-//!   must prove the step and the hub's split waits `w + delta'`;
+//! - its timeout, `split_<payee>`: 2-of-2 pre-signed to the mover of `j`
+//!   after the next mover's window, except at the last depth, where Alice
+//!   must prove the step and the hub's split waits for her proof's window
+//!   too (each lock: [`Spec::lock`]);
 //! - the other side's rules on move `j`, `disprove_<rule>`, runtime spends
 //!   after `delta` under the disprover's key;
 //! - `equiv_d_<d>_<f>` for every move so far and each of its fields: two
@@ -16,7 +17,12 @@
 //!   it) give the other side the output at once, so that a replay after
 //!   off-chain play is faithful;
 //! - at the last depth, Alice's proofs `prove_<class>`, 2-of-2 pre-signed
-//!   after `w` with fixed outputs.
+//!   after the hub's window with fixed outputs.
+//!
+//! The windows: with [`Windows`], each obligation has its own (Alice's
+//! moves and proof, the hub's choices, the hub's heavy moves at the final
+//! step and in the tail); without, the single window `w = delta + delta'`
+//! of contracts made before, the races at the end allowed `delta'`.
 
 use bitcoin::opcodes::all::*;
 use bitcoin::script::Builder;
@@ -55,6 +61,65 @@ fn verify_move(mut b: Builder, keys: &[WotsPublic]) -> Builder {
     b
 }
 
+/// A dispute's windows, in blocks: how long each party has for each kind
+/// of obligation, from the confirmation of the output it answers. Heavy
+/// moves need long windows (to stay safe when blocks are full, all of a
+/// hub's contracts can be due at once); light ones can be short, and the
+/// hub's are the absent hub's users' wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Windows {
+    /// Alice, for each of her moves (`inputs`, her rounds, her final
+    /// record, her choice of a hop) and for her proof of the last step.
+    pub user: u16,
+    /// The hub, for each of its choices.
+    pub hub: u16,
+    /// The hub, for its heavy moves: at the final step (a disprove, or its
+    /// path's split), its path's combine, its verdict, a hop's reveal.
+    pub path: u16,
+}
+
+impl Windows {
+    /// Whether these windows work with a disprove delay of `delta` and a
+    /// `post` of `post_csv`: every window holding the other side's
+    /// disproves outlasts `delta` (Alice's on a choice, the hub's at the
+    /// final step and on her choice of a hop), and the hub's choice can be
+    /// posted inside its window.
+    pub fn check(&self, delta: u16, post_csv: u16) -> Result<(), String> {
+        if self.user <= delta || self.path <= delta {
+            return Err(format!("windows {self:?}: Alice's and the hub's heavy windows must outlast the disprove delay {delta}"));
+        }
+        if self.hub <= post_csv.max(1) {
+            return Err(format!("windows {self:?}: the hub's window must outlast post's {post_csv}"));
+        }
+        Ok(())
+    }
+}
+
+/// Where a timeout sits, for its relative lock ([`Spec::lock`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Site {
+    /// The output `escalate` creates: the rest of the input is due.
+    Claimed,
+    /// The ladder output after move `j < m`: move `j + 1` is due.
+    Next(u32),
+    /// The last ladder output: when Alice may prove, the hub's window to
+    /// disprove or split over.
+    ProveAfter,
+    /// The last ladder output: the hub's timeout, her proof's window over.
+    FinalTimeout,
+    /// `path_split`'s first carrier: Alice's timeout if no combine comes.
+    Carrier,
+    /// The other carriers: the hub's sweep of what a shorter path left.
+    CarrierSweep,
+    /// After a combine: when the hub's verdict may come, her window to
+    /// choose a hop over.
+    VerdictAfter,
+    /// After a combine: Alice's timeout, the hub's verdict's window over.
+    PathTimeout,
+    /// After her choice of a hop: her timeout if the hub doesn't reveal it.
+    HopTimeout,
+}
+
 /// What the ladder is built from.
 pub struct Spec<'a> {
     pub ctx: &'a CommitCtx<'a>,
@@ -69,6 +134,8 @@ pub struct Spec<'a> {
     pub post_csv: u16,
     /// Under a jump list: the read and jump challenges' keys.
     pub tail: Option<&'a crate::tail::TailKeys>,
+    /// The windows, or none: the single window of contracts made before.
+    pub windows: Option<Windows>,
 }
 
 impl Spec<'_> {
@@ -80,8 +147,24 @@ impl Spec<'_> {
             Msg::Hop(l) => self.tail.expect("a jump list's tail").hop[l].clone(),
         }
     }
-    fn w(&self) -> u16 {
-        self.ctx.params.delta + self.ctx.params.delta_prime
+    /// A timeout's relative lock.
+    pub fn lock(&self, site: Site) -> u16 {
+        let (delta, dp) = (self.ctx.params.delta, self.ctx.params.delta_prime);
+        let Some(w) = self.windows else {
+            let w = delta + dp;
+            return match site {
+                Site::FinalTimeout | Site::Carrier | Site::PathTimeout => w + dp,
+                _ => w,
+            };
+        };
+        match site {
+            Site::Claimed => w.user,
+            Site::Next(j) if mover_at(j + 1) == Role::User => w.user,
+            Site::Next(_) => w.hub,
+            Site::ProveAfter | Site::Carrier | Site::CarrierSweep | Site::HopTimeout => w.path,
+            Site::FinalTimeout | Site::PathTimeout => w.path + w.user,
+            Site::VerdictAfter => w.user,
+        }
     }
     /// `escalate` on the contract output: move 1 and the claim's input
     /// words `claim_words`, 2-of-2 pre-signed, after `to_self_delay`.
@@ -152,7 +235,7 @@ impl Spec<'_> {
         }
         // the timeout
         let payee = self.timeout_payee(j);
-        let lock = if j == m { self.w() + ctx.params.delta_prime } else { self.w() };
+        let lock = if j == m { self.lock(Site::FinalTimeout) } else { self.lock(Site::Next(j)) };
         let b = ctx.two_of_two_verify(Builder::new().csv(lock));
         v.push(Leaf::new(Self::split_name(payee), b.push_int(1).into_script(), Timelock::csv(lock)));
         // the rules on move j, the other side's
@@ -177,7 +260,7 @@ impl Spec<'_> {
         }
         // Alice's proofs
         if j == m {
-            let w = self.w();
+            let w = self.lock(Site::ProveAfter);
             for r in prove_rules(self.s, self.info) {
                 let gate = ctx.two_of_two_verify(Builder::new().csv(w));
                 v.push(Leaf::new(r.name.clone(), r.script(gate, &key), Timelock::csv(w)));
@@ -202,19 +285,20 @@ impl Spec<'_> {
     /// The leaves of an output in the tail (a jump list's read and jump
     /// challenges, lngap_ladder::tail):
     /// - a carrier: `chunk` (2-of-2 pre-signed into a combine, with chunk
-    ///   `c`'s signatures); carrier 0 also Alice's timeout after `w +
-    ///   delta'` (the hub split and stalled), the others the hub's `sweep`
-    ///   after `w` (left over by a shorter path);
+    ///   `c`'s signatures); carrier 0 also Alice's timeout (the hub split
+    ///   and stalled), the others the hub's `sweep` (left over by a shorter
+    ///   path);
     /// - after `combine_<k>`: Alice's choice (`hop`), the hub's verdicts
-    ///   after `w` (`disprove_jump`, `disprove_read_<r>`), Alice's timeout
-    ///   after `w + delta'`;
+    ///   once her window passes (`disprove_jump`, `disprove_read_<r>`),
+    ///   Alice's timeout once the verdict's window passes too;
     /// - after her choice: the hub's reveal of the hop (`disprove_hop_<i>`,
-    ///   `disprove_hop_range`), Alice's timeout after `w`.
+    ///   `disprove_hop_range`), Alice's timeout.
+    ///
+    /// Each lock: [`Spec::lock`].
     pub fn tail_leaves(&self, at: TailOut) -> Vec<Leaf> {
         let ctx = self.ctx;
         let t = self.tail.expect("a jump list's tail");
         let csv = self.post_csv.max(1);
-        let w = self.w();
         let key = |msg: Msg| self.key(msg);
         let mut v = vec![];
         let hub_gate = |lock: u16| Builder::new().csv(lock).checksigverify(&ctx.key(Role::Hub).payment);
@@ -223,20 +307,22 @@ impl Spec<'_> {
                 let b = verify_move(ctx.two_of_two_verify(Builder::new()), &t.path[c]);
                 v.push(Leaf::new("chunk", b.push_int(1).into_script(), Timelock::NONE));
                 if c == 0 {
-                    let lock = w + ctx.params.delta_prime;
+                    let lock = self.lock(Site::Carrier);
                     let b = ctx.two_of_two_verify(Builder::new().csv(lock));
                     v.push(Leaf::new(Self::split_name(Role::User), b.push_int(1).into_script(), Timelock::csv(lock)));
                 } else {
+                    let w = self.lock(Site::CarrierSweep);
                     v.push(Leaf::new("sweep", hub_gate(w).push_int(1).into_script(), Timelock::csv(w)));
                 }
             }
             TailOut::Path(k) => {
                 let b = verify_drop(ctx.two_of_two_verify(Builder::new().csv(csv)), &t.hop[k - 1]);
                 v.push(Leaf::new("hop", b.push_int(1).into_script(), Timelock::csv(csv)));
+                let w = self.lock(Site::VerdictAfter);
                 for r in crate::tail::verdicts(self.s, k) {
                     v.push(Leaf::new(format!("disprove_{}", r.name), r.script(hub_gate(w), &key), Timelock::csv(w)));
                 }
-                let lock = w + ctx.params.delta_prime;
+                let lock = self.lock(Site::PathTimeout);
                 let b = ctx.two_of_two_verify(Builder::new().csv(lock));
                 v.push(Leaf::new(Self::split_name(Role::User), b.push_int(1).into_script(), Timelock::csv(lock)));
             }
@@ -244,6 +330,7 @@ impl Spec<'_> {
                 for r in crate::tail::hop_rules(self.s, k) {
                     v.push(Leaf::new(format!("disprove_{}", r.name), r.script(hub_gate(ctx.params.delta), &key), Timelock::csv(ctx.params.delta)));
                 }
+                let w = self.lock(Site::HopTimeout);
                 let b = ctx.two_of_two_verify(Builder::new().csv(w));
                 v.push(Leaf::new(Self::split_name(Role::User), b.push_int(1).into_script(), Timelock::csv(w)));
             }
