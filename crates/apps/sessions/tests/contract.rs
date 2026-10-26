@@ -194,3 +194,73 @@ fn windows_set_each_timeout() {
     assert!(contract(Some(Windows { hub: 1, ..w })).is_err(), "no time to post");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Everything the contract builds, hashed: the trees, every pre-signed
+/// transaction with what its signatures cover, the fold and the payout.
+/// A refactor of the contract must leave it unchanged, or open contracts'
+/// addresses and signatures break. Two contracts: a jump list's, with
+/// windows and an `inputs` link, and one with neither.
+#[test]
+fn the_fingerprint() {
+    use bitcoin::consensus::encode::serialize;
+    use bitcoin::hashes::{sha256, HashEngine};
+    use lngap_sessions::contract::Windows;
+    use lngap_sessions::statement::write_program_with;
+    let dir = std::env::temp_dir().join(format!("lngap-fingerprint-{}", std::process::id()));
+    let mut got = vec![];
+    for (jump, windows, in_claim) in [(true, Some(Windows { user: 14, hub: 10, path: 16 }), false), (false, None, true)] {
+        let pdf = write_program_with(&dir.join(format!("{jump}")), 42, &[(9, 42)], 8, jump).unwrap();
+        let program = Program::load(&pdf).unwrap();
+        let m = program.depths();
+        let (alice, hub) = (PartyKeys::from_seed(Role::User, Seed::from_label("f/alice")), PartyKeys::from_seed(Role::Hub, Seed::from_label("f/hub")));
+        let moves: Vec<Vec<WotsSecret>> = (1..=m).map(|d| program.field_bytes(d).into_iter().enumerate().map(|(f, n)| WotsSecret::from_entropy(WotsParams::for_bytes(n), Seed::from_label(&format!("f/move/{d}/{f}")).derive_bytes("wots"))).collect()).collect();
+        let inputs: Vec<WotsSecret> = (0..program.info.input_words).map(|j| WotsSecret::from_entropy(input_key_params(), [0x50 + j as u8; 32])).collect();
+        let tail = program.schedule.jump.map(|_| {
+            use lngap_ladder::tail::{chunk_fields, TailKeys, CHUNKS};
+            let k = |c: usize, f: usize, n: usize| WotsSecret::from_entropy(WotsParams::for_bytes(n as u32), Seed::from_label(&format!("f/tail/{c}/{f}")).derive_bytes("wots")).public();
+            TailKeys { path: (0..CHUNKS).map(|c| chunk_fields(c).iter().enumerate().map(|(f, n)| k(c, f, *n)).collect()).collect(), hop: (0..CHUNKS).map(|c| k(0x10 + c, 0, 1)).collect() }
+        });
+        let terms = Terms { id: 42, unit: Amount::from_sat(1), bits: 21, low_bits: 9, deposit: 500_000, t_close: 1_000, reserve_alice: Amount::from_sat(250_000), reserve_hub: Amount::from_sat(300_000) };
+        let spec = Spec {
+            terms,
+            cid: 42,
+            params: ChannelParams::regtest(Amount::from_sat(20_000_000)),
+            pubs: [alice.public(), hub.public()],
+            b_word: 0,
+            checks: vec![Check { name: "memo".into(), word: 1, value: 42, in_claim }],
+            moves: moves.iter().map(|ks| ks.iter().map(|k| k.public()).collect()).collect(),
+            inputs: inputs.iter().map(|k| k.public()).collect(),
+            tail,
+            windows,
+        };
+        let c = Contract::new(spec, &program).unwrap();
+        let funding = OutPoint { txid: Txid::from_byte_array([7; 32]), vout: 1 };
+        let mut e = sha256::Hash::engine();
+        e.input(c.tree().unwrap().script_pubkey().as_bytes());
+        for j in 1..=m {
+            e.input(c.ladder(j).unwrap().script_pubkey().as_bytes());
+        }
+        let set = c.presign(funding).unwrap();
+        assert!(set.iter().any(|p| p.name == "inputs") == !in_claim, "the inputs link covered");
+        for p in set.iter().chain([&c.fold(funding, Amount::from_sat(123_456), Amount::from_sat(1_000)).unwrap()]) {
+            e.input(p.name.as_bytes());
+            e.input(&[p.link as u8]);
+            e.input(&serialize(&p.tx));
+            e.input(&serialize(&p.prevout));
+            e.input(p.leaf.as_bytes());
+            e.input(&p.control.serialize());
+            for (o, l, cb) in &p.extra {
+                e.input(&serialize(o));
+                e.input(l.as_bytes());
+                e.input(&cb.serialize());
+            }
+        }
+        for o in c.pay_alice(c.value() - Amount::from_sat(5_000)).unwrap() {
+            e.input(&serialize(&o));
+        }
+        got.push(format!("{}: {} pre-signed, {}", if jump { "jump" } else { "plain" }, set.len(), sha256::Hash::from_engine(e)));
+    }
+    println!("FINGERPRINT {got:?}");
+    assert_eq!(got, ["jump: 63 pre-signed, 224747d3257e361638de2c91039e8d93d90124a8e485f7e07d60e1cf020e1765", "plain: 27 pre-signed, c32987354bd446481c5ae0d7fef12bec81bd2dee2705084e1ff029a5595a0d2e"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
