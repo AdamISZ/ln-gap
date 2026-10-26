@@ -7,4 +7,5 @@ pub mod contract;
 pub mod l2;
 pub mod play;
 pub mod session;
+pub mod skeleton;
 pub mod statement;

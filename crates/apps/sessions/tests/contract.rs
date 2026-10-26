@@ -241,7 +241,7 @@ fn the_fingerprint() {
             e.input(c.ladder(j).unwrap().script_pubkey().as_bytes());
         }
         let set = c.presign(funding).unwrap();
-        assert!(set.iter().any(|p| p.name == "inputs") == !in_claim, "the inputs link covered");
+        assert!(set.iter().any(|p| p.name == "inputs") != in_claim, "the inputs link covered");
         for p in set.iter().chain([&c.fold(funding, Amount::from_sat(123_456), Amount::from_sat(1_000)).unwrap()]) {
             e.input(p.name.as_bytes());
             e.input(&[p.link as u8]);
