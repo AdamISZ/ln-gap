@@ -96,7 +96,7 @@ pub fn claim_digest(image_id: &[u8; 32], journal: &[u8]) -> [u8; 32] {
 /// The proof's public inputs: the control root's halves, the claim's
 /// halves (each half a little-endian integer), the BN254 control id
 /// (likewise).
-fn public_inputs(claim: &[u8; 32]) -> [Fr; 5] {
+pub fn public_inputs(claim: &[u8; 32]) -> [Fr; 5] {
     let root = hex::decode(CONTROL_ROOT).expect("hex");
     let id = hex::decode(BN254_CONTROL_ID).expect("hex");
     let le = Fr::from_le_bytes_mod_order;
@@ -113,6 +113,27 @@ fn g1_const(c: [&str; 2]) -> G1Affine {
 
 fn g2_const(c: [&str; 4]) -> G2Affine {
     G2Affine::new(Fq2::new(dec(c[1]), dec(c[0])), Fq2::new(dec(c[3]), dec(c[2])))
+}
+
+/// RISC Zero 3.0's verifying key, as points: `ic` the public inputs'
+/// bases, the constant's first.
+pub struct Key {
+    pub alpha: G1Affine,
+    pub beta: G2Affine,
+    pub gamma: G2Affine,
+    pub delta: G2Affine,
+    pub ic: [G1Affine; 6],
+}
+
+pub fn key() -> Key {
+    Key { alpha: g1_const(ALPHA), beta: g2_const(BETA), gamma: g2_const(GAMMA), delta: g2_const(DELTA), ic: IC.map(g1_const) }
+}
+
+/// A Groth16 proof's points.
+pub struct Proof {
+    pub a: G1Affine,
+    pub b: G2Affine,
+    pub c: G1Affine,
 }
 
 /// A base field element from 32 little-endian bytes, below the modulus.
@@ -150,29 +171,41 @@ fn g2(b: &[u8]) -> Result<G2Affine> {
     Ok(p)
 }
 
+/// The points of a proof compressed (A, B, C: 128 bytes).
+pub fn decode(points: &[u8]) -> Result<Proof> {
+    ensure!(points.len() == 128, "the proof is 128 bytes, not {}", points.len());
+    Ok(Proof { a: g1(&points[..32])?, b: g2(&points[32..96])?, c: g1(&points[96..])? })
+}
+
 /// Whether `points` (A, B, C compressed: 128 bytes) prove that the guest
 /// `image_id` halted with exit code 0 and wrote `journal`.
 pub fn verify(image_id: &[u8; 32], points: &[u8], journal: &[u8]) -> Result<()> {
-    ensure!(points.len() == 128, "the proof is 128 bytes, not {}", points.len());
-    let (a, b, c) = (g1(&points[..32])?, g2(&points[32..96])?, g1(&points[96..])?);
+    let Proof { a, b, c } = decode(points)?;
+    let k = key();
     let inputs = public_inputs(&claim_digest(image_id, journal));
-    let mut vk_x = G1Projective::from(g1_const(IC[0]));
-    for (x, ic) in inputs.iter().zip(&IC[1..]) {
-        vk_x += g1_const(*ic) * x;
+    let mut vk_x = G1Projective::from(k.ic[0]);
+    for (x, ic) in inputs.iter().zip(&k.ic[1..]) {
+        vk_x += *ic * x;
     }
     // e(A, B) = e(alpha, beta) e(vk_x, gamma) e(C, delta)
-    let check = Bn254::multi_pairing([a, -g1_const(ALPHA), -vk_x.into_affine(), -c], [b, g2_const(BETA), g2_const(GAMMA), g2_const(DELTA)]);
+    let check = Bn254::multi_pairing([a, -k.alpha, -vk_x.into_affine(), -c], [b, k.beta, k.gamma, k.delta]);
     ensure!(check.0 == <Bn254 as Pairing>::TargetField::ONE, "the proof doesn't verify");
     Ok(())
 }
 
-/// What the verifier program decides on `input`: `Ok` iff it accepts.
-pub fn verify_input(input: &[u8]) -> Result<()> {
+/// The verifier program's input split: the image id, the proof's points
+/// (compressed, 128 bytes), the journal.
+pub fn split_input(input: &[u8]) -> Result<([u8; 32], &[u8], &[u8])> {
     ensure!(input.len() >= 164, "an input of {} bytes", input.len());
     let n = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
     ensure!(input.len() == 164 + 4 * n, "a journal of {n} words in an input of {} bytes", input.len());
-    let image_id: [u8; 32] = input[4..36].try_into().unwrap();
-    verify(&image_id, &input[36..164], &input[164..])
+    Ok((input[4..36].try_into().unwrap(), &input[36..164], &input[164..]))
+}
+
+/// What the verifier program decides on `input`: `Ok` iff it accepts.
+pub fn verify_input(input: &[u8]) -> Result<()> {
+    let (image_id, points, journal) = split_input(input)?;
+    verify(&image_id, points, journal)
 }
 
 #[cfg(test)]
