@@ -6,20 +6,21 @@ use lngap_btc::regtest::Regtest;
 use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::WitnessStack;
-use lngap_btc::hash160;
-use lngap_lamport::winternitz::{message_digits, WotsExt, WotsParams, WotsSecret};
+use lngap_lamport::winternitz::{message_digits, Chain, Wots256Secret, WotsExt, WotsParams, WotsSecret, WotsSecretOf};
 
 #[test]
 fn winternitz_leaf_on_regtest() {
     let rt = Regtest::start().unwrap();
     for n_bytes in [32u32, 4] {
-        winternitz_leaf(&rt, n_bytes);
+        winternitz_leaf(&rt, WotsSecret::from_entropy(WotsParams::for_bytes(n_bytes), [3u8; 32]));
     }
+    // SHA-256 chains: a 4-byte word, as lichen's hub signs b
+    winternitz_leaf(&rt, Wots256Secret::from_entropy(WotsParams::for_bytes(4), [3u8; 32]));
 }
 
-fn winternitz_leaf(rt: &Regtest, n_bytes: u32) {
-    let ps = WotsParams::for_bytes(n_bytes);
-    let sk = WotsSecret::from_entropy(ps, [3u8; 32]);
+fn winternitz_leaf<H: Chain>(rt: &Regtest, sk: WotsSecretOf<H>) {
+    let ps = sk.params;
+    let n_bytes = ps.message_digits / 2;
     let pk = sk.public();
     let msg: Vec<u8> = (0..n_bytes as u8).map(|i| i.wrapping_mul(59).wrapping_add(1)).collect();
     // leaf: verify, then require the 64 digits equal the message's nibbles (last nibble on top)
@@ -51,7 +52,7 @@ fn winternitz_leaf(rt: &Regtest, n_bytes: u32) {
     // forgery: bump one digit by hashing its signature once more, checksum untouched
     let mut forged = sig.clone();
     forged.digits[5] += 1;
-    forged.hashes[5] = hash160(&forged.hashes[5]);
+    forged.hashes[5] = H::hash(forged.hashes[5].as_ref());
     assert!(rt.test_accept(&spend(forged.consumption_order())).is_err(), "forged digit must fail the checksum");
     rt.send_and_confirm(&tx).unwrap();
 }

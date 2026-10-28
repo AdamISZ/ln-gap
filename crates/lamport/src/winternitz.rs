@@ -10,13 +10,45 @@
 //! order (high nibble of byte 0 first), so after verification the digits sit
 //! on the stack with the *last* nibble on top — the layout the in-Script
 //! SHA-256 expects for a midstate.
+//!
+//! The chains are HASH160 ([`WotsPublic`], [`WotsSecret`], [`WotsSig`]),
+//! Script's cheapest, or SHA-256 ([`Wots256Public`], ...) for a signature
+//! a zkVM also checks: RISC Zero accelerates SHA-256, not RIPEMD-160.
+//! The digits, checksum and wire are the same.
+
+use std::marker::PhantomData;
 
 use anyhow::{ensure, Result};
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::opcodes::all::*;
+use bitcoin::opcodes::Opcode;
 use bitcoin::script::Builder;
 use lngap_btc::script::BuilderExt;
 use lngap_btc::{hash160, Hash160};
 use serde::{Deserialize, Serialize};
+
+/// A SHA-256 digest, a chain element of the SHA-256 variant.
+pub type Hash256 = [u8; 32];
+
+/// A chain's hash, and the opcode that computes it.
+pub trait Chain: Copy + Eq + std::fmt::Debug + AsRef<[u8]> + for<'a> TryFrom<&'a [u8]> {
+    const OP: Opcode;
+    fn hash(data: &[u8]) -> Self;
+}
+
+impl Chain for Hash160 {
+    const OP: Opcode = OP_HASH160;
+    fn hash(data: &[u8]) -> Self {
+        hash160(data)
+    }
+}
+
+impl Chain for Hash256 {
+    const OP: Opcode = OP_SHA256;
+    fn hash(data: &[u8]) -> Self {
+        sha256::Hash::hash(data).to_byte_array()
+    }
+}
 
 pub const LOG2_BASE: u32 = 4;
 pub const MAX_DIGIT: u32 = 15;
@@ -46,18 +78,20 @@ impl WotsParams {
 
 /// Public key: one hash per digit (message digits, then checksum digits).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WotsPublic {
+pub struct WotsPublicOf<H> {
     pub params: WotsParams,
-    pub digits: Vec<Hash160>,
+    pub digits: Vec<H>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct WotsSecret {
+pub struct WotsSecretOf<H> {
     pub params: WotsParams,
     secret: [u8; 32],
+    #[serde(skip)]
+    chain: PhantomData<H>,
 }
 
-impl std::fmt::Debug for WotsSecret {
+impl<H> std::fmt::Debug for WotsSecretOf<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "WotsSecret({} digits)", self.params.total_digits())
     }
@@ -65,25 +99,35 @@ impl std::fmt::Debug for WotsSecret {
 
 /// A signature: per digit, `(H^digit(sk_i), digit)`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WotsSig {
+pub struct WotsSigOf<H> {
     pub params: WotsParams,
-    pub hashes: Vec<Hash160>,
+    pub hashes: Vec<H>,
     pub digits: Vec<u8>,
 }
 
-fn digit_secret(secret: &[u8; 32], index: u32) -> Hash160 {
+/// HASH160 chains.
+pub type WotsPublic = WotsPublicOf<Hash160>;
+pub type WotsSecret = WotsSecretOf<Hash160>;
+pub type WotsSig = WotsSigOf<Hash160>;
+
+/// SHA-256 chains.
+pub type Wots256Public = WotsPublicOf<Hash256>;
+pub type Wots256Secret = WotsSecretOf<Hash256>;
+pub type Wots256Sig = WotsSigOf<Hash256>;
+
+fn digit_secret<H: Chain>(secret: &[u8; 32], index: u32) -> H {
     let mut s = secret.to_vec();
     let mut i = index;
     while i > 0 {
         s.push((i & 255) as u8);
         i >>= 8;
     }
-    hash160(&s)
+    H::hash(&s)
 }
 
-fn hash_times(mut h: Hash160, n: u32) -> Hash160 {
+fn hash_times<H: Chain>(mut h: H, n: u32) -> H {
     for _ in 0..n {
-        h = hash160(&h);
+        h = H::hash(h.as_ref());
     }
     h
 }
@@ -103,31 +147,31 @@ fn checksum_digits(ps: &WotsParams, digits: &[u8]) -> Vec<u8> {
     out
 }
 
-impl WotsSecret {
-    pub fn from_entropy(params: WotsParams, secret: [u8; 32]) -> WotsSecret {
-        WotsSecret { params, secret }
+impl<H: Chain> WotsSecretOf<H> {
+    pub fn from_entropy(params: WotsParams, secret: [u8; 32]) -> WotsSecretOf<H> {
+        WotsSecretOf { params, secret, chain: PhantomData }
     }
-    pub fn public(&self) -> WotsPublic {
-        let digits = (0..self.params.total_digits()).map(|i| hash_times(digit_secret(&self.secret, i), MAX_DIGIT)).collect();
-        WotsPublic { params: self.params, digits }
+    pub fn public(&self) -> WotsPublicOf<H> {
+        let digits = (0..self.params.total_digits()).map(|i| hash_times(digit_secret::<H>(&self.secret, i), MAX_DIGIT)).collect();
+        WotsPublicOf { params: self.params, digits }
     }
-    pub fn sign(&self, msg: &[u8]) -> Result<WotsSig> {
+    pub fn sign(&self, msg: &[u8]) -> Result<WotsSigOf<H>> {
         let mut digits = message_digits(msg);
         ensure!(digits.len() as u32 == self.params.message_digits, "message has {} digits, key has {}", digits.len(), self.params.message_digits);
         digits.extend(checksum_digits(&self.params, &digits));
-        let hashes = digits.iter().enumerate().map(|(i, d)| hash_times(digit_secret(&self.secret, i as u32), u32::from(*d))).collect();
-        Ok(WotsSig { params: self.params, hashes, digits })
+        let hashes = digits.iter().enumerate().map(|(i, d)| hash_times(digit_secret::<H>(&self.secret, i as u32), u32::from(*d))).collect();
+        Ok(WotsSigOf { params: self.params, hashes, digits })
     }
 }
 
-impl WotsSig {
+impl<H: Chain> WotsSigOf<H> {
     /// Witness elements in consumption order (top of stack first):
     /// `digit[last], hash[last], ..., digit[0], hash[0]`.
     pub fn consumption_order(&self) -> Vec<Vec<u8>> {
         let mut v = Vec::with_capacity(2 * self.digits.len());
         for i in (0..self.digits.len()).rev() {
             v.push(scriptnum(self.digits[i]));
-            v.push(self.hashes[i].to_vec());
+            v.push(self.hashes[i].as_ref().to_vec());
         }
         v
     }
@@ -137,19 +181,19 @@ impl WotsSig {
     }
     /// Rebuild the signature over `msg` from its reveal hashes alone (the
     /// digit values are the message's own — the D43 entry-sig check).
-    pub fn from_hashes(params: WotsParams, msg: &[u8], hashes: Vec<Hash160>) -> Result<WotsSig> {
+    pub fn from_hashes(params: WotsParams, msg: &[u8], hashes: Vec<H>) -> Result<WotsSigOf<H>> {
         let mut digits = message_digits(msg);
         ensure!(digits.len() as u32 == params.message_digits, "message has {} digits, key has {}", digits.len(), params.message_digits);
         ensure!(hashes.len() as u32 == params.total_digits(), "expected {} reveal hashes, got {}", params.total_digits(), hashes.len());
         digits.extend(checksum_digits(&params, &digits));
-        Ok(WotsSig { params, hashes, digits })
+        Ok(WotsSigOf { params, hashes, digits })
     }
 
     /// Rebuild from witness elements in consumption order.
-    pub fn from_consumption_order(params: WotsParams, items: &[Vec<u8>]) -> Result<WotsSig> {
+    pub fn from_consumption_order(params: WotsParams, items: &[Vec<u8>]) -> Result<WotsSigOf<H>> {
         let n = params.total_digits() as usize;
         let mut digits = vec![0u8; n];
-        let mut hashes = vec![[0u8; 20]; n];
+        let mut hashes = Vec::with_capacity(n);
         for i in 0..n {
             let d = &items[2 * (n - 1 - i)];
             let h = &items[2 * (n - 1 - i) + 1];
@@ -158,16 +202,16 @@ impl WotsSig {
                 1 => d[0],
                 _ => anyhow::bail!("digit element too long"),
             };
-            ensure!(h.len() == 20, "hash element not 20 bytes");
-            hashes[i].copy_from_slice(h);
+            let h: H = h[..].try_into().map_err(|_| anyhow::anyhow!("hash element not {} bytes", std::mem::size_of::<H>()))?;
+            hashes.push(h);
         }
-        Ok(WotsSig { params, hashes, digits })
+        Ok(WotsSigOf { params, hashes, digits })
     }
 }
 
-impl WotsPublic {
+impl<H: Chain> WotsPublicOf<H> {
     /// Off-chain verification; returns the message.
-    pub fn verify(&self, sig: &WotsSig) -> Result<Vec<u8>> {
+    pub fn verify(&self, sig: &WotsSigOf<H>) -> Result<Vec<u8>> {
         ensure!(sig.params == self.params, "params mismatch");
         let n = self.params.total_digits() as usize;
         for i in 0..n {
@@ -189,7 +233,7 @@ fn scriptnum(d: u8) -> Vec<u8> {
 /// witness and leaving the message digits `d_0 … d_{n-1}` on the stack with
 /// `d_{n-1}` on top. Checksum verified in-script.
 pub trait WotsExt: Sized {
-    fn wots_verify(self, pk: &WotsPublic) -> Self;
+    fn wots_verify<H: Chain>(self, pk: &WotsPublicOf<H>) -> Self;
     /// The tied variant: like [`wots_verify`](Self::wots_verify), but the
     /// MESSAGE digits are not witness-supplied — digit `i`'s value is
     /// PICKed off the register file already on the stack (`pos[i]` is its
@@ -205,17 +249,17 @@ pub trait WotsExt: Sized {
     /// Runs with the `file`-element register file on the stack and leaves
     /// it intact (the per-digit PICK copies are consumed by the checksum
     /// finale, then dropped).
-    fn wots_verify_tied(self, pk: &WotsPublic, file: usize, pos: &[usize]) -> Self;
+    fn wots_verify_tied<H: Chain>(self, pk: &WotsPublicOf<H>, file: usize, pos: &[usize]) -> Self;
 }
 
 /// One digit's chain verification, consuming `[hash, digit]` (digit on
 /// top) and leaving nothing; one copy of the (clamped) digit value goes to
 /// the altstack for the checksum finale.
-fn wots_step(mut b: Builder, pk_digit: &Hash160) -> Builder {
+fn wots_step<H: Chain>(mut b: Builder, pk_digit: &H) -> Builder {
     b = b
         .push_opcode(OP_SWAP)
         .push_opcode(OP_SIZE)
-        .push_int(20)
+        .push_int(std::mem::size_of::<H>() as i64)
         .push_opcode(OP_EQUALVERIFY)
         .push_opcode(OP_SWAP)
         .push_int(i64::from(MAX_DIGIT))
@@ -229,13 +273,13 @@ fn wots_step(mut b: Builder, pk_digit: &Hash160) -> Builder {
         .push_opcode(OP_DROP)
         .push_opcode(OP_TOALTSTACK);
     for _ in 0..MAX_DIGIT.div_ceil(2) {
-        b = b.push_opcode(OP_HASH160);
+        b = b.push_opcode(H::OP);
     }
     b = b.push_opcode(OP_ELSE).push_opcode(OP_SUB).push_opcode(OP_TOALTSTACK).push_opcode(OP_ENDIF);
     for _ in 0..MAX_DIGIT / 2 {
-        b = b.push_opcode(OP_DUP).push_opcode(OP_HASH160);
+        b = b.push_opcode(OP_DUP).push_opcode(H::OP);
     }
-    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_PICK).push_bytes(pk_digit).push_opcode(OP_EQUALVERIFY);
+    b = b.push_opcode(OP_FROMALTSTACK).push_opcode(OP_PICK).push_bytes(pk_digit.as_ref()).push_opcode(OP_EQUALVERIFY);
     for _ in 0..(MAX_DIGIT + 1) / 4 {
         b = b.push_opcode(OP_2DROP);
     }
@@ -263,7 +307,7 @@ fn wots_checksum_finale(mut b: Builder, ps: &WotsParams) -> Builder {
 }
 
 impl WotsExt for Builder {
-    fn wots_verify(mut self, pk: &WotsPublic) -> Self {
+    fn wots_verify<H: Chain>(mut self, pk: &WotsPublicOf<H>) -> Self {
         let ps = &pk.params;
         let total = ps.total_digits() as usize;
         // digits, last first: for each, check the hash chain via a pick list
@@ -274,7 +318,7 @@ impl WotsExt for Builder {
         wots_checksum_finale(self, ps)
     }
 
-    fn wots_verify_tied(mut self, pk: &WotsPublic, file: usize, pos: &[usize]) -> Self {
+    fn wots_verify_tied<H: Chain>(mut self, pk: &WotsPublicOf<H>, file: usize, pos: &[usize]) -> Self {
         let ps = &pk.params;
         let total = ps.total_digits() as usize;
         let msg = ps.message_digits as usize;
@@ -327,5 +371,18 @@ mod tests {
         forged.digits[5] += 1;
         forged.hashes[5] = hash160(&forged.hashes[5]);
         assert!(pk.verify(&forged).is_err());
+    }
+
+    #[test]
+    fn sha256_chains() {
+        let ps = WotsParams::for_bytes(4);
+        let sk = Wots256Secret::from_entropy(ps, [9u8; 32]);
+        let pk = sk.public();
+        let sig = sk.sign(&[1, 2, 3, 4]).unwrap();
+        assert_eq!(pk.verify(&sig).unwrap(), [1, 2, 3, 4]);
+        // the HASH160 key's digits, 32-byte chains
+        assert_eq!(sig.digits, WotsSecret::from_entropy(ps, [9u8; 32]).sign(&[1, 2, 3, 4]).unwrap().digits);
+        assert_eq!(pk.digits[0], hash_times(Hash256::hash(&[9u8; 32]), MAX_DIGIT));
+        assert_eq!(Wots256Sig::from_consumption_order(ps, &sig.consumption_order()).unwrap(), sig);
     }
 }
