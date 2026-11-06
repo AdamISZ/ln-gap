@@ -213,9 +213,19 @@ impl Regtest {
         Ok(self.rpc.get_block_count()? as u32)
     }
 
-    /// Mine `n` blocks to the harness wallet; returns their hashes.
+    /// Mine `n` blocks to the harness wallet; returns their hashes in order.
+    /// Large requests use bounded RPC batches, not one atomic mining call.
     pub fn mine(&self, n: u64) -> Result<Vec<BlockHash>> {
-        let hashes = self.rpc.generate_to_address(n, &self.mine_to)?;
+        // Bulk deadline mining can exceed the transport's 15-second read
+        // timeout. That transport may resend a timed-out request, creating
+        // extra blocks. Keep each request small instead of retrying it here.
+        let mut hashes = Vec::new();
+        let mut remaining = n;
+        while remaining > 0 {
+            let batch = remaining.min(64);
+            hashes.extend(self.rpc.generate_to_address(batch, &self.mine_to)?);
+            remaining -= batch;
+        }
         debug!(n, height = self.height()?, "mined");
         Ok(hashes)
     }
