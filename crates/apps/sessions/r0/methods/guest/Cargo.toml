@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 # the toolchain of RISC Zero's pinned guest builder image
-# (risczero/risc0-guest-builder:r0.1.88.0): the lockfile must resolve to
-# versions that build with it
-rust-version = "1.88"
+# (risczero/risc0-guest-builder:r0.1.97.0, risc0-build 3.0.7's): the
+# lockfile must resolve to versions that build with it
+rust-version = "1.97"
 
 [workspace]
 # MSRV-aware resolution: dependency versions that build on rust-version
@@ -14,7 +14,7 @@ resolver = "3"
 
 [dependencies]
 lngap-r0-core = { path = "../../core" }
-risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
+risc0-zkvm = { version = "=3.1.0", default-features = false, features = ["std"] }
 
 # RISC Zero's accelerated crypto (its zkVM's precompiles for SHA-256 and
 # big-number arithmetic): the statement's cost is almost all the
