@@ -8,11 +8,10 @@ image for **x86_64 only** (gnark plus the proving key). This directory is
 the RISC Zero side: the guest (`methods/guest`), a host tool `lngap-r0`
 (`host/`) and these scripts.
 
-Everything is pinned to **RISC Zero 3.0.6**. The BitVMX verifier ELF
-bakes in RISC Zero 3.0's control root (`a54dc85a…1f56`) and BN254
-control id (`c07a6514…4404`), so receipts made with any 3.0 release
-verify with it unpatched (the older sample proof needed a patch; see
-`crates/apps/zk/GROTH16.md`).
+Everything is pinned to **RISC Zero 3.1.0**. The BitVMX verifier ELF
+bakes in RISC Zero 3.0's verifying key and constants, so the disputes
+run it with 3.1's written in (`lngap_zk::groth16::verifier_elf`; the
+tests write it to their temporary directories, never committed).
 
 ## On the Linux machine
 
@@ -35,8 +34,8 @@ optional: with it, the logs record peak memory.
 
    It checks the machine, installs RISC Zero's `rzup` (its installer
    adds `~/.risc0/bin` to your shell profile), then through it the guest
-   toolchain, `r0vm` 3.0.6 and `cargo-risczero` 3.0.6, pulls
-   `risczero/risc0-groth16-prover:v2025-04-03.1`, and builds `lngap-r0`.
+   toolchain, `r0vm` 3.1.0 and `cargo-risczero` 3.1.0, pulls
+   `risczero/risc0-groth16-prover:v2026-10-20.1`, and builds `lngap-r0`.
 
 3. Self-test the whole pipeline (prove, wrap, verify):
 
@@ -53,7 +52,7 @@ contract pins, so both parties, and anyone auditing, must get the same
 one. RISC Zero's ordinary build embeds machine-specific details (the Mac
 and the laptop got different ids for the same code); its Docker build
 doesn't. So the guest is built canonically on x86 Linux, inside RISC
-Zero's pinned builder image (`risczero/risc0-guest-builder:r0.1.88.0`,
+Zero's pinned builder image (`risczero/risc0-guest-builder:r0.1.97.0`,
 x86 only), and the resulting binary is committed as
 `guests/withdraw.bin`. The host tool proves that committed binary and
 computes its image id from it, so every machine proves the same program.
@@ -110,8 +109,8 @@ needs compiling here, and Xcode's Metal compiler is not needed):
 
     curl -L https://risczero.com/install | bash      # rzup
     rzup install rust
-    rzup install r0vm 3.0.6
-    rzup install cargo-risczero 3.0.6
+    rzup install r0vm 3.1.0
+    rzup install cargo-risczero 3.1.0
     cd crates/apps/sessions/r0 && cargo build --release
     ./target/release/lngap-r0 prove 9 42 succinct.bin   # ~7 s
 
@@ -142,13 +141,13 @@ deterministic from fixed seeds, so every machine builds the same input.
   scripts set `RISC0_WORK_DIR=$HOME/r0work` for this reason (set it
   yourself when running `lngap-r0 wrap` by hand).
 - `docker returned failure exit code` otherwise: run the image by hand to see why,
-  `docker run --rm risczero/risc0-groth16-prover:v2025-04-03.1`; out of
+  `docker run --rm risczero/risc0-groth16-prover:v2026-10-20.1`; out of
   memory is the usual cause (check `dmesg` for the OOM killer). Exit
   code 137 is the kernel's kill: on the Mac, under Colima's default VM
   (2 CPUs, 1.9 GB, the amd64 image emulated), the wrap died this way
   after 26 s. A larger VM (`colima start --memory 24 --cpu 8 --arch
   x86_64`, say) might do it there, slowly; x86 Linux is the plain route.
-- `r0vm` version errors: the host tool and `r0vm` must both be 3.0.x;
-  `rzup show` lists what's installed, `rzup default r0vm 3.0.6` selects.
+- `r0vm` version errors: the host tool and `r0vm` must both be 3.1.x;
+  `rzup show` lists what's installed, `rzup default r0vm 3.1.0` selects.
 - `image id mismatch` on verify: the two machines built different
   guests; check out the same commit on both and rebuild.

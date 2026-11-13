@@ -48,14 +48,14 @@ verifier program's 168-byte input: the journal length, the image ID, the
 three compressed proof points, the journal. The result is checked
 byte-for-byte against the input that ran the paper's dispute.
 
-**3. A parameter patch.** The ELF was built for RISC Zero v3's parameters,
+**3. A parameter patch.** The ELF was built for RISC Zero 3.0's parameters,
 but the sample proof was made under older ones, so as shipped the verifier
 rejects it. The script overwrites the three affected constants in the
 ELF's public-input table (file offset 716804): the control root (two
 16-byte halves, at +0 and +32) and the BN254 control ID (32 bytes, at +128).
-The patched ELF is checked against a known hash. A proof made under v3's
-parameters would need no patch, but generating one needs RISC Zero's
-x86 tooling.
+The patched ELF is checked against a known hash. A proof made under RISC
+Zero 3.1 needs 3.1's verifying key written in as well
+(`lngap_zk::groth16::verifier_elf`, which the sessions tests use).
 
 **4. Program definitions.** BitVMX's tools describe a program with a small
 YAML file naming the ELF, the search arity and the input. The script writes
