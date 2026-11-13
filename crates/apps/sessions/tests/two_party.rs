@@ -462,23 +462,11 @@ fn the_read_and_jump_challenges() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The verifier ELF as shipped (BitVMX-CPU's built copy, from the Cargo
-/// checkout).
-fn groth16_verifier_elf() -> std::path::PathBuf {
-    let home = std::env::var("CARGO_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".cargo"));
-    let checkouts = home.join("git/checkouts");
-    for d in std::fs::read_dir(&checkouts).unwrap().flatten() {
-        if !d.file_name().to_string_lossy().starts_with("bitvmx-cpu-") {
-            continue;
-        }
-        for rev in std::fs::read_dir(d.path()).unwrap().flatten() {
-            let elf = rev.path().join("docker-riscv32/verifier/build/zkverifier-new-mul.elf");
-            if elf.exists() {
-                return elf;
-            }
-        }
-    }
-    panic!("no BitVMX-CPU checkout with the verifier ELF under {}", checkouts.display());
+/// BitVMX's Groth16 verifier as the disputes run it: the ELF BitVMX-CPU
+/// ships (from the Cargo checkout) with RISC Zero 3.1's key and constants
+/// written in (`lngap_zk::groth16::verifier_elf`).
+fn groth16_verifier_elf() -> Vec<u8> {
+    lngap_zk::groth16::verifier_elf(&lngap_zk::groth16::shipped_verifier_elf().unwrap()).unwrap()
 }
 
 /// Opt-in, slow (the real statement: about 10 minutes): the read challenge
@@ -494,7 +482,7 @@ fn the_read_challenge_on_the_groth16_verifier() {
     let dir = std::env::temp_dir().join(format!("lngap-2p-real-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::copy(groth16_verifier_elf(), dir.join("zkverifier.elf")).unwrap();
+    std::fs::write(dir.join("zkverifier.elf"), groth16_verifier_elf()).unwrap();
     std::fs::write(dir.join("groth16.yaml"), "elf: zkverifier.elf\nnary_search: 8\nmax_steps: 536870912\ninput_section_name: .input\njump_list: true\ninputs:\n  - size: 172\n    owner: prover\n").unwrap();
     let pdf = dir.join("groth16.yaml").display().to_string();
     let claim = hex::decode(include_str!("data/withdraw-9-42.hex").trim()).unwrap();
