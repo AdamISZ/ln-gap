@@ -4,6 +4,7 @@
 
 use bitcoin::script::Builder;
 use bitcoin::{Amount, ScriptBuf, TxOut};
+use bitcoincore_rpc::RpcApi;
 use lngap_btc::keys::{xonly, Seed};
 use lngap_btc::regtest::Regtest;
 use lngap_btc::script::BuilderExt;
@@ -17,6 +18,26 @@ fn sink() -> ScriptBuf {
     TapTree::new(vec![Leaf::new("x", Builder::new().push_int(1).into_script(), Timelock::NONE)])
         .unwrap()
         .script_pubkey()
+}
+
+#[test]
+fn mining_preserves_count_and_hash_order() {
+    let rt = Regtest::start_standard().unwrap();
+    for n in [0, 1, 63, 64, 65, 129] {
+        let before = rt.height().unwrap();
+        let hashes = rt.mine(n).unwrap();
+        assert_eq!(hashes.len() as u64, n);
+        assert_eq!(u64::from(rt.height().unwrap()), u64::from(before) + n);
+        for (i, hash) in hashes.iter().enumerate() {
+            assert_eq!(*hash, rt.rpc.get_block_hash(u64::from(before) + i as u64 + 1).unwrap());
+        }
+    }
+    let target = rt.height().unwrap() + 65;
+    rt.mine_to_height(target).unwrap();
+    assert_eq!(rt.height().unwrap(), target);
+    rt.mine_to_height(target).unwrap();
+    rt.mine_to_height(target - 1).unwrap();
+    assert_eq!(rt.height().unwrap(), target);
 }
 
 #[test]
