@@ -4,17 +4,17 @@
 # its guests build with RISC Zero's toolchain (rzup), so the main
 # workspace doesn't depend on any of it.
 #
-# Pinned to RISC Zero 3.0.6: the BitVMX Groth16 verifier ELF carries
-# 3.0's control root (a54dc85a...) and BN254 control id, so receipts from
-# 3.0 verify with it unpatched. See WRAP_ON_LINUX.md.
+# Pinned to RISC Zero 3.1.0. The BitVMX Groth16 verifier ELF ships with
+# 3.0's key and constants; the disputes run it with 3.1's written in
+# (lngap_zk::groth16::verifier_elf). See WRAP_ON_LINUX.md.
 
 [workspace]
 resolver = "2"
 members = ["host", "methods", "core"]
 
 [workspace.dependencies]
-risc0-zkvm = { version = "=3.0.6", default-features = false }
-risc0-build = { version = "=3.0.6" }
+risc0-zkvm = { version = "=3.1.0", default-features = false }
+risc0-build = { version = "=3.0.7" }
 
 # RISC Zero's advice: the prover is unusably slow unoptimised
 [profile.dev]

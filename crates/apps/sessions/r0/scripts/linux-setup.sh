@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Set up an x86_64 Linux machine to prove the sessions guest and wrap
-# proofs in Groth16 (RISC Zero 3.0.6). See ../WRAP_ON_LINUX.md.
+# proofs in Groth16 (RISC Zero 3.1.0). See ../WRAP_ON_LINUX.md.
 #
 # Installs (user-level, no sudo): RISC Zero's rzup and, through it, the
-# guest toolchain, r0vm 3.0.6 and cargo-risczero 3.0.6; pulls RISC Zero's
+# guest toolchain, r0vm 3.1.0 and cargo-risczero 3.1.0; pulls RISC Zero's
 # Groth16 prover image; builds the host tool. Needs: Rust (rustup), Docker
 # usable by this user, git, curl.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-R0_VERSION=3.0.6
-IMAGE=risczero/risc0-groth16-prover:v2025-04-03.1
+R0_VERSION=3.1.0
+IMAGE=risczero/risc0-groth16-prover:v2026-10-20.1
 
 say() { printf '\n== %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
