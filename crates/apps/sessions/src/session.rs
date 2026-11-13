@@ -24,7 +24,7 @@ use lngap_btc::script::BuilderExt;
 use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::Timelock;
 use lngap_channel::{CommitCtx, Role};
-use lngap_lamport::winternitz::{WotsExt, WotsPublic};
+use lngap_lamport::winternitz::{Chain, WotsExt, WotsPublic, WotsPublicOf};
 
 /// A session's terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -69,7 +69,7 @@ impl Terms {
 /// the hub's. Alice's leaf waits `delta`, so that if she signed two values
 /// of `b` the hub's `equiv_b` takes the output first. Witness, wire order:
 /// the word's reveal, the spender's signature.
-pub fn bit_leaf(ctx: &CommitCtx, i: u32, b_key: &WotsPublic, want: bool) -> Leaf {
+pub fn bit_leaf<H: Chain>(ctx: &CommitCtx, i: u32, b_key: &WotsPublicOf<H>, want: bool) -> Leaf {
     let who = if want { Role::User } else { Role::Hub };
     let m = b_key.params.message_digits as usize;
     assert_eq!(m, 8, "a word's key signs 4 bytes");
@@ -98,7 +98,7 @@ pub fn bit_leaf(ctx: &CommitCtx, i: u32, b_key: &WotsPublic, want: bool) -> Leaf
 /// one-time key (Alice signed two values of `b`); the hub takes the
 /// output. `i` only makes the leaf distinct per output. Witness, wire
 /// order: one reveal, the other, the hub's signature.
-pub fn equiv_b_leaf(ctx: &CommitCtx, i: u32, b_key: &WotsPublic) -> Leaf {
+pub fn equiv_b_leaf<H: Chain>(ctx: &CommitCtx, i: u32, b_key: &WotsPublicOf<H>) -> Leaf {
     let m = b_key.params.message_digits as usize;
     let mut b = Builder::new().push_int(i64::from(i)).push_opcode(OP_DROP).checksigverify(&ctx.key(Role::Hub).payment).wots_verify(b_key);
     for _ in 0..m {
@@ -128,7 +128,7 @@ pub fn equiv_b_leaf(ctx: &CommitCtx, i: u32, b_key: &WotsPublic) -> Leaf {
 }
 
 /// The output for bit `i`: Alice's leaf, the hub's, and `equiv_b`.
-pub fn bit_tree(ctx: &CommitCtx, i: u32, b_key: &WotsPublic) -> Result<TapTree> {
+pub fn bit_tree<H: Chain>(ctx: &CommitCtx, i: u32, b_key: &WotsPublicOf<H>) -> Result<TapTree> {
     TapTree::new(vec![bit_leaf(ctx, i, b_key, true), bit_leaf(ctx, i, b_key, false), equiv_b_leaf(ctx, i, b_key)])
 }
 
@@ -141,7 +141,7 @@ pub fn reserve_leaf(ctx: &CommitCtx) -> Leaf {
 
 /// The reserve output of a payout to Alice: both reserves, hers after
 /// `delta`, the hub's with `equiv_b` (index `K`, after the bit outputs').
-pub fn reserve_tree(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic) -> Result<TapTree> {
+pub fn reserve_tree<H: Chain>(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublicOf<H>) -> Result<TapTree> {
     TapTree::new(vec![reserve_leaf(ctx), equiv_b_leaf(ctx, t.bits, b_key)])
 }
 
@@ -150,7 +150,7 @@ pub fn reserve_tree(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic) -> Result<Ta
 /// an output of `u 2^i`, Alice's iff bit `i` of her signed `b` is set; then
 /// both reserves, Alice's; the rest of `available` (less `fee`) to the
 /// hub.
-pub fn payout(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount, fee: Amount) -> Result<Vec<TxOut>> {
+pub fn payout<H: Chain>(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublicOf<H>, available: Amount, fee: Amount) -> Result<Vec<TxOut>> {
     payout_less(ctx, t, b_key, available, fee, Amount::ZERO)
 }
 
@@ -158,7 +158,7 @@ pub fn payout(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount,
 /// `floors` out of the contract: the hub, the loser, forfeits its reserve
 /// less them (Alice receives `r_A + r_H - floors` with her bits; the hub
 /// still `V_max - b`).
-pub fn payout_less(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublic, available: Amount, fee: Amount, floors: Amount) -> Result<Vec<TxOut>> {
+pub fn payout_less<H: Chain>(ctx: &CommitCtx, t: &Terms, b_key: &WotsPublicOf<H>, available: Amount, fee: Amount, floors: Amount) -> Result<Vec<TxOut>> {
     let total = available.checked_sub(fee).ok_or_else(|| anyhow::anyhow!("the fee exceeds the output"))?;
     let reserves = t.reserves().checked_sub(floors).filter(|r| *r >= t.reserve_alice).ok_or_else(|| anyhow::anyhow!("the floors {floors} exceed the hub's reserve"))?;
     ensure!(total >= t.v_max() + reserves, "{total} cannot pay V_max {} and the reserves less the floors", t.v_max());

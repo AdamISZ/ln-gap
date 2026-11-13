@@ -21,7 +21,7 @@ use lngap_btc::taptree::{Leaf, TapTree};
 use lngap_btc::tx::{build_spend, Timelock};
 use lngap_btc::witness::tapscript_witness;
 use lngap_channel::{ChannelParams, CommitCtx, PartyPubKeys, Role};
-use lngap_lamport::winternitz::WotsPublic;
+use lngap_lamport::winternitz::{Chain, WotsPublicOf};
 
 use crate::session::{default_leaf, default_outputs, fold_leaf, payout_less, Terms};
 
@@ -116,7 +116,7 @@ impl<'a> Core<'a> {
     /// `available` is what the output carries, the contract's value less
     /// the floors and anchors of the links played, which come out of the
     /// hub's forfeited reserve (D-J2).
-    pub fn pay_alice(&self, b_key: &WotsPublic, available: Amount) -> Result<Vec<TxOut>> {
+    pub fn pay_alice<H: Chain>(&self, b_key: &WotsPublicOf<H>, available: Amount) -> Result<Vec<TxOut>> {
         let floors = self.value().checked_sub(available).context("an output carries more than the contract")?;
         payout_less(&self.ctx(), self.terms, b_key, available, Amount::ZERO, floors)
     }
@@ -142,9 +142,9 @@ impl<'a> Core<'a> {
 }
 
 /// The witness shape of one-time signatures under `keys`, for a link's
-/// size: each digit's elements (20 bytes, and a digit of one byte).
-pub fn wots_shape<'k>(keys: impl IntoIterator<Item = &'k WotsPublic>) -> Vec<Vec<u8>> {
-    keys.into_iter().flat_map(|k| (0..k.params.total_digits()).flat_map(|_| [vec![0u8; 20], vec![15u8]])).collect()
+/// size: each digit's elements (a chain hash, and a digit of one byte).
+pub fn wots_shape<'k, H: Chain + 'k>(keys: impl IntoIterator<Item = &'k WotsPublicOf<H>>) -> Vec<Vec<u8>> {
+    keys.into_iter().flat_map(|k| (0..k.params.total_digits()).flat_map(|_| [vec![0u8; std::mem::size_of::<H>()], vec![15u8]])).collect()
 }
 
 /// One pre-signed transaction: unsigned, with what its signatures cover.
