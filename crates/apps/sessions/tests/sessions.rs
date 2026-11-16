@@ -638,28 +638,17 @@ fn sessions_on_regtest() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The verifier ELF as shipped (GPL, not vendored): BitVMX-CPU's built
-/// copy, from the Cargo checkout.
-fn groth16_verifier_elf() -> std::path::PathBuf {
-    let home = std::env::var("CARGO_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".cargo"));
-    let checkouts = home.join("git/checkouts");
-    for d in std::fs::read_dir(&checkouts).unwrap().flatten() {
-        if !d.file_name().to_string_lossy().starts_with("bitvmx-cpu-") {
-            continue;
-        }
-        for rev in std::fs::read_dir(d.path()).unwrap().flatten() {
-            let elf = rev.path().join("docker-riscv32/verifier/build/zkverifier-new-mul.elf");
-            if elf.exists() {
-                return elf;
-            }
-        }
-    }
-    panic!("no BitVMX-CPU checkout with the verifier ELF under {}", checkouts.display());
+/// BitVMX's Groth16 verifier as the disputes run it: the ELF BitVMX-CPU
+/// ships (from the Cargo checkout) with RISC Zero 3.1's key and constants
+/// written in (`lngap_zk::groth16::verifier_elf`).
+fn groth16_verifier_elf() -> Vec<u8> {
+    lngap_zk::groth16::verifier_elf(&lngap_zk::groth16::shipped_verifier_elf().unwrap()).unwrap()
 }
 
-/// The pinned guest's image id (r0/guests/README.md), as the input's
-/// words 1 to 8.
-const IMAGE_ID: &str = "4beda75466ff0db4aa6c6fe9512140368ad287c695f0ff162775db93039aa639";
+/// The image id of the guest `data/withdraw-9-42.hex` proves (the previous
+/// statement under RISC Zero 3.1.0, data/README.md), as the input's words
+/// 1 to 8.
+const IMAGE_ID: &str = "c7971df34f391e8fbfe45012e93372dca29d9524b28004a3ed3b75de217eb541";
 
 /// Opt-in: sessions on the REAL statement program, BitVMX's Groth16
 /// verifier (59 depths), with a real proof of the withdrawal guest
@@ -682,7 +671,7 @@ fn sessions_on_the_groth16_verifier() {
     let rt = Regtest::start_standard().unwrap();
     let dir = std::env::temp_dir().join(format!("lngap-sess-real-{}-{}", std::process::id(), std::env::var("LNGAP_NARY").unwrap_or_default()));
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::copy(groth16_verifier_elf(), dir.join("zkverifier.elf")).unwrap();
+    std::fs::write(dir.join("zkverifier.elf"), groth16_verifier_elf()).unwrap();
     // the search's arity: LNGAP_NARY (2 or 8; default 8); the trace hashed
     // as a jump list unless LNGAP_JUMP=0
     let nary: u8 = std::env::var("LNGAP_NARY").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
